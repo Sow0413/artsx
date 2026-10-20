@@ -5,17 +5,68 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
     public var id: UUID
     public var name: String
     public var workID: String
-    /// 取ったときの位置と精度。乗せ替えても変えない。
+    /// 取ったときの位置と精度。乗せ替えても、補正を引いても変えない。
     public var captured: GeodeticPosition
     /// トラバー点など、あとから採用した座標。
     public var adopted: GeodeticPosition?
+    /// 取得時に三角点補正を引いた座標。captured は残す。
+    public var corrected: GeodeticPosition?
+    public var appliedCorrectionID: UUID?
+    /// 戻り点検で時刻比例に割り振った座標。
+    public var closureAdjustment: ClosureAdjustment?
+    /// 戻り点検で付けた要再測。座標は消さない。
+    public var needsResurvey: Bool
 
-    public init(id: UUID = UUID(), name: String, workID: String, captured: GeodeticPosition, adopted: GeodeticPosition? = nil) {
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        workID: String,
+        captured: GeodeticPosition,
+        adopted: GeodeticPosition? = nil,
+        corrected: GeodeticPosition? = nil,
+        appliedCorrectionID: UUID? = nil,
+        closureAdjustment: ClosureAdjustment? = nil,
+        needsResurvey: Bool = false
+    ) {
         self.id = id
         self.name = name
         self.workID = workID
         self.captured = captured
         self.adopted = adopted
+        self.corrected = corrected
+        self.appliedCorrectionID = appliedCorrectionID
+        self.closureAdjustment = closureAdjustment
+        self.needsResurvey = needsResurvey
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, workID, captured, adopted, corrected, appliedCorrectionID, closureAdjustment, needsResurvey
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        workID = try container.decode(String.self, forKey: .workID)
+        captured = try container.decode(GeodeticPosition.self, forKey: .captured)
+        adopted = try container.decodeIfPresent(GeodeticPosition.self, forKey: .adopted)
+        corrected = try container.decodeIfPresent(GeodeticPosition.self, forKey: .corrected)
+        appliedCorrectionID = try container.decodeIfPresent(UUID.self, forKey: .appliedCorrectionID)
+        closureAdjustment = try container.decodeIfPresent(ClosureAdjustment.self, forKey: .closureAdjustment)
+        needsResurvey = try container.decodeIfPresent(Bool.self, forKey: .needsResurvey) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(workID, forKey: .workID)
+        try container.encode(captured, forKey: .captured)
+        try container.encodeIfPresent(adopted, forKey: .adopted)
+        try container.encodeIfPresent(corrected, forKey: .corrected)
+        try container.encodeIfPresent(appliedCorrectionID, forKey: .appliedCorrectionID)
+        try container.encodeIfPresent(closureAdjustment, forKey: .closureAdjustment)
+        try container.encode(needsResurvey, forKey: .needsResurvey)
     }
 
     public var horizontalAccuracyAtCapture: Double { captured.horizontalAccuracyMeters }

@@ -29,6 +29,9 @@ struct RootView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .padding(.bottom, 8)
+            if let correction = field.correctionStore.active {
+                CorrectionStatusBar(correction: correction)
+            }
             if let progress = field.benchmarkProgressLabel {
                 Text(progress)
                     .font(.system(size: 16, weight: .heavy))

@@ -51,6 +51,11 @@ final class FieldModel: ObservableObject {
     @Published private(set) var observations: FieldObservationLog
     @Published var showsWorkSettings = false
     @Published private(set) var captureMessage: String?
+    @Published var plannedRounds = 3
+    @Published private(set) var rounds: [BenchmarkRound] = []
+    @Published private(set) var comparison: CampaignComparison?
+    @Published private(set) var campaignClosed = false
+    @Published private(set) var correctionStore: CorrectionStore
 
     let tiles: TileStore
     let packDirectory: URL
@@ -63,6 +68,7 @@ final class FieldModel: ObservableObject {
     private var benchmarkTask: Task<Void, Never>?
     private var visibleBounds: GeoBounds?
     private var visibleZoom: Int?
+    private var campaignPoint: ControlPoint?
 
     init(
         source: any PositionSource,
@@ -81,6 +87,7 @@ final class FieldModel: ObservableObject {
         self.workCatalog = WorkCatalog.load(from: siteDirectory)
         self.instrumentTrust = InstrumentTrust.load(from: siteDirectory)
         self.observations = FieldObservationLog.load(from: siteDirectory)
+        self.correctionStore = CorrectionStore.load(from: siteDirectory)
         self.reading = .waiting
         self.camera = MapCameraFollow()
         self.viewport = MapViewportPolicy.japanOverview
@@ -93,8 +100,29 @@ final class FieldModel: ObservableObject {
             for: reading,
             work: workCatalog.selected,
             trust: instrumentTrust,
-            safetyFactor: workCatalog.optimisticSafetyFactor
+            safetyFactor: workCatalog.optimisticSafetyFactor,
+            correction: correctionStore.active,
+            now: Date()
         )
+    }
+
+    var workingReading: PositionReading {
+        guard let position = reading.position,
+              let shifted = correctionStore.active?.workingPosition(from: position, now: Date()) else {
+            return reading
+        }
+        return PositionReading(position: shifted, availability: reading.availability)
+    }
+
+    var showsCorrectedPosition: Bool {
+        guard let position = reading.position else { return false }
+        return correctionStore.active?.applies(to: position, now: Date()) == true
+    }
+
+    var returnCheck: ReturnCheck? {
+        guard campaignClosed, let comparison, let start = correctionStore.active, let point = campaignPoint,
+              start.pointID == point.id, rounds.last?.instrument == start.instrument else { return nil }
+        return ReturnCheck.compare(start: start, end: comparison.overall)
     }
 
     func selectWork(_ id: String) {
@@ -120,10 +148,20 @@ final class FieldModel: ObservableObject {
         }
         let work = workCatalog.selected
         let count = observations.observations.filter { $0.workID == work.id }.count + 1
-        let observation = FieldObservation(name: "\(work.shortTitle)\(count)", workID: work.id, captured: position)
+        let correction = correctionStore.active
+        let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let observation = FieldObservation(
+            name: "\(work.shortTitle)\(count)",
+            workID: work.id,
+            captured: position,
+            corrected: shifted,
+            appliedCorrectionID: shifted == nil ? nil : correction?.id
+        )
         observations = observations.appending(observation)
         try? observations.save(to: siteDirectory)
-        captureMessage = "\(observation.name)を残しました。下見の座標は捨てません。"
+        captureMessage = shifted == nil
+            ? "\(observation.name)を残しました。下見の座標は捨てません。"
+            : "\(observation.name)を残しました。補正を引いた座標も残し、取得時の位置は捨てません。"
     }
 
     func rebase(_ observationID: UUID, onto targetID: UUID) {
@@ -186,7 +224,7 @@ final class FieldModel: ObservableObject {
     func recenter() {
         followUser = true
         camera = MapCameraFollow()
-        if let position = reading.position, position.isPlottable {
+        if let position = workingReading.position, position.isPlottable {
             viewport = camera.update(for: position)
         }
     }
@@ -200,8 +238,8 @@ final class FieldModel: ObservableObject {
     func selectControlPoint(_ id: String) {
         guard !isBenchmarkRunning else { return }
         guard controlPoints.contains(where: { $0.id == id }) else { return }
-        if benchmarkStatistics != nil {
-            clearBenchmarkResults()
+        if campaignPoint?.id != id {
+            clearCampaign()
         }
         selectedControlPointID = id
         benchmarkMessage = nil
@@ -209,6 +247,12 @@ final class FieldModel: ObservableObject {
 
     func startBenchmark() {
         guard !isBenchmarkRunning, let point = selectedControlPoint else { return }
+        if campaignPoint?.id != point.id {
+            rounds = []
+            comparison = nil
+            campaignClosed = false
+        }
+        campaignPoint = point
         benchmarkTask?.cancel()
         benchmarkStatistics = nil
         benchmarkExportURL = nil
@@ -273,18 +317,42 @@ final class FieldModel: ObservableObject {
             instrumentTrust = instrumentTrust.setting(InstrumentState(position), optimistic: optimistic)
             try? instrumentTrust.save(to: siteDirectory)
         }
-        writeExport(recorder: recorder, statistics: statistics)
+        let instrument = recorder.samples.last.map { InstrumentState($0.position) }
+            ?? InstrumentState(receiver: .iphoneGPS, stage: .iphone, fixQuality: .standalone)
+        rounds.append(BenchmarkRound(
+            index: rounds.count + 1,
+            startedAt: recorder.startedAt,
+            samples: recorder.samples,
+            statistics: statistics,
+            instrument: instrument
+        ))
+        comparison = CampaignComparison.make(point: recorder.point, rounds: rounds)
+        campaignClosed = rounds.count >= max(plannedRounds, 1)
+        writeCampaignExport(point: recorder.point)
         if benchmarkMessage == nil {
-            benchmarkMessage = "記録が終わりました。"
+            benchmarkMessage = campaignClosed
+                ? "記録が終わりました。"
+                : "置き直して、向きを変えてから次の回を始めてください。"
         }
     }
 
-    private func writeExport(recorder: BenchmarkRecorder, statistics: BenchmarkStatistics) {
-        let csv = BenchmarkCSV.render(recorder: recorder, statistics: statistics)
-        let safe = recorder.point.id.replacingOccurrences(of: "/", with: "-")
+    private func writeCampaignExport(point: ControlPoint) {
+        let plan = benchmark?.plan ?? BenchmarkPlan(durationSeconds: benchmarkDurationSeconds)
+        var body = ""
+        for (index, round) in rounds.enumerated() {
+            let recorder = BenchmarkRecorder(point: point, plan: plan, startedAt: round.startedAt, samples: round.samples)
+            let csv = BenchmarkCSV.render(recorder: recorder, statistics: round.statistics)
+            if index == 0 {
+                body = csv
+            } else {
+                let rows = csv.split(separator: "\n", omittingEmptySubsequences: false).dropFirst()
+                body += rows.joined(separator: "\n")
+            }
+        }
+        let safe = point.id.replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("sankakuten-\(safe).csv")
         do {
-            try csv.write(to: url, atomically: true, encoding: .utf8)
+            try body.write(to: url, atomically: true, encoding: .utf8)
             benchmarkExportURL = url
         } catch {
             benchmarkExportURL = nil
@@ -293,9 +361,75 @@ final class FieldModel: ObservableObject {
     }
 
     private func clearBenchmarkResults() {
+        clearCampaign()
+    }
+
+    func summarizeCampaign() {
+        guard !rounds.isEmpty, !isBenchmarkRunning else { return }
+        campaignClosed = true
+        benchmarkMessage = "この回数でまとめました。"
+    }
+
+    func applyControlCorrection() {
+        guard let point = campaignPoint, let comparison, let instrument = rounds.last?.instrument,
+              let correction = ControlCorrection.make(
+                point: point,
+                instrument: instrument,
+                comparison: comparison,
+                acquiredAt: Date()
+              ) else {
+            benchmarkMessage = "回のずれがそろっていないので、補正値にはしません。"
+            return
+        }
+        correctionStore = correctionStore.saving(correction)
+        try? correctionStore.save(to: siteDirectory)
+        benchmarkMessage = "\(point.name)の補正を、以後の観測から引きます。"
+    }
+
+    func chooseReturn(_ choice: ClosureChoice) {
+        guard let start = correctionStore.active, let comparison, let point = campaignPoint, start.pointID == point.id else { return }
+        let endAt = rounds.last?.samples.last?.loggedAt ?? Date()
+        let updated: [FieldObservation]
+        switch choice {
+        case .apportion:
+            updated = ClosureAdjustmentMath.apportion(
+                observations: observations.observations,
+                start: start,
+                end: comparison.overall,
+                endAt: endAt
+            )
+            benchmarkMessage = "途中の点に、時刻の割合で差を振りました。元の座標は残しています。"
+        case .resurvey:
+            updated = ClosureAdjustmentMath.markResurvey(
+                observations: observations.observations,
+                start: start,
+                endAt: endAt
+            )
+            benchmarkMessage = "途中の点に要再測の印を付けました。元の座標は残しています。"
+        }
+        observations = FieldObservationLog(observations: updated)
+        try? observations.save(to: siteDirectory)
+        let check = ReturnCheck.compare(start: start, end: comparison.overall)
+        correctionStore.lastReturnCheck = ReturnCheckRecord(
+            pointID: point.id,
+            startCorrectionID: start.id,
+            checkedAt: Date(),
+            horizontalDifferenceMeters: check.horizontalDifferenceMeters,
+            verticalDifferenceMeters: check.verticalDifferenceMeters,
+            valid: check.valid,
+            choice: choice
+        )
+        try? correctionStore.save(to: siteDirectory)
+    }
+
+    private func clearCampaign() {
         benchmark = nil
         benchmarkStatistics = nil
         benchmarkExportURL = nil
+        rounds = []
+        comparison = nil
+        campaignPoint = nil
+        campaignClosed = false
     }
 
     private func refreshVisibleControlPoints() {
@@ -405,7 +539,7 @@ final class FieldModel: ObservableObject {
     private func apply(_ reading: PositionReading) {
         self.reading = reading
         refreshVisibleControlPoints()
-        guard followUser, let position = reading.position, position.isPlottable else { return }
+        guard followUser, let position = workingReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
     }
 

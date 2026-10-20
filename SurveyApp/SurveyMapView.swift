@@ -25,7 +25,7 @@ struct SurveyMapView: UIViewRepresentable {
         context.coordinator.attach(field: field, map: map)
         context.coordinator.update(
             map: map,
-            reading: field.reading,
+            reading: field.workingReading,
             viewport: field.viewport,
             followUser: field.followUser,
             tone: field.badge.tone,

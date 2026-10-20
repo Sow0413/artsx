@@ -26,7 +26,7 @@ struct MapTabView: View {
                 }
                 if field.selectedControlPoint != nil || field.benchmark != nil {
                     BenchmarkCard(field: field)
-                        .frame(maxHeight: 360)
+                        .frame(maxHeight: 460)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
                     BenchmarkHint(
@@ -40,7 +40,10 @@ struct MapTabView: View {
                         onSave: field.downloadVisibleArea,
                         onCancel: field.cancelDownload
                     )
-                    LocationPanel(reading: field.reading)
+                    LocationPanel(
+                        reading: field.workingReading,
+                        note: field.showsCorrectedPosition ? "三角点補正を引いた位置" : nil
+                    )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     captureButton

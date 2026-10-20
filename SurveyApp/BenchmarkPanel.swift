@@ -41,8 +41,8 @@ struct BenchmarkCard: View {
                 .foregroundStyle(SurveyColor.muted)
             if field.isBenchmarkRunning, let recorder = field.benchmark {
                 running(recorder)
-            } else if let statistics = field.benchmarkStatistics, let recorder = field.benchmark {
-                finished(recorder, statistics)
+            } else if !field.rounds.isEmpty {
+                CampaignSummary(field: field)
             } else if let point = field.selectedControlPoint {
                 ready(point)
             }
@@ -70,6 +70,24 @@ struct BenchmarkCard: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("毎回、置き直して向きを変えます。")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(SurveyColor.muted)
+            HStack(spacing: 8) {
+                ForEach([1, 3, 5], id: \.self) { count in
+                    Button {
+                        field.plannedRounds = count
+                    } label: {
+                        Text("\(count)回")
+                            .font(.system(size: 16, weight: .heavy))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(field.plannedRounds == count ? SurveyColor.blue : SurveyColor.background)
+                            .foregroundStyle(SurveyColor.text)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             HStack(spacing: 8) {
                 ForEach(BenchmarkPlan.durationChoices, id: \.self) { seconds in
@@ -113,6 +131,9 @@ struct BenchmarkCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(recorder.point.name)
                 .font(.system(size: 22, weight: .heavy))
+            Text("\(field.rounds.count + 1) / \(field.plannedRounds) 回")
+                .font(.system(size: 16, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
             Text("\(recorder.samples.count) / \(recorder.plan.expectedCount) 点")
                 .font(.system(size: 28, weight: .heavy, design: .monospaced))
             Text("1秒に1点。\(BenchmarkPlan.durationTitle(recorder.plan.durationSeconds))で止まります。")
@@ -127,65 +148,6 @@ struct BenchmarkCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-        }
-    }
-
-    private func finished(_ recorder: BenchmarkRecorder, _ statistics: BenchmarkStatistics) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(recorder.point.name)
-                .font(.system(size: 22, weight: .heavy))
-            Text("平均 \(CoordinateText.latitude(statistics.meanLatitudeDegrees)), \(CoordinateText.longitude(statistics.meanLongitudeDegrees))")
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
-            Text(CoordinateText.ellipsoidalHeight(statistics.meanEllipsoidalHeightMeters))
-                .font(.system(size: 16, weight: .semibold))
-            Text("水平の差 \(BenchmarkText.meters(statistics.horizontalDifferenceMeters))")
-                .font(.system(size: 28, weight: .heavy))
-            Text(BenchmarkText.spread(std: statistics.horizontalStdMeters, percentile95: statistics.horizontal95Meters))
-                .font(.system(size: 16, weight: .bold))
-            Text(BenchmarkText.verticalNote(statistics))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            if let verticalStd = statistics.verticalStdMeters, let vertical95 = statistics.vertical95Meters {
-                Text("高さの" + BenchmarkText.spread(std: verticalStd, percentile95: vertical95))
-                    .font(.system(size: 15, weight: .bold))
-            }
-            Text(BenchmarkText.horizontalOptimism(statistics))
-                .font(.system(size: 16, weight: .heavy))
-                .foregroundStyle(statistics.horizontalOptimistic == true ? SurveyColor.amber : SurveyColor.text)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(BenchmarkText.coverage68(outside: statistics.horizontalEpochsOutside, epochs: statistics.horizontalEpochs))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(statistics.horizontal68Optimistic == true ? SurveyColor.amber : SurveyColor.muted)
-            if let message = field.benchmarkMessage {
-                Text(message)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-            }
-            HStack(spacing: 8) {
-                if let url = field.benchmarkExportURL {
-                    ShareLink(item: url) {
-                        Text("CSV")
-                            .font(.system(size: 18, weight: .heavy))
-                            .frame(maxWidth: .infinity, minHeight: 56)
-                            .background(SurveyColor.blue)
-                            .foregroundStyle(SurveyColor.text)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button(action: field.dismissBenchmark) {
-                    Text("閉じる")
-                        .font(.system(size: 18, weight: .heavy))
-                        .frame(minWidth: 88, minHeight: 56)
-                        .background(SurveyColor.background)
-                        .foregroundStyle(SurveyColor.text)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 

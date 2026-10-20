@@ -54,6 +54,19 @@ struct MeasureLogView: View {
             Text(accuracyLine(observation))
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(SurveyColor.muted)
+            if observation.needsResurvey {
+                Text("要再測")
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+            }
+            if let corrected = observation.corrected {
+                Text("補正後 \(CoordinateText.latitude(corrected.latitudeDegrees)), \(CoordinateText.longitude(corrected.longitudeDegrees))")
+                    .font(.system(size: 14, weight: .bold))
+            }
+            if let adjusted = observation.closureAdjustment {
+                Text("割り振り後 \(CoordinateText.latitude(adjusted.position.latitudeDegrees)), \(CoordinateText.longitude(adjusted.position.longitudeDegrees))")
+                    .font(.system(size: 14, weight: .bold))
+            }
             if let adopted = observation.adopted {
                 Text("乗せ替え先 \(CoordinateText.latitude(adopted.latitudeDegrees)), \(CoordinateText.longitude(adopted.longitudeDegrees))")
                     .font(.system(size: 14, weight: .bold))

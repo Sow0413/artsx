@@ -92,6 +92,7 @@ struct PlaceholderTabView: View {
 
 struct LocationPanel: View {
     let reading: PositionReading
+    var note: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -112,6 +113,11 @@ struct LocationPanel: View {
                     Text(accuracyText(position))
                 }
                 .font(.system(size: 18, weight: .bold))
+                if let note {
+                    Text(note)
+                        .font(.system(size: 15, weight: .heavy))
+                        .foregroundStyle(SurveyColor.blue)
+                }
                 Text(CoordinateText.previewNote)
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(SurveyColor.muted)

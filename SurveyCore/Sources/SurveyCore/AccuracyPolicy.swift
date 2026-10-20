@@ -60,16 +60,20 @@ public enum AccuracyPolicy {
         for position: GeodeticPosition,
         work: WorkRequirement = WorkCatalog.provisional.selected,
         trust: InstrumentTrust = InstrumentTrust(),
-        safetyFactor: Double = WorkCatalog.defaultSafetyFactor
+        safetyFactor: Double = WorkCatalog.defaultSafetyFactor,
+        correction: ControlCorrection? = nil,
+        now: Date = Date()
     ) -> AccuracyTone {
-        judgment(for: position, work: work, trust: trust, safetyFactor: safetyFactor).tone
+        judgment(for: position, work: work, trust: trust, safetyFactor: safetyFactor, correction: correction, now: now).tone
     }
 
     public static func badge(
         for reading: PositionReading,
         work: WorkRequirement = WorkCatalog.provisional.selected,
         trust: InstrumentTrust = InstrumentTrust(),
-        safetyFactor: Double = WorkCatalog.defaultSafetyFactor
+        safetyFactor: Double = WorkCatalog.defaultSafetyFactor,
+        correction: ControlCorrection? = nil,
+        now: Date = Date()
     ) -> AccuracyBadgeModel {
         switch reading.availability {
         case .denied:
@@ -88,7 +92,14 @@ public enum AccuracyPolicy {
                     isStakeoutGrade: false
                 )
             }
-            let judged = judgment(for: position, work: work, trust: trust, safetyFactor: safetyFactor)
+            let judged = judgment(
+                for: position,
+                work: work,
+                trust: trust,
+                safetyFactor: safetyFactor,
+                correction: correction,
+                now: now
+            )
             let text = position.isTrustedRTKFix
                 ? "RTK Fix \(AccuracyFormat.label(meters: position.horizontalAccuracyMeters, approximate: false))"
                 : approximateTitle(for: position)
@@ -113,27 +124,33 @@ public enum AccuracyPolicy {
         for position: GeodeticPosition,
         work: WorkRequirement,
         trust: InstrumentTrust = InstrumentTrust(),
-        safetyFactor: Double = WorkCatalog.defaultSafetyFactor
+        safetyFactor: Double = WorkCatalog.defaultSafetyFactor,
+        correction: ControlCorrection? = nil,
+        now: Date = Date()
     ) -> (tone: AccuracyTone, guidance: String, caution: String) {
         guard position.isPlottable, position.hasValidHorizontalAccuracy else {
             return (.grey, "", "")
         }
-        let factor = trust.factor(for: position, safetyFactor: safetyFactor)
+        let adjusted = correction?.judgmentMeters(for: position, now: now)
+        let factor = adjusted == nil ? trust.factor(for: position, safetyFactor: safetyFactor) : 1
+        let reportedHorizontal = adjusted?.horizontal ?? position.horizontalAccuracyMeters
+        let reportedVertical = adjusted?.vertical ?? position.verticalAccuracyMeters
         let horizontal = WorkJudgment.axis(
-            reported: position.horizontalAccuracyMeters,
+            reported: reportedHorizontal,
             requirement: work.horizontalMeters,
             factor: factor
         )
-        let vertical = position.verticalAccuracyMeters.flatMap { value -> AxisJudgment? in
+        let vertical = reportedVertical.flatMap { value -> AxisJudgment? in
             guard value.isFinite, value >= 0 else { return nil }
             return WorkJudgment.axis(reported: value, requirement: work.verticalMeters, factor: factor)
         }
         let verticalMissing = vertical == nil
         let tone = WorkJudgment.tone(horizontal: horizontal, vertical: vertical, verticalMissing: verticalMissing)
+        let caution = adjusted?.note ?? WorkJudgment.caution(factor: factor)
         return (
             tone,
             WorkJudgment.guidance(work: work, horizontal: horizontal, vertical: vertical, verticalMissing: verticalMissing && horizontal != nil),
-            WorkJudgment.caution(factor: factor)
+            caution
         )
     }
 

@@ -44,11 +44,11 @@ public struct BenchmarkRecorder: Equatable, Sendable {
     public private(set) var samples: [BenchmarkSample]
     private var nextDue: Date
 
-    public init(point: ControlPoint, plan: BenchmarkPlan, startedAt: Date) {
+    public init(point: ControlPoint, plan: BenchmarkPlan, startedAt: Date, samples: [BenchmarkSample] = []) {
         self.point = point
         self.plan = plan
         self.startedAt = startedAt
-        self.samples = []
+        self.samples = samples
         self.nextDue = startedAt
     }
 
