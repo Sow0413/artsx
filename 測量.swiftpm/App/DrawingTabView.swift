@@ -74,7 +74,10 @@ struct DrawingTabView: View {
                 onFit: { drawing.fit(in: $0) }
             )
             VStack {
-                SafetyBanner(crew: field.crew)
+                SafetyBanner(crew: field.crew) {
+                    field.recordIncident(trigger: .manual)
+                }
+                IncidentTray(field: field)
                 Spacer()
             }
             if drawing.document == nil {

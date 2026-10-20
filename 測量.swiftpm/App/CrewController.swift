@@ -16,6 +16,8 @@ final class CrewController: ObservableObject {
     @Published var speakDirections = false
     @Published private(set) var revision = 0
 
+    var onAlarm: ((Date) -> Bool)?
+    var onHiyari: (() -> Void)?
     let notice = SafetyNotice.text
     private let relay = CrewRelayStub(reachable: false)
     private let mesh = CrewMesh(reachable: false)
@@ -33,6 +35,8 @@ final class CrewController: ObservableObject {
     private var workRadius = MachineCatalog.twentyTon.radiusMeters
     private var approachLead = ApproachCallout.defaultLeadMeters
     private var approachRepeat = ApproachCallout.defaultRepeatSeconds
+    private var openedAlarms: Set<UUID> = []
+    private var speeches: [IncidentSpeech] = []
     #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
     private let uwb = SystemUWB()
     #endif
@@ -67,16 +71,28 @@ final class CrewController: ObservableObject {
         #endif
         #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
         if RadioHardware.watch {
+            watch.onHiyari = { [weak self] in
+                self?.onHiyari?()
+            }
             watch.start()
         }
         #endif
+    }
+
+    var deviceID: String { desk.deviceID }
+    var displayName: String { desk.name }
+
+    func recentSpeeches() -> [IncidentSpeech] { speeches }
+
+    func distances() -> [String: Double] {
+        Dictionary(desk.hits.map { ($0.other.id, $0.distanceMeters) }, uniquingKeysWith: { first, _ in first })
     }
 
     func setSpeakDirections(_ enabled: Bool) {
         speakDirections = enabled
         lastSpoken = ""
         if enabled {
-            speak()
+            speak(at: Date())
         }
     }
 
@@ -109,6 +125,8 @@ final class CrewController: ObservableObject {
             savedSignature = signature(history)
             approachMemory = []
             callout = nil
+            openedAlarms = []
+            speeches = []
         }
         limits = ProximityLimits.resolved(caution: project.cautionMeters, margin: project.proximityMarginMeters)
         desk.limits = limits
@@ -132,7 +150,9 @@ final class CrewController: ObservableObject {
             horizontalAccuracyMeters: position.horizontalAccuracyMeters,
             workRadiusMeters: desk.role == .machine ? radius : nil,
             sentAt: now,
-            ranges: desk.ranges
+            ranges: desk.ranges,
+            courseDegrees: position.courseDegrees,
+            headingDegrees: position.headingDegrees
         )
         #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
         _ = desk.publish(fix, uwbToken: RadioHardware.nearbyInteraction ? uwb.tokenData() : nil)
@@ -178,13 +198,19 @@ final class CrewController: ObservableObject {
         statusLine = describe()
         revision += 1
         persist()
+        let fresh = desk.events.filter { $0.level == .alarm && $0.endedAt == nil && !openedAlarms.contains($0.id) }
+        if !fresh.isEmpty, onAlarm?(now) == true {
+            for event in fresh {
+                openedAlarms.insert(event.id)
+            }
+        }
         guard sound else { return }
         signal(now: now)
         if let spoken = approach.spoken {
-            lastSpoken = spoken.speech
+            rememberSpeech(spoken.speech, at: now)
             CrewVoice.say(spoken.speech)
         } else {
-            speak()
+            speak(at: now)
         }
     }
 
@@ -198,11 +224,20 @@ final class CrewController: ObservableObject {
         )
     }
 
-    private func speak() {
+    private func speak(at date: Date) {
         guard speakDirections, let cue = threats.cues.first else { return }
         guard cue.speech != lastSpoken else { return }
         lastSpoken = cue.speech
+        rememberSpeech(cue.speech, at: date)
         CrewVoice.say(cue.speech)
+    }
+
+    private func rememberSpeech(_ text: String, at date: Date) {
+        guard !text.isEmpty else { return }
+        speeches.append(IncidentSpeech(at: date, text: text))
+        if speeches.count > 30 {
+            speeches.removeFirst(speeches.count - 30)
+        }
     }
 
     private func describe() -> String {

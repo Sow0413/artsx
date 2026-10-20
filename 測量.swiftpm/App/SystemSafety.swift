@@ -42,6 +42,8 @@ import WatchConnectivity
 
 /// ペアの Apple Watch へ振動の合図を送る。Watch 側の再生は未確認。
 final class SystemWatch: NSObject, WCSessionDelegate {
+    var onHiyari: (() -> Void)?
+
     func start() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
@@ -61,6 +63,20 @@ final class SystemWatch: NSObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        acceptHiyari(message)
+    }
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
+        acceptHiyari(message)
+        replyHandler(["ok": "1"])
+    }
+
+    private func acceptHiyari(_ message: [String: Any]) {
+        guard message["action"] as? String == "hiyari" else { return }
+        DispatchQueue.main.async { self.onHiyari?() }
+    }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
 

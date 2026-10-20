@@ -59,6 +59,10 @@ public struct CrewFix: Codable, Equatable, Sendable, Identifiable {
     public var workRadiusMeters: Double?
     public var sentAt: Date
     public var ranges: [CrewRange]
+    /// 進行方向。共有されない端末は nil。
+    public var courseDegrees: Double?
+    /// 端末の方位。共有されない端末は nil。
+    public var headingDegrees: Double?
 
     public init(
         id: String,
@@ -69,7 +73,9 @@ public struct CrewFix: Codable, Equatable, Sendable, Identifiable {
         horizontalAccuracyMeters: Double,
         workRadiusMeters: Double?,
         sentAt: Date,
-        ranges: [CrewRange] = []
+        ranges: [CrewRange] = [],
+        courseDegrees: Double? = nil,
+        headingDegrees: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -80,6 +86,8 @@ public struct CrewFix: Codable, Equatable, Sendable, Identifiable {
         self.workRadiusMeters = workRadiusMeters
         self.sentAt = sentAt
         self.ranges = ranges
+        self.courseDegrees = courseDegrees
+        self.headingDegrees = headingDegrees
     }
 }
 

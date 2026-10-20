@@ -214,6 +214,9 @@ public final class RadioDesk {
     public private(set) var phase: RadioPhase = .idle
     public private(set) var utterances: [RadioUtterance] = []
     public private(set) var hearingSpeaker: String?
+    /// 発話ごとの音声。上限を超えた分は捨てる。実機のマイクは未確認。
+    public private(set) var audio: [UUID: Data] = [:]
+    private let audioCap = 256 * 1024
 
     public let relay: any RadioLink
     public let nearby: any RadioLink
@@ -288,6 +291,7 @@ public final class RadioDesk {
     public func addAudio(_ data: Data, at date: Date) {
         guard var utterance = live, let path = utterance.path, !data.isEmpty else { return }
         utterance.audioByteCount += data.count
+        rememberAudio(data, id: utterance.id)
         live = utterance
         let packet = RadioPacket(
             kind: .audio,
@@ -347,6 +351,7 @@ public final class RadioDesk {
         case .audio:
             guard var utterance = hearing, utterance.id == packet.utteranceID else { return }
             utterance.audioByteCount += packet.audio?.count ?? 0
+            if let audio = packet.audio { rememberAudio(audio, id: utterance.id) }
             hearing = utterance
         case .end:
             guard var utterance = hearing, utterance.id == packet.utteranceID else { return }
@@ -355,6 +360,14 @@ public final class RadioDesk {
             hearing = nil
             hearingSpeaker = nil
         }
+    }
+
+    private func rememberAudio(_ data: Data, id: UUID) {
+        var stored = audio[id] ?? Data()
+        guard stored.count < audioCap else { return }
+        let room = audioCap - stored.count
+        stored.append(data.prefix(room))
+        audio[id] = stored
     }
 
     @discardableResult

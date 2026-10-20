@@ -43,7 +43,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 28)
-                    .padding(.bottom, 220)
+                    .padding(.bottom, 300)
                 } else {
                     VStack(spacing: 6) {
                         stationLabel(station)
@@ -53,7 +53,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 28)
-                    .padding(.bottom, 240)
+                    .padding(.bottom, 340)
                 }
                 VStack {
                     HStack {
@@ -72,6 +72,8 @@ struct OperatorView: View {
                     SafetyBanner(crew: field.crew)
                     directionHeadline
                     hailButton
+                    hiyariButton
+                    IncidentTray(field: field)
                     CrewRadar(
                         marks: field.crew.marks,
                         selfRole: field.crew.role,
@@ -214,6 +216,19 @@ struct OperatorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var hiyariButton: some View {
+        Button("ヒヤリ") {
+            field.recordIncident(trigger: .manual)
+        }
+        .font(.system(size: 28, weight: .black))
+        .foregroundStyle(Color.white)
+        .frame(maxWidth: .infinity)
+        .frame(height: 72)
+        .background(SurveyColor.red)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityLabel("ヒヤリ")
     }
 
     private var talkButton: some View {

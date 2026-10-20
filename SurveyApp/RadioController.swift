@@ -27,6 +27,15 @@ final class RadioController: ObservableObject {
         }
     }
 
+    var relayReachable: Bool {
+        get { relay.isReachable }
+        set { relay.isReachable = newValue }
+    }
+
+    func recentUtterances() -> [RadioUtterance] { desk.utterances }
+
+    func audioData() -> [UUID: Data] { desk.audio }
+
     func arm() {
         #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
         if RadioHardware.pushToTalk {

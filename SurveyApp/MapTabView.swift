@@ -20,7 +20,10 @@ struct MapTabView: View {
                         .padding(.horizontal, 12)
                         .background(SurveyColor.card.opacity(0.94))
                 }
-                SafetyBanner(crew: field.crew)
+                SafetyBanner(crew: field.crew) {
+                    field.recordIncident(trigger: .manual)
+                }
+                IncidentTray(field: field)
                 HStack {
                     Spacer()
                     Text(reachCaption)

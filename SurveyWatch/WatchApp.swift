@@ -9,9 +9,14 @@ struct SurveyWatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 Text(model.line)
                     .font(.headline)
+                Button("ヒヤリ") {
+                    model.sendHiyari()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
                 Text("補助。安全確認の代わりではない")
                     .font(.footnote)
                     .multilineTextAlignment(.center)
@@ -32,6 +37,23 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
+
+    func sendHiyari() {
+        guard WCSession.isSupported() else {
+            line = "Watch が使えません"
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else {
+            line = "iPhone に届いていません"
+            return
+        }
+        session.sendMessage(["action": "hiyari"], replyHandler: { _ in
+            DispatchQueue.main.async { self.line = "ヒヤリを送りました" }
+        }, errorHandler: { _ in
+            DispatchQueue.main.async { self.line = "送れませんでした" }
+        })
+    }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         apply(message)

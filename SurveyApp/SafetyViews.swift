@@ -1,5 +1,8 @@
 import SwiftUI
 import SurveyCore
+#if canImport(PhotosUI)
+import PhotosUI
+#endif
 
 struct CrewGlyph: Equatable {
     var id: String
@@ -12,22 +15,35 @@ struct CrewGlyph: Equatable {
 
 struct SafetyBanner: View {
     @ObservedObject var crew: CrewController
+    var onHiyari: (() -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(crew.notice)
-                .font(.system(size: 13, weight: .heavy))
-            Text(crew.statusLine)
-                .font(.system(size: crew.worst == .clear ? 15 : 22, weight: .black))
-                .minimumScaleFactor(0.6)
-                .lineLimit(2)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(crew.notice)
+                    .font(.system(size: 13, weight: .heavy))
+                Text(crew.statusLine)
+                    .font(.system(size: crew.worst == .clear ? 15 : 22, weight: .black))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let onHiyari {
+                Button("ヒヤリ", action: onHiyari)
+                    .font(.system(size: 16, weight: .black))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(crew.worst == .alarm ? Color.black.opacity(0.35) : SurveyColor.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityLabel("ヒヤリ")
+            }
         }
         .foregroundStyle(crew.worst == .alarm ? Color.white : SurveyColor.text)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(fill)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private var fill: Color {
@@ -172,5 +188,66 @@ struct CrewRadar: View {
         case .caution: return SurveyColor.yellow
         case .clear: return SurveyColor.blue
         }
+    }
+}
+
+struct IncidentTray: View {
+    @ObservedObject var field: FieldModel
+    #if canImport(PhotosUI)
+    @State private var photo: PhotosPickerItem?
+    #endif
+
+    var body: some View {
+        if field.incidentOpen || field.incidentNote != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                if let note = field.incidentNote {
+                    Text(note)
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(SurveyColor.amber)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                }
+                if field.incidentOpen {
+                    HStack(spacing: 8) {
+                        photoControl
+                        Button(field.incidentRecordingMemo ? "録音中" : "音声メモ") {
+                            field.toggleIncidentMemo()
+                        }
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(field.incidentRecordingMemo ? SurveyColor.red : SurveyColor.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var photoControl: some View {
+        #if canImport(PhotosUI)
+        PhotosPicker(selection: $photo, matching: .images) {
+            Text("写真")
+                .font(.system(size: 15, weight: .black))
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(SurveyColor.card)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .onChange(of: photo) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await MainActor.run { field.attachIncidentPhoto(data) }
+                }
+            }
+        }
+        #else
+        EmptyView()
+        #endif
     }
 }

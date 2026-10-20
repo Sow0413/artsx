@@ -45,6 +45,8 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var backgroundVerdict: BackgroundVerdict?
     @Published private(set) var backgroundBusy = false
     @Published private(set) var activeRecordFolder: String?
+    @Published private(set) var activeRecordKind: String?
+    @Published private(set) var activeRecordName: String?
     @Published private(set) var operatorEntityID: Int?
     /// この現場の計画高（床掘底）。無いときはオペ画面に楕円体高を出す。
     @Published var designHeightMeters: Double?
@@ -858,6 +860,8 @@ final class DrawingSession: ObservableObject {
                 pointPrefix: pointPrefix
             )
             activeRecordFolder = note.folderName
+            activeRecordKind = note.kind
+            activeRecordName = note.name
             message = "記録 \(note.folderName) を作りました。"
             return note.folderName
         } catch let error as ProjectStoreError {

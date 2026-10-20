@@ -75,6 +75,12 @@ final class FieldModel: ObservableObject {
     let nearby: NearbyLink
     let radio: RadioController
     let crew: CrewController
+    let incidents = IncidentSession()
+    @Published private(set) var incidentOpen = false
+    @Published private(set) var incidentNote: String?
+    @Published private(set) var incidentRecordingMemo = false
+    private var incidentTimer: Timer?
+    private var restoredIncidentProject: String?
     let controlPoints: [ControlPoint]
     private var prefixStore: PointPrefixStore
     private let source: any PositionSource
@@ -127,6 +133,15 @@ final class FieldModel: ObservableObject {
         crew.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
+        crew.onAlarm = { [weak self] _ in
+            self?.recordIncident(trigger: .alarm) ?? false
+        }
+        crew.onHiyari = { [weak self] in
+            self?.recordIncident(trigger: .manual)
+        }
+        HiyariHook.fire = { [weak self] in
+            self?.recordIncident(trigger: .manual)
+        }
     }
 
     func beginRadio() {
@@ -151,6 +166,99 @@ final class FieldModel: ObservableObject {
             endRadio()
         } else {
             beginRadio()
+        }
+    }
+
+    @discardableResult
+    func recordIncident(trigger: IncidentTrigger) -> Bool {
+        guard let project = drawing.project else {
+            incidentNote = "先にプロジェクトを作ってください。"
+            return false
+        }
+        guard let position = workingReading.position, position.isPlottable else {
+            incidentNote = "位置が無いので記録できません。"
+            return false
+        }
+        let now = Date()
+        let radius: Double
+        if crew.role == .machine {
+            radius = drawing.machineRadiusMeters
+        } else {
+            radius = crew.peers.first { $0.role == .machine }?.workRadiusMeters ?? drawing.machineRadiusMeters
+        }
+        let opening = IncidentOpening(
+            projectID: project.id,
+            projectName: project.name,
+            occurredAt: now,
+            trigger: trigger,
+            parties: IncidentParties.assemble(
+                selfID: crew.deviceID,
+                selfName: crew.displayName,
+                selfRole: crew.role,
+                selfLatitude: position.latitudeDegrees,
+                selfLongitude: position.longitudeDegrees,
+                selfAccuracy: position.horizontalAccuracyMeters,
+                selfCourse: position.courseDegrees,
+                selfHeading: position.headingDegrees,
+                selfRadius: drawing.machineRadiusMeters,
+                others: crew.peers,
+                distances: crew.distances(),
+                stationLine: drawing.stationLine
+            ),
+            machineRadiusMeters: radius,
+            work: IncidentWork(
+                kind: drawing.activeRecordKind ?? workCatalog.selected.shortTitle,
+                name: drawing.activeRecordName ?? workCatalog.selected.title
+            ),
+            accuracyMeters: position.horizontalAccuracyMeters,
+            stageLabel: "段階\(position.stage.rawValue)",
+            solutionLabel: position.solutionLabel,
+            speeches: crew.recentSpeeches().filter { abs($0.at.timeIntervalSince(now)) <= IncidentBook.beforeSeconds },
+            radio: radioClips(around: now),
+            strokes: incidentStrokes(around: position)
+        )
+        do {
+            let id = try incidents.open(opening, projectName: project.name, at: drawing.projectsRoot)
+            incidentOpen = incidents.latestID != nil
+            if id == opening.id {
+                incidentNote = trigger == .alarm ? "接近警報を記録しています" : "ヒヤリを記録しています"
+            }
+            return true
+        } catch {
+            incidentNote = "記録を作れませんでした。"
+            return false
+        }
+    }
+
+    func attachIncidentPhoto(_ data: Data) {
+        guard let project = drawing.project else { return }
+        do {
+            try incidents.attachPhoto(data, projectName: project.name, at: drawing.projectsRoot)
+            incidentNote = "写真を添えました"
+        } catch {
+            incidentNote = "写真は確定した記録には足せません。"
+        }
+    }
+
+    func toggleIncidentMemo() {
+        if let data = IncidentVoiceMemo.toggle() {
+            incidentRecordingMemo = false
+            attachIncidentVoice(data)
+            return
+        }
+        incidentRecordingMemo = IncidentVoiceMemo.isRecording
+        if incidentRecordingMemo {
+            incidentNote = "音声メモを録音しています"
+        }
+    }
+
+    private func attachIncidentVoice(_ data: Data) {
+        guard let project = drawing.project else { return }
+        do {
+            try incidents.attachVoice(data, projectName: project.name, at: drawing.projectsRoot)
+            incidentNote = "音声メモを添えました"
+        } catch {
+            incidentNote = "音声メモは確定した記録には足せません。"
         }
     }
 
@@ -360,6 +468,10 @@ final class FieldModel: ObservableObject {
     func start() {
         radio.arm()
         crew.arm()
+        incidentTimer?.invalidate()
+        incidentTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.closeIncidents(now: Date())
+        }
         source.start()
         if readTask == nil {
             let readings = source.readings
@@ -817,9 +929,109 @@ final class FieldModel: ObservableObject {
             radius: drawing.machineRadiusMeters,
             root: drawing.projectsRoot
         )
+        trackIncidents()
         refreshVisibleControlPoints()
         guard followUser, let position = workingReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
+    }
+
+    private func trackIncidents(now: Date = Date()) {
+        guard let project = drawing.project else { return }
+        if restoredIncidentProject != project.name {
+            restoredIncidentProject = project.name
+            incidents.restore(projectName: project.name, at: drawing.projectsRoot)
+        }
+        var batch: [IncidentSample] = []
+        if let position = workingReading.position, position.isPlottable {
+            batch.append(IncidentSample(
+                at: now,
+                id: crew.deviceID,
+                name: crew.displayName,
+                role: crew.role,
+                latitudeDegrees: position.latitudeDegrees,
+                longitudeDegrees: position.longitudeDegrees,
+                horizontalAccuracyMeters: position.horizontalAccuracyMeters,
+                courseDegrees: position.courseDegrees,
+                headingDegrees: position.headingDegrees
+            ))
+        }
+        for peer in crew.peers {
+            batch.append(IncidentSample(
+                at: peer.sentAt,
+                id: peer.id,
+                name: peer.name,
+                role: peer.role,
+                latitudeDegrees: peer.latitudeDegrees,
+                longitudeDegrees: peer.longitudeDegrees,
+                horizontalAccuracyMeters: peer.horizontalAccuracyMeters,
+                courseDegrees: peer.courseDegrees,
+                headingDegrees: peer.headingDegrees
+            ))
+        }
+        incidents.observe(batch, projectName: project.name, at: drawing.projectsRoot)
+        closeIncidents(now: now)
+    }
+
+    private func closeIncidents(now: Date) {
+        guard let project = drawing.project else { return }
+        incidents.relay.isReachable = radio.relayReachable
+        let results = (try? incidents.closeDue(
+            projectName: project.name,
+            at: drawing.projectsRoot,
+            now: now,
+            speeches: crew.recentSpeeches(),
+            radio: radioClips(around: now),
+            audio: radio.audioData()
+        )) ?? []
+        if !results.isEmpty {
+            let sent = results.contains { $0.delivery == .sent }
+            incidentNote = sent
+                ? "ヒヤリハット報告書を記録し、P510へ渡しました"
+                : "ヒヤリハット報告書を記録簿に入れました。P510にはまだ渡していません"
+        }
+        incidents.flush(projectName: project.name, at: drawing.projectsRoot, now: now)
+        incidentOpen = incidents.latestID != nil
+    }
+
+    private func radioClips(around now: Date) -> [IncidentRadioClip] {
+        radio.recentUtterances().compactMap { utterance in
+            let end = utterance.endedAt ?? utterance.startedAt
+            let overlaps = end.timeIntervalSince(now) >= -IncidentBook.beforeSeconds
+                && utterance.startedAt.timeIntervalSince(now) <= IncidentBook.afterSeconds
+            guard overlaps else { return nil }
+            return IncidentRadioClip(
+                id: utterance.id,
+                speaker: utterance.speaker,
+                startedAt: utterance.startedAt,
+                endedAt: utterance.endedAt,
+                stationText: utterance.station?.text,
+                audioByteCount: utterance.audioByteCount,
+                delivered: utterance.delivered
+            )
+        }
+    }
+
+    private func incidentStrokes(around position: GeodeticPosition) -> [IncidentStroke] {
+        guard let line = drawing.stationLine,
+              let origin = PlaneRectangular.forward(
+                latitudeDegrees: position.latitudeDegrees,
+                longitudeDegrees: position.longitudeDegrees,
+                zone: line.zone
+              ) else { return [] }
+        var east: [Double] = []
+        var north: [Double] = []
+        for vertex in line.vertices {
+            let deltaEast = vertex.x - origin.eastingMeters
+            let deltaNorth = vertex.y - origin.northingMeters
+            if abs(deltaEast) < 150, abs(deltaNorth) < 150 {
+                east.append(deltaEast)
+                north.append(deltaNorth)
+            } else if !east.isEmpty {
+                break
+            }
+        }
+        guard east.count >= 2 else { return [] }
+        return [IncidentStroke(eastMeters: east, northMeters: north)]
     }
 
     private static func message(for error: TileDownloadError) -> String {
