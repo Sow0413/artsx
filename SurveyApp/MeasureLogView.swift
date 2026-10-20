@@ -24,6 +24,17 @@ struct MeasureLogView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                Button {
+                    field.showsCrosshair = true
+                } label: {
+                    Text("水準器")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                        .background(SurveyColor.blue)
+                        .foregroundStyle(SurveyColor.onAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
                 if field.stature.style == .sight {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }

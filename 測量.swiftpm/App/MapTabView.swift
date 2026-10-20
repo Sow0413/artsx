@@ -184,6 +184,18 @@ struct MapTabView: View {
                     )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        field.showsCrosshair = true
+                    } label: {
+                        Text("水準器")
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: 560, minHeight: OutdoorContrast.primaryPoints)
+                            .frame(maxWidth: .infinity)
+                            .background(SurveyColor.blue)
+                            .foregroundStyle(SurveyColor.onAccent)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                     captureButton
                 }
             }

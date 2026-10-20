@@ -77,6 +77,9 @@ final class FieldModel: ObservableObject {
     @Published var stature = StatureProfile.load()
     @Published var showsStature = false
     @Published var asksStature = false
+    @Published var showsCrosshair = false
+    @Published var tiltZero = TiltZero.load()
+    @Published private(set) var crosshairTilt: Double?
     @Published private(set) var sightTiltRadians: Double?
     @Published private(set) var measuredEyeDistance: Double?
     let deviceMachine = DeviceIdentity.machine
@@ -1048,6 +1051,90 @@ final class FieldModel: ObservableObject {
     var statureNotice: String? {
         guard let position = reading.position else { return nil }
         return StatureMath.notice(profile: stature, stage: stageTransition.stage, receiver: position.receiver, sight: liveSight)
+    }
+
+    func setCrosshairSession(_ on: Bool) {
+        #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
+        if on {
+            SystemMotion.shared.onCrosshairPitch = { [weak self] pitch in
+                self?.crosshairTilt = StatureMath.tiltFromVertical(pitchRadians: pitch)
+            }
+            SystemMotion.shared.setCrosshairPitch(true)
+        } else {
+            SystemMotion.shared.setCrosshairPitch(false)
+            SystemMotion.shared.onCrosshairPitch = nil
+            crosshairTilt = nil
+        }
+        #else
+        if !on { crosshairTilt = nil }
+        #endif
+    }
+
+    func saveTiltZero(_ bias: Double) {
+        tiltZero = TiltZero(biasRadians: bias, calibrated: true)
+        tiltZero.save()
+    }
+
+    var crosshairElevation: Double? {
+        guard let crosshairTilt else { return nil }
+        return tiltZero.corrected(crosshairTilt)
+    }
+
+    /// 今の端末高から持ち高さを引いた地盤高。水準の器械高に使う。
+    func crosshairGroundHeight() -> Double? {
+        guard let device = reading.position?.ellipsoidalHeightMeters else { return nil }
+        let sight = liveSight ?? crosshairTilt.flatMap { tilt in
+            SightSample.resolved(
+                tiltRadians: tilt,
+                measuredDistance: measuredEyeDistance,
+                antennaAlongUpMeters: AntennaCatalog.alongUpMeters(model: deviceMachine)
+            )
+        }
+        guard let hold = StatureMath.holdMeters(profile: stature, sight: sight) else { return nil }
+        return device - hold
+    }
+
+    @discardableResult
+    func registerTarget(_ shot: TargetResult, rangeLabel: String) -> Bool {
+        guard let latitude = shot.latitudeDegrees, let longitude = shot.longitudeDegrees else {
+            captureMessage = "方位が無いので、座標は登録できません。"
+            return false
+        }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return false
+        }
+        let origin = reading.position
+        let accuracy = CrosshairMath.storedAccuracy(
+            originHorizontal: origin?.horizontalAccuracyMeters ?? shot.horizontalSigmaMeters,
+            originVertical: origin?.verticalAccuracyMeters,
+            aimHorizontal: shot.horizontalSigmaMeters,
+            aimVertical: shot.heightSigmaMeters
+        )
+        let position = CrosshairMath.position(
+            latitude: latitude,
+            longitude: longitude,
+            height: shot.targetHeightMeters,
+            horizontalAccuracy: accuracy.horizontal,
+            verticalAccuracy: accuracy.vertical,
+            at: Date()
+        )
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: .iphone,
+            durationSeconds: nil,
+            epochCount: nil
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: workCatalog.selected.id,
+            captured: position,
+            condition: condition
+        )
+        store(observation)
+        remember(CoordinateBookIndex.entry(from: observation, kind: CrosshairMath.kind))
+        captureMessage = "\(name)を簡易ターゲットにしました。\(rangeLabel)、段階0。"
+        return true
     }
 
     func setSightForeground(_ active: Bool) {

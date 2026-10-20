@@ -228,9 +228,11 @@ final class SystemMotion {
     static let shared = SystemMotion()
     var onSample: ((FallSample) -> Void)?
     var onPitchRadians: ((Double) -> Void)?
+    var onCrosshairPitch: ((Double) -> Void)?
     private let manager = CMMotionManager()
     private var fallOn = false
-    private var pitchOn = false
+    private var staturePitch = false
+    private var crosshairPitch = false
     private var running = false
 
     private init() {}
@@ -241,12 +243,17 @@ final class SystemMotion {
     }
 
     func setPitch(_ on: Bool) {
-        pitchOn = on
+        staturePitch = on
+        sync()
+    }
+
+    func setCrosshairPitch(_ on: Bool) {
+        crosshairPitch = on
         sync()
     }
 
     private func sync() {
-        if fallOn || pitchOn {
+        if fallOn || staturePitch || crosshairPitch {
             start()
         } else {
             stop()
@@ -266,8 +273,11 @@ final class SystemMotion {
                 let totalG = Self.magnitude(user.x + gravity.x, user.y + gravity.y, user.z + gravity.z)
                 self.onSample?(FallSample(at: Date(), userG: userG, totalG: totalG))
             }
-            if self.pitchOn {
+            if self.staturePitch {
                 self.onPitchRadians?(motion.attitude.pitch)
+            }
+            if self.crosshairPitch {
+                self.onCrosshairPitch?(motion.attitude.pitch)
             }
         }
         if CMMotionManager.availableAttitudeReferenceFrames().contains(.xArbitraryZVertical) {

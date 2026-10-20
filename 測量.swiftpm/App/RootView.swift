@@ -134,6 +134,9 @@ struct RootView: View {
         .sheet(isPresented: $field.asksStature) {
             StatureAskSheet(field: field)
         }
+        .sheet(isPresented: $field.showsCrosshair) {
+            CrosshairSheet(field: field)
+        }
     }
 
     private func syncVolume() {
