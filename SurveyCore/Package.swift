@@ -7,7 +7,16 @@ let package = Package(
         .library(name: "SurveyCore", targets: ["SurveyCore"])
     ],
     targets: [
-        .target(name: "SurveyCore"),
+        .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3"),
+        .target(
+            name: "SurveyCore",
+            dependencies: [
+                .target(name: "CSQLite", condition: .when(platforms: [.linux]))
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3", .when(platforms: [.iOS, .macOS, .watchOS, .tvOS]))
+            ]
+        ),
         .testTarget(
             name: "SurveyCoreTests",
             dependencies: ["SurveyCore"]

@@ -68,12 +68,16 @@ public enum DrawingSnap {
                 break
             }
         }
-        let limit = max(0, segments.count)
+        let ranked = segments.sorted { lhs, rhs in
+            midpoint(lhs.segment).distance(to: point) < midpoint(rhs.segment).distance(to: point)
+        }
+        let limited = Array(ranked.prefix(48))
+        let limit = limited.count
         if limit > 1 {
             for left in 0..<limit {
-                for right in (left + 1)..<limit where segments[left].entity != segments[right].entity {
-                    guard let hit = intersection(segments[left].segment, segments[right].segment) else { continue }
-                    if sharesEnd(segments[left].segment, segments[right].segment) { continue }
+                for right in (left + 1)..<limit where limited[left].entity != limited[right].entity {
+                    guard let hit = intersection(limited[left].segment, limited[right].segment) else { continue }
+                    if sharesEnd(limited[left].segment, limited[right].segment) { continue }
                     let distance = hit.distance(to: point)
                     if distance <= tolerance {
                         candidates.append(DrawingSnapHit(kind: .intersection, point: hit, distance: distance))
@@ -87,6 +91,10 @@ public enum DrawingSnap {
             }
             return lhs.distance < rhs.distance
         }
+    }
+
+    private static func midpoint(_ segment: Segment2D) -> PlanarPoint {
+        PlanarPoint(x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2)
     }
 
     private static func rank(_ kind: SnapKind) -> Int {

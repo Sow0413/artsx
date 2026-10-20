@@ -100,6 +100,10 @@ public struct DrawingBounds: Sendable, Equatable {
         self.init(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
     }
 
+    public func contains(_ point: PlanarPoint) -> Bool {
+        !isEmpty && point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
+    }
+
     public func intersects(_ other: DrawingBounds) -> Bool {
         !isEmpty && !other.isEmpty && minX <= other.maxX && maxX >= other.minX && minY <= other.maxY && maxY >= other.minY
     }
@@ -323,18 +327,25 @@ public struct DrawingDocument: Sendable, Equatable {
 public struct DrawingSpatialIndex: Sendable, Equatable {
     var cell: Double
     var buckets: [Int64: [Int]]
+    /// 何マスもまたぐ線。全マスに複製しない。
+    var wide: [(id: Int, bounds: DrawingBounds)]
 
     public init(entities: [DrawingEntity]) {
         let bounds = entities.reduce(DrawingBounds.empty) { $0.union($1.bounds) }
         let span = bounds.isEmpty ? 1 : max(bounds.width, bounds.height, 1)
         cell = max(span / 32, 1e-6)
         buckets = [:]
+        wide = []
         for entity in entities {
             guard !entity.bounds.isEmpty else { continue }
             let x0 = Int(floor(entity.bounds.minX / cell))
             let x1 = Int(floor(entity.bounds.maxX / cell))
             let y0 = Int(floor(entity.bounds.minY / cell))
             let y1 = Int(floor(entity.bounds.maxY / cell))
+            if x1 - x0 > 4 || y1 - y0 > 4 {
+                wide.append((entity.id, entity.bounds))
+                continue
+            }
             for ix in x0...x1 {
                 for iy in y0...y1 {
                     buckets[Self.key(ix, iy), default: []].append(entity.id)
@@ -359,6 +370,9 @@ public struct DrawingSpatialIndex: Sendable, Equatable {
                 }
             }
         }
+        for item in wide where item.bounds.intersects(query) && seen.insert(item.id).inserted {
+            result.append(item.id)
+        }
         return result
     }
 
@@ -367,7 +381,7 @@ public struct DrawingSpatialIndex: Sendable, Equatable {
     }
 
     public static func == (lhs: DrawingSpatialIndex, rhs: DrawingSpatialIndex) -> Bool {
-        lhs.cell == rhs.cell && lhs.buckets == rhs.buckets
+        lhs.cell == rhs.cell && lhs.buckets == rhs.buckets && lhs.wide.elementsEqual(rhs.wide, by: { $0.id == $1.id && $0.bounds == $1.bounds })
     }
 }
 

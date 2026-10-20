@@ -203,6 +203,16 @@ public struct ConversionTag: Codable, Equatable, Sendable {
     public static let keptOriginal = "受け取った図面ファイルはそのまま残している。座標の読み方だけをこの札に書く。"
 }
 
+public struct CoordinateBookPreview: Sendable, Equatable {
+    public var count: Int
+    public var sample: [CoordinateBookEntry]
+
+    public init(count: Int, sample: [CoordinateBookEntry]) {
+        self.count = count
+        self.sample = sample
+    }
+}
+
 /// 基準点として座標簿に残す1点。点名の連番は、この名前を飛ばす。
 public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
     public var name: String
@@ -457,33 +467,106 @@ public enum ProjectStore {
         return try read(ProjectRecordNote.self, from: url)
     }
 
-    /// 座標簿へ1点を足す。同じ名前のファイルは上書きしない。元の図面ファイルは触らない。
+    /// 座標簿へ1点を足す。SQLite の同じ名前は上書きする。元の図面ファイルは触らない。
     public static func saveCoordinate(_ entry: CoordinateBookEntry, projectName: String, at root: URL) throws {
-        guard let safe = safeComponent(entry.name) else { throw ProjectStoreError.emptyName }
+        try saveCoordinates([entry], projectName: projectName, at: root)
+    }
+
+    public static func saveCoordinates(_ entries: [CoordinateBookEntry], projectName: String, at root: URL) throws {
         let directory = try projectDirectory(projectName, at: root)
-        let folder = directory.appendingPathComponent("座標簿", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        var file = "\(safe).json"
-        var number = 2
-        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(file).path) {
-            file = "\(safe)-\(number).json"
-            number += 1
-        }
-        try write(entry, to: folder.appendingPathComponent(file))
+        try CoordinateBookStore.upsert(entries, projectDirectory: directory)
     }
 
     public static func coordinateBookEntries(projectName: String, at root: URL) -> [CoordinateBookEntry] {
         guard let directory = try? projectDirectory(projectName, at: root) else { return [] }
+        if CoordinateBookStore.exists(projectDirectory: directory) {
+            return CoordinateBookStore.entries(projectDirectory: directory)
+        }
+        return jsonCoordinateEntries(in: directory)
+    }
+
+    public static func coordinateBookNames(projectName: String, at root: URL) -> Set<String> {
+        guard let directory = try? projectDirectory(projectName, at: root) else { return [] }
+        if CoordinateBookStore.exists(projectDirectory: directory) {
+            return CoordinateBookStore.names(projectDirectory: directory)
+        }
+        return Set(jsonCoordinateEntries(in: directory).map(\.name))
+    }
+
+    /// 保存済みの座標簿は SQLite で絞る。観測と既知点は件数が小さいのでメモリで足す。
+    public static func filteredCoordinates(
+        projectName: String,
+        at root: URL,
+        query: CoordinateBookQuery,
+        observations: [FieldObservation],
+        known: [ControlPoint],
+        siteBook: [CoordinateBookEntry]
+    ) -> [CoordinateBookEntry] {
+        guard let directory = try? projectDirectory(projectName, at: root) else {
+            return CoordinateBookQuery.apply(
+                CoordinateBookIndex.collect(book: siteBook, observations: observations, known: known),
+                query: query
+            )
+        }
+        let stored = CoordinateBookStore.exists(projectDirectory: directory)
+            ? CoordinateBookStore.filter(query, projectDirectory: directory)
+            : CoordinateBookQuery.apply(jsonCoordinateEntries(in: directory), query: query)
+        let extras = CoordinateBookQuery.apply(
+            CoordinateBookIndex.collect(book: siteBook, observations: observations, known: known),
+            query: query
+        )
+        var byName: [String: CoordinateBookEntry] = [:]
+        for entry in extras { byName[entry.name] = entry }
+        for entry in stored { byName[entry.name] = entry }
+        return byName.values.sorted { $0.name < $1.name }
+    }
+
+    /// 画面に出す分だけ。全件は読み出さない。
+    public static func coordinateBookPreview(
+        projectName: String,
+        at root: URL,
+        query: CoordinateBookQuery,
+        observations: [FieldObservation],
+        known: [ControlPoint],
+        siteBook: [CoordinateBookEntry],
+        sampleLimit: Int = 8
+    ) -> CoordinateBookPreview {
+        let extras = CoordinateBookQuery.apply(
+            CoordinateBookIndex.collect(book: siteBook, observations: observations, known: known),
+            query: query
+        )
+        guard let directory = try? projectDirectory(projectName, at: root) else {
+            return CoordinateBookPreview(count: extras.count, sample: Array(extras.prefix(sampleLimit)))
+        }
+        if !CoordinateBookStore.exists(projectDirectory: directory) {
+            let stored = CoordinateBookQuery.apply(jsonCoordinateEntries(in: directory), query: query)
+            var byName: [String: CoordinateBookEntry] = [:]
+            for entry in extras { byName[entry.name] = entry }
+            for entry in stored { byName[entry.name] = entry }
+            let merged = byName.values.sorted { $0.name < $1.name }
+            return CoordinateBookPreview(count: merged.count, sample: Array(merged.prefix(sampleLimit)))
+        }
+        let storedCount = CoordinateBookStore.matchCount(query, projectDirectory: directory)
+        let storedSample = CoordinateBookStore.filter(query, projectDirectory: directory, limit: sampleLimit)
+        var byName: [String: CoordinateBookEntry] = [:]
+        for entry in storedSample { byName[entry.name] = entry }
+        var count = storedCount
+        for entry in extras {
+            if CoordinateBookStore.matches(name: entry.name, query: query, projectDirectory: directory) { continue }
+            count += 1
+            byName[entry.name] = entry
+        }
+        let sample = byName.values.sorted { $0.name < $1.name }
+        return CoordinateBookPreview(count: count, sample: Array(sample.prefix(sampleLimit)))
+    }
+
+    private static func jsonCoordinateEntries(in directory: URL) -> [CoordinateBookEntry] {
         let folder = directory.appendingPathComponent("座標簿", isDirectory: true)
         guard let urls = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
         return urls.compactMap { url in
             guard url.pathExtension.lowercased() == "json" else { return nil }
             return try? read(CoordinateBookEntry.self, from: url)
         }.sorted { $0.name < $1.name }
-    }
-
-    public static func coordinateBookNames(projectName: String, at root: URL) -> Set<String> {
-        Set(coordinateBookEntries(projectName: projectName, at: root).map(\.name))
     }
 
     public static func exportDirectory(projectName: String, at root: URL) throws -> URL {

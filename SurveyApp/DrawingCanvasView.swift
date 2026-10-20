@@ -99,33 +99,29 @@ struct DrawingCanvasView: View {
     private func draw(in context: inout GraphicsContext, size: CGSize) {
         guard let document else { return }
         let query = visibleBounds(size: size, document: document)
-        let minimum = 1 / max(camera.pointsPerUnit, 1e-9)
-        for entity in document.entities(in: query) {
-            if entity.bounds.width < minimum, entity.bounds.height < minimum, entity.stroke.count > 1 {
-                continue
-            }
-            let color = Color(red: entity.color.red, green: entity.color.green, blue: entity.color.blue)
+        let batch = DrawingLOD.batch(document: document, view: query, pointsPerUnit: camera.pointsPerUnit)
+        for stroke in batch.strokes {
+            guard let first = stroke.points.first else { continue }
             var path = Path()
-            let stroke = entity.stroke
-            if let first = stroke.first {
-                path.move(to: screen(first, size: size))
-                for point in stroke.dropFirst() {
-                    path.addLine(to: screen(point, size: size))
-                }
-                context.stroke(path, with: .color(color), lineWidth: 1.4)
+            path.move(to: screen(first, size: size))
+            for point in stroke.points.dropFirst() {
+                path.addLine(to: screen(point, size: size))
             }
-            if case let .point(point) = entity.primitive {
-                let origin = screen(point, size: size)
-                let rect = CGRect(x: origin.x - 3, y: origin.y - 3, width: 6, height: 6)
-                context.fill(Path(rect), with: .color(color))
-            }
-            if case let .text(origin, string, height, _) = entity.primitive, height * camera.pointsPerUnit >= 8 {
-                context.draw(
-                    Text(string).font(.system(size: 12, weight: .semibold)).foregroundStyle(color),
-                    at: screen(origin, size: size),
-                    anchor: .bottomLeading
-                )
-            }
+            let color = Color(red: stroke.red, green: stroke.green, blue: stroke.blue)
+            context.stroke(path, with: .color(color), lineWidth: 1.4)
+        }
+        for mark in batch.points {
+            let origin = screen(mark.point, size: size)
+            let rect = CGRect(x: origin.x - 3, y: origin.y - 3, width: 6, height: 6)
+            context.fill(Path(rect), with: .color(Color(red: mark.red, green: mark.green, blue: mark.blue)))
+        }
+        for label in batch.labels where label.height * camera.pointsPerUnit >= 8 {
+            let color = Color(red: label.red, green: label.green, blue: label.blue)
+            context.draw(
+                Text(label.text).font(.system(size: 12, weight: .semibold)).foregroundStyle(color),
+                at: screen(label.origin, size: size),
+                anchor: .bottomLeading
+            )
         }
         for range in reachRanges where range.points.count >= 2 {
             var path = Path()

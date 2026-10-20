@@ -1429,39 +1429,99 @@ final class FieldModel: ObservableObject {
     }
 
     func filteredBookEntries() -> [CoordinateBookEntry] {
-        let projectBook = drawing.project.map {
-            ProjectStore.coordinateBookEntries(projectName: $0.name, at: drawing.projectsRoot)
-        } ?? []
-        let collected = CoordinateBookIndex.collect(
-            book: projectBook + SiteCoordinateBook.load(from: siteDirectory),
+        guard let project = drawing.project else {
+            return CoordinateBookQuery.apply(
+                CoordinateBookIndex.collect(
+                    book: SiteCoordinateBook.load(from: siteDirectory),
+                    observations: observations.observations,
+                    known: controlPoints
+                ),
+                query: bookQuery
+            )
+        }
+        return ProjectStore.filteredCoordinates(
+            projectName: project.name,
+            at: drawing.projectsRoot,
+            query: bookQuery,
             observations: observations.observations,
-            known: controlPoints
+            known: controlPoints,
+            siteBook: SiteCoordinateBook.load(from: siteDirectory)
         )
-        return CoordinateBookQuery.apply(collected, query: bookQuery)
+    }
+
+    func bookPreview() -> CoordinateBookPreview {
+        let siteBook = SiteCoordinateBook.load(from: siteDirectory)
+        guard let project = drawing.project else {
+            let rows = CoordinateBookQuery.apply(
+                CoordinateBookIndex.collect(
+                    book: siteBook,
+                    observations: observations.observations,
+                    known: controlPoints
+                ),
+                query: bookQuery
+            )
+            return CoordinateBookPreview(count: rows.count, sample: Array(rows.prefix(8)))
+        }
+        return ProjectStore.coordinateBookPreview(
+            projectName: project.name,
+            at: drawing.projectsRoot,
+            query: bookQuery,
+            observations: observations.observations,
+            known: controlPoints,
+            siteBook: siteBook
+        )
     }
 
     func exportDelivery(_ format: DeliveryFormat) {
-        let entries = filteredBookEntries()
-        guard !entries.isEmpty else {
-            exportMessage = "絞り込みに合う点がありません。"
-            return
-        }
-        let bytes = CoordinateDelivery.data(entries, format: format, zone: drawing.zone)
-        do {
-            let folder = try deliveryFolder()
-            let url = folder.appendingPathComponent(format.filename)
-            try bytes.write(to: url, options: .atomic)
-            exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
-        } catch {
-            exportMessage = "書き出せませんでした。"
+        let query = bookQuery
+        let zone = drawing.zone
+        let projectName = drawing.project?.name
+        let root = drawing.projectsRoot
+        let site = siteDirectory
+        let observations = observations.observations
+        let known = controlPoints
+        let siteBook = SiteCoordinateBook.load(from: site)
+        exportMessage = "書き出しています。"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let entries: [CoordinateBookEntry]
+            if let projectName {
+                entries = ProjectStore.filteredCoordinates(
+                    projectName: projectName,
+                    at: root,
+                    query: query,
+                    observations: observations,
+                    known: known,
+                    siteBook: siteBook
+                )
+            } else {
+                entries = CoordinateBookQuery.apply(
+                    CoordinateBookIndex.collect(book: siteBook, observations: observations, known: known),
+                    query: query
+                )
+            }
+            guard !entries.isEmpty else {
+                DispatchQueue.main.async { self.exportMessage = "絞り込みに合う点がありません。" }
+                return
+            }
+            let bytes = CoordinateDelivery.data(entries, format: format, zone: zone)
+            do {
+                let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
+                let url = folder.appendingPathComponent(format.filename)
+                try bytes.write(to: url, options: .atomic)
+                DispatchQueue.main.async {
+                    self.exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
+                }
+            } catch {
+                DispatchQueue.main.async { self.exportMessage = "書き出せませんでした。" }
+            }
         }
     }
 
-    private func deliveryFolder() throws -> URL {
-        if let project = drawing.project {
-            return try ProjectStore.exportDirectory(projectName: project.name, at: drawing.projectsRoot)
+    private static func deliveryFolder(projectName: String?, root: URL, site: URL) throws -> URL {
+        if let projectName {
+            return try ProjectStore.exportDirectory(projectName: projectName, at: root)
         }
-        let folder = siteDirectory.appendingPathComponent("出す", isDirectory: true)
+        let folder = site.appendingPathComponent("出す", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }

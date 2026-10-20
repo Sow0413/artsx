@@ -69,10 +69,14 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var stationLine: StationLine?
     /// 集計に書く天候。測っていないときは空。
     @Published private(set) var weatherLabel = ""
+    /// 図面の読込。解析が終わる前から、プロジェクト自体は使える。
+    @Published private(set) var importProgress: WorkProgress?
 
     let projectsRoot: URL
     private var reference: (latitude: Double, longitude: Double, name: String)?
     private var referenceStamp: (latitude: Double, longitude: Double)?
+    private var loadGeneration = 0
+    private var mapGeneration = 0
 
     init(projectsRoot: URL) {
         self.projectsRoot = projectsRoot
@@ -120,6 +124,8 @@ final class DrawingSession: ObservableObject {
     }
 
     func select(_ selected: SurveyProject) {
+        loadGeneration += 1
+        let generation = loadGeneration
         project = selected
         zone = selected.zone ?? zone
         axis = selected.axis
@@ -135,17 +141,50 @@ final class DrawingSession: ObservableObject {
             zone = active.zone
             axis = active.axis
         }
-        if let drawing = selected.drawings.last,
-           let data = try? ProjectStore.originalDXF(fileName: drawing.fileName, projectName: selected.name, at: projectsRoot) {
-            applyParsed(data, fileName: drawing.fileName)
-        } else {
-            document = nil
-            fileName = nil
-            camera.fittedID = nil
-        }
+        document = nil
+        fileName = nil
+        camera.fittedID = nil
+        importProgress = nil
         applyCab(from: selected)
         refresh()
         refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
+        guard let drawing = selected.drawings.last else { return }
+        let drawingName = drawing.fileName
+        let projectName = selected.name
+        let root = projectsRoot
+        importProgress = WorkProgress(label: "図面を読んでいます", fraction: 0.05)
+        DispatchQueue.global(qos: .userInitiated).async {
+            let data: Data
+            do {
+                data = try ProjectStore.originalDXF(fileName: drawingName, projectName: projectName, at: root)
+            } catch {
+                DispatchQueue.main.async {
+                    guard generation == self.loadGeneration else { return }
+                    self.importProgress = nil
+                    self.message = "保存してある図面を読めませんでした。"
+                }
+                return
+            }
+            do {
+                let parsed = try DrawingImport.load(data: data, fileName: drawingName) { progress in
+                    DispatchQueue.main.async {
+                        guard generation == self.loadGeneration else { return }
+                        self.importProgress = progress
+                    }
+                }
+                DispatchQueue.main.async {
+                    guard generation == self.loadGeneration else { return }
+                    self.adopt(parsed, fileName: drawingName)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard generation == self.loadGeneration else { return }
+                    self.importProgress = nil
+                    let ext = (drawingName as NSString).pathExtension.lowercased()
+                    self.message = ext == "sfc" ? "保存してある SFC を読めませんでした。" : "保存してある DXF を読めませんでした。"
+                }
+            }
+        }
     }
 
     func importFile(
@@ -154,51 +193,63 @@ final class DrawingSession: ObservableObject {
         latitude: Double? = nil,
         longitude: Double? = nil
     ) {
-        guard var current = project else {
+        guard let snapshot = project else {
             message = "先にプロジェクトを作ってください。"
             return
         }
-        do {
-            let ext = (rawName as NSString).pathExtension.lowercased()
-            let parsed: DrawingDocument
-            if ext == "sfc" {
-                parsed = try SFCParser.parse(data)
-                axis = .cadEastNorth
-                current.axis = .cadEastNorth
-            } else {
-                parsed = try DXFParser.parse(data)
+        loadGeneration += 1
+        let generation = loadGeneration
+        let root = projectsRoot
+        let ext = (rawName as NSString).pathExtension.lowercased()
+        importProgress = WorkProgress(label: "図面を読んでいます", fraction: 0.05)
+        message = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            var current = snapshot
+            do {
+                let parsed = try DrawingImport.load(data: data, fileName: rawName) { progress in
+                    DispatchQueue.main.async {
+                        guard generation == self.loadGeneration else { return }
+                        self.importProgress = progress
+                    }
+                }
+                if ext == "sfc" {
+                    current.axis = .cadEastNorth
+                }
+                let stored = try ProjectStore.importDXF(
+                    data: data,
+                    fileName: rawName,
+                    into: &current,
+                    at: root,
+                    codePage: parsed.codePage,
+                    unsupported: parsed.unsupportedCounts
+                )
+                var note = ext == "sfc"
+                    ? "設計に \(stored) を置きました。公共座標として読みました。系を選ぶと地図に載ります。元の SFC は変えていません。"
+                    : "設計に \(stored) を置きました。元の DXF は変えていません。"
+                if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
+                if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
+                let draft = current
+                let base = note
+                DispatchQueue.main.async {
+                    guard generation == self.loadGeneration else { return }
+                    self.project = draft
+                    if ext == "sfc" { self.axis = .cadEastNorth }
+                    self.reload()
+                    self.adopt(parsed, fileName: stored)
+                    self.refreshPlacement(latitude: latitude, longitude: longitude, overrideZone: ext == "sfc")
+                    if let placementNote = self.placementNote {
+                        self.message = [base, placementNote].joined(separator: " ")
+                    } else {
+                        self.message = base
+                    }
+                }
+            } catch let error as DXFError {
+                self.failImport(generation, error.description)
+            } catch let error as SFCError {
+                self.failImport(generation, error.description)
+            } catch {
+                self.failImport(generation, "図面を読めませんでした。")
             }
-            let stored = try ProjectStore.importDXF(
-                data: data,
-                fileName: rawName,
-                into: &current,
-                at: projectsRoot,
-                codePage: parsed.codePage,
-                unsupported: parsed.unsupportedCounts
-            )
-            project = current
-            reload()
-            document = parsed
-            fileName = stored
-            camera.fittedID = nil
-            backgroundVerdict = nil
-            var note = ext == "sfc"
-                ? "設計に \(stored) を置きました。公共座標として読みました。系を選ぶと地図に載ります。元の SFC は変えていません。"
-                : "設計に \(stored) を置きました。元の DXF は変えていません。"
-            if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
-            if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
-            message = note
-            refreshPlacement(latitude: latitude, longitude: longitude, overrideZone: ext == "sfc")
-            if let placementNote {
-                message = [message, placementNote].compactMap { $0 }.joined(separator: " ")
-            }
-            refresh()
-        } catch let error as DXFError {
-            message = error.description
-        } catch let error as SFCError {
-            message = error.description
-        } catch {
-            message = "図面を読めませんでした。"
         }
     }
 
@@ -1040,17 +1091,21 @@ final class DrawingSession: ObservableObject {
         return PlanarPoint(x: inspection.drawingX, y: inspection.drawingY)
     }
 
-    private func applyParsed(_ data: Data, fileName: String) {
-        let ext = (fileName as NSString).pathExtension.lowercased()
-        let parsed = ext == "sfc" ? (try? SFCParser.parse(data)) : (try? DXFParser.parse(data))
-        guard let parsed else {
-            message = ext == "sfc" ? "保存してある SFC を読めませんでした。" : "保存してある DXF を読めませんでした。"
-            return
-        }
+    private func adopt(_ parsed: DrawingDocument, fileName: String) {
+        importProgress = nil
         document = parsed
         self.fileName = fileName
         camera.fittedID = nil
         backgroundVerdict = nil
+        refresh()
+    }
+
+    private func failImport(_ generation: Int, _ text: String) {
+        DispatchQueue.main.async {
+            guard generation == self.loadGeneration else { return }
+            self.importProgress = nil
+            self.message = text
+        }
     }
 
     private func persistProject() {
@@ -1093,21 +1148,32 @@ final class DrawingSession: ObservableObject {
     }
 
     private func refreshMap() {
+        mapGeneration += 1
+        let generation = mapGeneration
         guard let document else {
             mapPaths = []
             overlayCapped = false
             mapRevision += 1
             return
         }
-        let built = DrawingPlacement.overlay(
-            document: document,
-            zone: zone,
-            axis: axis,
-            transform: activeTransform,
-            composesAxis: activeComposesAxis
-        )
-        mapPaths = built.paths
-        overlayCapped = built.capped
-        mapRevision += 1
+        let zone = zone
+        let axis = axis
+        let transform = activeTransform
+        let composes = activeComposesAxis
+        DispatchQueue.global(qos: .userInitiated).async {
+            let built = DrawingPlacement.overlay(
+                document: document,
+                zone: zone,
+                axis: axis,
+                transform: transform,
+                composesAxis: composes
+            )
+            DispatchQueue.main.async {
+                guard generation == self.mapGeneration else { return }
+                self.mapPaths = built.paths
+                self.overlayCapped = built.capped
+                self.mapRevision += 1
+            }
+        }
     }
 }

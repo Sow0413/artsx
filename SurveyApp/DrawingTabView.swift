@@ -115,7 +115,20 @@ struct DrawingTabView: View {
                 }
                 Spacer()
             }
-            if drawing.document == nil {
+            if let progress = drawing.importProgress {
+                VStack(spacing: 10) {
+                    Text(progress.label)
+                        .font(.system(size: 16, weight: .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                    ProgressView(value: progress.fraction)
+                        .tint(SurveyColor.blue)
+                        .frame(maxWidth: 280)
+                    Text("解析が終わる前から、プロジェクトは使えます。")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                }
+                .padding(24)
+            } else if drawing.document == nil {
                 Text(drawing.project == nil ? "プロジェクトを作って、DXF か SFC を読み込みます。" : "DXF か SFC を読み込むと、ここに図面が出ます。")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(SurveyColor.muted)
@@ -411,6 +424,11 @@ struct DrawingTabView: View {
                 Spacer()
                 Button("図面を読む") { importing = true }
                     .buttonStyle(SurveyPlainButton())
+            }
+            if let progress = drawing.importProgress {
+                Text(progress.label)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SurveyColor.muted)
             }
             if let document = drawing.document, !document.unsupportedSummary.isEmpty {
                 Text("読めない要素: \(document.unsupportedSummary)")

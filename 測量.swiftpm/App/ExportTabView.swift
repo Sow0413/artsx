@@ -27,9 +27,10 @@ struct ExportTabView: View {
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 filters
-                Text("\(field.filteredBookEntries().count) 点")
+                let preview = field.bookPreview()
+                Text("\(preview.count) 点")
                     .font(.system(size: 18, weight: .heavy))
-                names
+                names(preview.sample)
                 ForEach(DeliveryFormat.allCases) { format in
                     Button {
                         field.exportDelivery(format)
@@ -144,9 +145,8 @@ struct ExportTabView: View {
         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var names: some View {
-        let shown = field.filteredBookEntries().prefix(8)
-        return VStack(alignment: .leading, spacing: 4) {
+    private func names(_ shown: [CoordinateBookEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             if shown.isEmpty {
                 Text("合う点がありません。")
                     .font(.system(size: 15, weight: .semibold))
