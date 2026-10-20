@@ -220,6 +220,8 @@ public final class RadioDesk {
 
     public let relay: any RadioLink
     public let nearby: any RadioLink
+    /// 受け取った PCM。空間オーディオはアプリ側。未設定なら何もしない。
+    public var onAudio: ((Data) -> Void)?
     private var live: RadioUtterance?
     private var hearing: RadioUtterance?
 
@@ -351,7 +353,10 @@ public final class RadioDesk {
         case .audio:
             guard var utterance = hearing, utterance.id == packet.utteranceID else { return }
             utterance.audioByteCount += packet.audio?.count ?? 0
-            if let audio = packet.audio { rememberAudio(audio, id: utterance.id) }
+            if let audio = packet.audio {
+                rememberAudio(audio, id: utterance.id)
+                onAudio?(audio)
+            }
             hearing = utterance
         case .end:
             guard var utterance = hearing, utterance.id == packet.utteranceID else { return }

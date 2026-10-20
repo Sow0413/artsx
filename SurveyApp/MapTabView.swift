@@ -30,6 +30,16 @@ struct MapTabView: View {
                 .padding(.top, 6)
                 IncidentTray(field: field)
                 HStack {
+                    Button(field.radio.spaceAudio ? "定位オン" : "定位") {
+                        field.radio.setSpaceAudio(!field.radio.spaceAudio)
+                    }
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(SurveyColor.card.opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
                     Button("統計") {
                         field.showsIncidentStats = true
                     }
@@ -64,6 +74,7 @@ struct MapTabView: View {
             ZStack {
                 SafetyWash(level: field.crew.worst)
                 ThreatRim(cues: [], fall: field.crew.fallCue)
+                TalkRim(pointer: field.talkPointer)
             }
         }
         .sheet(isPresented: $field.showsIncidentStats) {

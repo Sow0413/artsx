@@ -39,6 +39,7 @@ struct DrawingTabView: View {
             ZStack {
                 SafetyWash(level: field.crew.worst)
                 ThreatRim(cues: [], fall: field.crew.fallCue)
+                TalkRim(pointer: field.talkPointer)
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: drawingTypes) { result in

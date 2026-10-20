@@ -31,6 +31,7 @@ struct OperatorView: View {
                 SurveyColor.background
                 SafetyWash(level: field.crew.worst)
                 ThreatRim(cues: field.crew.threats.cues, fall: field.crew.fallCue)
+                TalkRim(pointer: field.talkPointer)
                 if landscape {
                     VStack(spacing: 4) {
                         HStack(spacing: 8) {
@@ -280,6 +281,12 @@ struct OperatorView: View {
                     }
                     .font(.system(size: 13, weight: .heavy))
                     .foregroundStyle(SurveyColor.muted)
+                    Button(field.radio.spaceAudio ? "定位オン" : "定位") {
+                        field.radio.setSpaceAudio(!field.radio.spaceAudio)
+                    }
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.muted)
+                    .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
                 }
             }
         }

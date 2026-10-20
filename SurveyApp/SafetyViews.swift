@@ -74,6 +74,60 @@ struct SafetyWash: View {
     }
 }
 
+struct TalkRim: View {
+    var pointer: TalkPointer?
+
+    var body: some View {
+        if let pointer {
+            GeometryReader { geo in
+                if pointer.known, let degrees = pointer.relativeDegrees {
+                    let point = rim(degrees, in: geo.size)
+                    VStack(spacing: 4) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 64, weight: .black))
+                            .rotationEffect(.degrees(degrees))
+                        Text(pointer.text)
+                            .font(.system(size: 28, weight: .black))
+                            .minimumScaleFactor(0.5)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                    }
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(SurveyColor.amber)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .position(point)
+                    .accessibilityLabel(pointer.reference.isEmpty ? pointer.text : "\(pointer.reference)、\(pointer.text)")
+                } else {
+                    Text(pointer.text)
+                        .font(.system(size: 34, weight: .black))
+                        .minimumScaleFactor(0.5)
+                        .lineLimit(1)
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(SurveyColor.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 36)
+                        .accessibilityLabel(pointer.text)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func rim(_ degrees: Double, in size: CGSize) -> CGPoint {
+        let turn = degrees * .pi / 180
+        let inset = min(size.width, size.height) * 0.22
+        return CGPoint(
+            x: size.width / 2 + CGFloat(sin(turn)) * (size.width / 2 - inset),
+            y: size.height / 2 - CGFloat(cos(turn)) * (size.height / 2 - inset)
+        )
+    }
+}
+
 struct ThreatRim: View {
     var cues: [ThreatCue]
     var fall: FallCue?

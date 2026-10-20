@@ -163,6 +163,10 @@ final class FieldModel: ObservableObject {
         fall.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
+        radio.spacePoint = { [weak self] in
+            guard let pointer = self?.talkPointer, pointer.known, let degrees = pointer.relativeDegrees else { return nil }
+            return TalkDirection.space(relativeDegrees: degrees, distanceMeters: pointer.distanceMeters ?? 0)
+        }
         HiyariHook.fire = { [weak self] in
             self?.recordIncident(trigger: .manual)
         }
@@ -360,6 +364,23 @@ final class FieldModel: ObservableObject {
             operatingStage: stageTransition.stage,
             stageNotice: stageTransition.notice,
             demoteForStageDrop: stageTransition.steppedDown
+        )
+    }
+
+    /// 受信中だけ。オペ画面は重機の向き、それ以外は自分の進行か方位。
+    var talkPointer: TalkPointer? {
+        guard let speaker = radio.hearingSpeaker else { return nil }
+        let position = workingReading.position
+        let plottable = position?.isPlottable == true
+        return TalkDirection.pointer(
+            speaker: speaker,
+            fixes: crew.peers,
+            selfLatitude: plottable ? position?.latitudeDegrees : nil,
+            selfLongitude: plottable ? position?.longitudeDegrees : nil,
+            courseDegrees: position?.courseDegrees,
+            headingDegrees: position?.headingDegrees,
+            facing: tab == .seat ? .machine : .own,
+            now: Date()
         )
     }
 
@@ -1008,6 +1029,8 @@ final class FieldModel: ObservableObject {
             radius: drawing.machineRadiusMeters,
             root: drawing.projectsRoot
         )
+        radio.rename(crew.displayName)
+        radio.refreshSpace()
         trackIncidents()
         refreshVisibleControlPoints()
         guard followUser, let position = workingReading.position, position.isPlottable else { return }

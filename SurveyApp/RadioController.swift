@@ -4,27 +4,57 @@ import SurveyCore
 /// オペ画面のボタンと、中継・近距離・端末内記録をつなぐ。
 final class RadioController: ObservableObject {
     @Published private(set) var phase: RadioPhase = .idle
+    @Published private(set) var hearingSpeaker: String?
     @Published private(set) var status: String
     @Published var attachStation = true
+    @Published private(set) var spaceAudio = false
 
     private let relay = P510RelayStub(reachable: false)
     private let mesh = NearbyMesh(reachable: false)
     private let desk: RadioDesk
     private let nearby: NearbyLink
+    private let space = RadioSpace()
+    private let defaults: UserDefaults
     private var systemBegan = false
+    /// 受信中の話者を、空間オーディオの位置に変える。方向不明なら nil。
+    var spacePoint: () -> TalkPoint? = { nil }
 
     #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
     private let system = SystemPushToTalk()
     #endif
 
-    init(nearby: NearbyLink) {
+    init(nearby: NearbyLink, defaults: UserDefaults = .standard) {
         self.nearby = nearby
+        self.defaults = defaults
         desk = RadioDesk(speaker: "この端末", relay: relay, nearby: mesh)
+        spaceAudio = defaults.object(forKey: "radio.spaceAudio") as? Bool ?? false
+        space.enabled = spaceAudio
         if RadioHardware.pushToTalk || RadioHardware.nearbyPeers {
             status = "中継はまだありません。近くに同じ現場がいれば、そちらへ出します。"
         } else {
             status = "無線の権限は切ってあります。発話は端末に残します。"
         }
+        desk.onAudio = { [weak self] data in
+            self?.playIncoming(data)
+        }
+    }
+
+    func rename(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        desk.speaker = trimmed
+    }
+
+    func setSpaceAudio(_ enabled: Bool) {
+        spaceAudio = enabled
+        space.enabled = enabled
+        defaults.set(enabled, forKey: "radio.spaceAudio")
+        refreshSpace()
+    }
+
+    func refreshSpace() {
+        guard spaceAudio, hearingSpeaker != nil, let point = spacePoint() else { return }
+        space.place(point)
     }
 
     var relayReachable: Bool {
@@ -106,8 +136,20 @@ final class RadioController: ObservableObject {
         publish()
     }
 
+    private func playIncoming(_ data: Data) {
+        guard spaceAudio else { return }
+        if let point = spacePoint() {
+            space.place(point)
+        } else {
+            space.place(TalkPoint(x: 0, y: 0, z: 0))
+        }
+        space.play(data)
+    }
+
     private func publish() {
         phase = desk.phase
+        hearingSpeaker = desk.hearingSpeaker
+        refreshSpace()
         if let speaker = desk.hearingSpeaker {
             status = "\(speaker) が話しています"
             return
