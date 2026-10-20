@@ -106,6 +106,7 @@ final class SystemNearbyRadio: NSObject, MCSessionDelegate, MCNearbyServiceAdver
     var onFall: ((FallNotice) -> Void)?
     var onSOS: ((SOSPacket) -> Void)?
     var onAid: ((AidPacket) -> Void)?
+    var onBucket: ((BucketEnvelope) -> Void)?
     var onPeerCount: ((Int) -> Void)?
 
     func start(channel: RadioChannel, name: String) {
@@ -157,6 +158,10 @@ final class SystemNearbyRadio: NSObject, MCSessionDelegate, MCNearbyServiceAdver
         send(LinkFrame(kind: .aid, aid: packet))
     }
 
+    func send(_ envelope: BucketEnvelope) {
+        send(LinkFrame(kind: .bucket, bucket: envelope))
+    }
+
     private func send(_ frame: LinkFrame) {
         guard let session, !session.connectedPeers.isEmpty else { return }
         let encoder = JSONEncoder()
@@ -189,6 +194,10 @@ final class SystemNearbyRadio: NSObject, MCSessionDelegate, MCNearbyServiceAdver
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         if let frame = try? decoder.decode(LinkFrame.self, from: data) {
+            if frame.kind == .bucket, let bucket = frame.bucket {
+                onBucket?(bucket)
+                return
+            }
             if let radio = frame.radio { onPacket?(radio) }
             if let crew = frame.crew { onCrew?(crew) }
             if let fall = frame.fall { onFall?(fall) }

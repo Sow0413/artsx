@@ -85,6 +85,27 @@ final class FieldModel: ObservableObject {
     let fallRelay = FallRelay(reachable: false)
     let sosRelay = SOSRelay(reachable: false)
     let aidRelay = AidRelay(reachable: false)
+    let disasterRelay = DisasterRelay(reachable: false)
+    var bucketDesk = BucketDesk(selfID: "")
+    var disasterPeersDesk = DisasterPeers()
+    var lastDisasterShare: Date?
+    var lastDisasterRelay: Date?
+    var lastPassageSample: PassageSample?
+    var disasterPeersNearby = 0
+    var disasterUplink = DisasterUplink()
+    var disasterLoadedProject: String?
+    #if canImport(Network)
+    var disasterPath: DisasterPathMonitor?
+    #endif
+    @Published var disasterMode = false
+    @Published var batterySaver = false
+    @Published private(set) var disasterSites: [DisasterSite] = []
+    @Published private(set) var disasterSegments: [PassageSegment] = []
+    @Published private(set) var disasterPeers: [DisasterPosition] = []
+    @Published private(set) var disasterTexts: [DisasterText] = []
+    @Published private(set) var disasterPending = 0
+    @Published private(set) var disasterMessage: String?
+    @Published var showsDisaster = false
     @Published private(set) var firstEpisode: FirstEpisode?
     @Published private(set) var firstView: FirstView?
     @Published private(set) var aidArrows: [AidArrow] = []
@@ -328,6 +349,7 @@ final class FieldModel: ObservableObject {
         case .nearby:
             nearby.send(packet)
         }
+        relayDisasterSOS(packet)
     }
 
     func acceptNearestDuty() {
@@ -949,6 +971,17 @@ final class FieldModel: ObservableObject {
                 self?.ingestAid(packet, arrived: .nearby)
             }
         }
+        nearby.onBucket = { [weak self] envelope in
+            DispatchQueue.main.async {
+                self?.ingestBucket(envelope)
+            }
+        }
+        nearby.observePeers { [weak self] count in
+            DispatchQueue.main.async {
+                self?.disasterPeerCount(count)
+            }
+        }
+        startDisasterUplink()
         fall.start()
         incidentTimer?.invalidate()
         incidentTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -1216,6 +1249,10 @@ final class FieldModel: ObservableObject {
 
     func downloadVisibleArea() {
         guard downloadTask == nil else { return }
+        if batterySaver {
+            downloadMessage = "電池節約中は、地図の追加保存を止めます。"
+            return
+        }
         guard let bounds = visibleBounds, let zoom = visibleZoom else {
             downloadMessage = "地図の範囲がまだ分かりません"
             return
@@ -1415,6 +1452,7 @@ final class FieldModel: ObservableObject {
         radio.rename(crew.displayName)
         radio.refreshSpace()
         refreshSOS()
+        noteDisasterMotion()
         if firstDesk.episode?.active == true {
             publishFirst(speak: false)
         } else {
@@ -1472,6 +1510,8 @@ final class FieldModel: ObservableObject {
         sosRelay.flush()
         aidRelay.isReachable = radio.relayReachable
         aidRelay.flush()
+        flushDisasterSync()
+        relayDisasterHeld(now: now)
         let results = (try? incidents.closeDue(
             projectName: project.name,
             at: drawing.projectsRoot,

@@ -96,7 +96,10 @@ struct OperatorView: View {
             }
         }
         .background(SurveyColor.background)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = !field.batterySaver }
+        .onChange(of: field.batterySaver) { _, saver in
+            UIApplication.shared.isIdleTimerDisabled = !saver
+        }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 

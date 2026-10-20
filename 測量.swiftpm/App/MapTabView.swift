@@ -44,6 +44,15 @@ struct MapTabView: View {
                     .background(SurveyColor.card.opacity(0.92))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
+                    Button("災害") {
+                        field.showsDisaster = true
+                    }
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(field.disasterMode ? Color.white : SurveyColor.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(field.disasterMode ? SurveyColor.red : SurveyColor.card.opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     Button("統計") {
                         field.showsIncidentStats = true
                     }
@@ -64,6 +73,18 @@ struct MapTabView: View {
                 }
                 .padding(.trailing, 12)
                 .padding(.top, 6)
+                if field.disasterMode {
+                    Text("災害派遣。圏外のまま、近くの端末へ中継します。")
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(SurveyColor.redBackground.opacity(0.94))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                }
                 if field.enclosingBook {
                     enclosureBanner
                 } else if field.drawing.pick == .mapPoint {
@@ -84,6 +105,9 @@ struct MapTabView: View {
         }
         .sheet(isPresented: $field.showsIncidentStats) {
             IncidentStatsSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsDisaster) {
+            DisasterSheet(field: field)
         }
     }
 

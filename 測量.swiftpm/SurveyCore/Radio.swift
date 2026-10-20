@@ -396,6 +396,7 @@ public struct LinkFrame: Codable, Equatable, Sendable {
         case fall
         case sos
         case aid
+        case bucket
     }
 
     public var kind: Kind
@@ -404,6 +405,7 @@ public struct LinkFrame: Codable, Equatable, Sendable {
     public var fall: FallNotice?
     public var sos: SOSPacket?
     public var aid: AidPacket?
+    public var bucket: BucketEnvelope?
 
     public init(
         kind: Kind,
@@ -411,7 +413,8 @@ public struct LinkFrame: Codable, Equatable, Sendable {
         crew: CrewPacket? = nil,
         fall: FallNotice? = nil,
         sos: SOSPacket? = nil,
-        aid: AidPacket? = nil
+        aid: AidPacket? = nil,
+        bucket: BucketEnvelope? = nil
     ) {
         self.kind = kind
         self.radio = radio
@@ -419,6 +422,7 @@ public struct LinkFrame: Codable, Equatable, Sendable {
         self.fall = fall
         self.sos = sos
         self.aid = aid
+        self.bucket = bucket
     }
 }
 

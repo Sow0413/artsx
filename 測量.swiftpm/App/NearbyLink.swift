@@ -8,6 +8,7 @@ final class NearbyLink {
     var onFall: ((FallNotice) -> Void)?
     var onSOS: ((SOSPacket) -> Void)?
     var onAid: ((AidPacket) -> Void)?
+    var onBucket: ((BucketEnvelope) -> Void)?
     private var peerObservers: [(Int) -> Void] = []
 
     #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
@@ -30,6 +31,9 @@ final class NearbyLink {
         }
         peers.onAid = { [weak self] packet in
             self?.onAid?(packet)
+        }
+        peers.onBucket = { [weak self] envelope in
+            self?.onBucket?(envelope)
         }
         peers.onPeerCount = { [weak self] count in
             self?.peerObservers.forEach { $0(count) }
@@ -88,6 +92,14 @@ final class NearbyLink {
         peers.send(packet)
         #else
         _ = packet
+        #endif
+    }
+
+    func send(_ envelope: BucketEnvelope) {
+        #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
+        peers.send(envelope)
+        #else
+        _ = envelope
         #endif
     }
 }

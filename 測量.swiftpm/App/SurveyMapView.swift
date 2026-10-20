@@ -44,6 +44,7 @@ struct SurveyMapView: UIViewRepresentable {
         context.coordinator.syncReach(on: map, field: field)
         context.coordinator.syncCrew(on: map, field: field)
         context.coordinator.syncAid(on: map, field: field)
+        context.coordinator.syncDisaster(on: map, field: field)
         context.coordinator.syncHeat(on: map, field: field)
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
@@ -76,6 +77,9 @@ struct SurveyMapView: UIViewRepresentable {
         private var crewKey = ""
         private var aidAnnotations: [AidAnnotation] = []
         private var aidKey = ""
+        private var disasterAnnotations: [MKAnnotation] = []
+        private var disasterOverlays: [MKOverlay] = []
+        private var disasterKey = ""
         private var heatOverlays: [MKOverlay] = []
         private var heatKey = ""
         private var mapPick = false
@@ -241,6 +245,63 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }
 
+        func syncDisaster(on map: MKMapView, field: FieldModel) {
+            let crewIDs = Set(field.crew.peers.map(\.id))
+            let peers = field.disasterPeers.filter { !crewIDs.contains($0.deviceID) && $0.deviceID != field.crew.deviceID }
+            let key = field.disasterSites.map { "\($0.id.uuidString):\($0.latitudeDegrees):\($0.longitudeDegrees)" }.joined(separator: "|")
+                + "#"
+                + field.disasterSegments.map { segment in
+                    let points = segment.points.map { "\($0.latitudeDegrees),\($0.longitudeDegrees)" }.joined(separator: ";")
+                    return "\(segment.author):\(segment.state.rawValue):\(points)"
+                }.joined(separator: "|")
+                + "#"
+                + peers.map { "\($0.deviceID):\($0.latitudeDegrees):\($0.longitudeDegrees)" }.joined(separator: "|")
+            if key == disasterKey { return }
+            disasterKey = key
+            if !disasterAnnotations.isEmpty {
+                map.removeAnnotations(disasterAnnotations)
+                disasterAnnotations = []
+            }
+            if !disasterOverlays.isEmpty {
+                map.removeOverlays(disasterOverlays)
+                disasterOverlays = []
+            }
+            for site in field.disasterSites {
+                disasterAnnotations.append(DisasterSiteAnnotation(site: site))
+            }
+            for position in peers {
+                disasterAnnotations.append(DisasterPeerAnnotation(position: position))
+            }
+            for segment in field.disasterSegments {
+                if segment.points.count >= 2 {
+                    var coordinates = segment.points.map {
+                        CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
+                    }
+                    let line = ReachLineOverlay(coordinates: &coordinates, count: coordinates.count)
+                    line.stroke = segment.state == .open ? SurveyUIColor.green : SurveyUIColor.red
+                    disasterOverlays.append(line)
+                }
+                if (segment.points.count == 1 || segment.state == .closed), let point = segment.points.last {
+                    disasterAnnotations.append(PassageMarkAnnotation(point: point, state: segment.state, author: segment.author))
+                }
+            }
+            if !disasterAnnotations.isEmpty {
+                map.addAnnotations(disasterAnnotations)
+            }
+            if !disasterOverlays.isEmpty {
+                map.addOverlays(disasterOverlays, level: .aboveLabels)
+            }
+        }
+
+        private static func disasterColor(_ kind: DisasterKind) -> UIColor {
+            switch kind {
+            case .collapse, .roadCut: return SurveyUIColor.red
+            case .flood: return SurveyUIColor.blue
+            case .bridge, .sediment: return SurveyUIColor.amber
+            case .other: return SurveyUIColor.grey
+            }
+        }
+
         private static func reachColor(_ coverage: ReachCoverage?) -> UIColor {
             switch coverage {
             case .inside, .onRadius: return SurveyUIColor.green
@@ -377,6 +438,39 @@ struct SurveyMapView: UIViewRepresentable {
                 marker.annotation = point
                 marker.configure(title: point.title ?? point.pointID, selected: point.pointID == selectedControlID)
                 return marker
+            }
+            if let site = annotation as? DisasterSiteAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "disaster-site")
+                    ?? MKMarkerAnnotationView(annotation: site, reuseIdentifier: "disaster-site")
+                view.annotation = site
+                if let marker = view as? MKMarkerAnnotationView {
+                    marker.markerTintColor = Self.disasterColor(site.kind)
+                    marker.glyphText = String(site.kind.label.prefix(1))
+                    marker.titleVisibility = .visible
+                }
+                return view
+            }
+            if let passage = annotation as? PassageMarkAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "disaster-pass")
+                    ?? MKMarkerAnnotationView(annotation: passage, reuseIdentifier: "disaster-pass")
+                view.annotation = passage
+                if let marker = view as? MKMarkerAnnotationView {
+                    marker.markerTintColor = passage.state == .open ? SurveyUIColor.green : SurveyUIColor.red
+                    marker.glyphText = passage.state == .open ? "通" : "止"
+                    marker.titleVisibility = .visible
+                }
+                return view
+            }
+            if let peer = annotation as? DisasterPeerAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "disaster-peer")
+                    ?? MKMarkerAnnotationView(annotation: peer, reuseIdentifier: "disaster-peer")
+                view.annotation = peer
+                if let marker = view as? MKMarkerAnnotationView {
+                    marker.markerTintColor = SurveyUIColor.blue
+                    marker.glyphText = "人"
+                    marker.titleVisibility = .visible
+                }
+                return view
             }
             if let aid = annotation as? AidAnnotation {
                 let view = mapView.dequeueReusableAnnotationView(withIdentifier: "aid-pin")
