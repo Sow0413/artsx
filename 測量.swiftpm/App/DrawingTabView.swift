@@ -699,6 +699,17 @@ struct DrawingTabView: View {
                     Button("AR位置出し") { field.showsARStakeout = true }
                         .buttonStyle(SurveyPlainButton())
                     HStack(spacing: 8) {
+                        ForEach(StakeoutSpeechStyle.allCases, id: \.self) { style in
+                            Button(style.label) { field.setStakeoutSpeech(style) }
+                                .buttonStyle(.plain)
+                                .font(SurveyType(16, .heavy))
+                                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                                .background(field.stakeoutSpeechStyle.style == style ? SurveyColor.blue : SurveyColor.card)
+                                .foregroundStyle(field.stakeoutSpeechStyle.style == style ? SurveyColor.onAccent : SurveyColor.text)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                    }
+                    HStack(spacing: 8) {
                         ForEach(StakeoutUnit.allCases, id: \.self) { unit in
                             Button(unit.label) { field.setStakeoutUnit(unit) }
                                 .buttonStyle(.plain)

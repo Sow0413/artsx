@@ -182,7 +182,7 @@ struct RootView: View {
     }
 }
 
-/// 地図と図面で、位置出しの文が変わったときだけ読む。オペ画面では読まない。実機の声は未確認。
+/// 地図と図面で、画面の上を前にした方向が変わったときだけ読む。オペ画面では読まない。実機の声は未確認。
 private struct StakeoutSpeaker: View {
     @ObservedObject var field: FieldModel
     @State private var spoken = ""
@@ -192,12 +192,16 @@ private struct StakeoutSpeaker: View {
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
             .onChange(of: phrase) { _, next in
+                if let utterance = field.stakeoutUtterance, utterance.mode != field.stakeoutSpeechMode {
+                    field.stakeoutSpeechMode = utterance.mode
+                }
+                guard field.tab == .map || field.tab == .drawing else { return }
                 guard let next, next != spoken else {
                     if next == nil { StakeoutVoice.stop() }
                     return
                 }
                 spoken = next
-                StakeoutVoice.say(next)
+                StakeoutVoice.say(field.stakeoutUtterance?.speech ?? next)
             }
             .onChange(of: field.tab) { _, tab in
                 if tab == .seat {
@@ -209,7 +213,7 @@ private struct StakeoutSpeaker: View {
 
     private var phrase: String? {
         guard field.tab == .map || field.tab == .drawing else { return nil }
-        return field.stakeoutGuide?.speech
+        return field.stakeoutUtterance?.directionKey
     }
 }
 

@@ -83,6 +83,8 @@ final class FieldModel: ObservableObject {
     @Published var showsARStakeout = false
     @Published var pace = PaceProfile.load()
     @Published var stakeoutUnit = StakeoutPacePreference.load()
+    @Published var stakeoutSpeechStyle = StakeoutSpeechPreference.load()
+    @Published var stakeoutSpeechMode = ARGuidanceMode.augmented
     @Published var arHandoff = ARHandoffPreference.load()
     @Published private(set) var walkMode: WalkMode = .gnss
     @Published private(set) var bridgeFix: WalkFix?
@@ -1015,7 +1017,7 @@ final class FieldModel: ObservableObject {
                 latitude2: targetLatitude,
                 longitude2: targetLongitude
               ) else { return nil }
-        let facing = ThreatBearing.facing(courseDegrees: here.courseDegrees, headingDegrees: here.headingDegrees)
+        let facing = StakeoutSpeech.screenForward(headingDegrees: here.headingDegrees)
         return StakeoutPace.guide(
             distanceMeters: inverse.distanceMeters,
             azimuthDegrees: inverse.azimuthDegrees,
@@ -1026,9 +1028,41 @@ final class FieldModel: ObservableObject {
         )
     }
 
+    /// 画面の上を前にした短い声。数字は、数値も読むときだけ足す。オペ画面では使わない。
+    var stakeoutUtterance: StakeoutUtterance? {
+        guard let inspection = drawing.inspection,
+              let targetLatitude = inspection.latitudeDegrees,
+              let targetLongitude = inspection.longitudeDegrees,
+              let here = navigationReading.position,
+              here.isPlottable,
+              let inverse = GRS80Geodesic.inverse(
+                latitude1: here.latitudeDegrees,
+                longitude1: here.longitudeDegrees,
+                latitude2: targetLatitude,
+                longitude2: targetLongitude
+              ) else { return nil }
+        return StakeoutSpeech.utterance(
+            distanceMeters: inverse.distanceMeters,
+            azimuthDegrees: inverse.azimuthDegrees,
+            headingDegrees: here.headingDegrees,
+            style: stakeoutSpeechStyle.style,
+            strideMeters: pace.strideMeters,
+            unit: stakeoutUnit.unit,
+            current: stakeoutSpeechMode,
+            switchMeters: arHandoff.meters,
+            precision: StakeoutPrecision.decide(drawing.stakeoutAccuracy)
+        )
+    }
+
     func setStakeoutUnit(_ unit: StakeoutUnit) {
         let preference = StakeoutPacePreference(unit: unit)
         stakeoutUnit = preference
+        preference.save()
+    }
+
+    func setStakeoutSpeech(_ style: StakeoutSpeechStyle) {
+        let preference = StakeoutSpeechPreference(style: style)
+        stakeoutSpeechStyle = preference
         preference.save()
     }
 

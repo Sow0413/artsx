@@ -73,11 +73,6 @@ struct ARStakeoutSheet: View {
             model.mode = next
             ARHandoffCue.play()
         }
-        .onChange(of: picture?.speech) { _, speech in
-            if picture?.numeric == true, let speech {
-                StakeoutVoice.say(speech)
-            }
-        }
     }
 
     private var camera: some View {
@@ -196,6 +191,20 @@ struct ARStakeoutSheet: View {
                     .foregroundStyle(SurveyColor.text)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
+            HStack(spacing: 8) {
+                ForEach(StakeoutSpeechStyle.allCases, id: \.self) { style in
+                    Button(style.label) { field.setStakeoutSpeech(style) }
+                        .buttonStyle(.plain)
+                        .font(SurveyType(16, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(field.stakeoutSpeechStyle.style == style ? SurveyColor.blue : SurveyColor.background)
+                        .foregroundStyle(field.stakeoutSpeechStyle.style == style ? SurveyColor.onAccent : SurveyColor.text)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+            Text("声は画面の上を前にします。方向が変わったときだけです。")
+                .font(SurveyType(14, .semibold))
+                .foregroundStyle(SurveyColor.muted)
             Text("切替 \(String(format: "%g", field.arHandoff.meters))m。\(String(format: "%g", field.arHandoff.resumeMeters))mでARに戻ります。")
                 .font(SurveyType(15, .heavy))
             HStack(spacing: 8) {
@@ -262,7 +271,7 @@ struct ARStakeoutSheet: View {
 
     private var facing: Double? {
         let position = field.navigationReading.position
-        return ThreatBearing.facing(courseDegrees: position?.courseDegrees, headingDegrees: position?.headingDegrees)?.degrees
+        return StakeoutSpeech.screenForward(headingDegrees: position?.headingDegrees)
     }
 
     private var tap: some Gesture {
