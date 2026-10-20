@@ -389,7 +389,6 @@ public enum BucketKind: String, Codable, Sendable {
     case site
     case passage
     case radio
-    case beacon
 
     /// 小さいほど先に送る。SOS が最優先。
     public var relayRank: Int {
@@ -397,10 +396,9 @@ public enum BucketKind: String, Codable, Sendable {
         case .sos: return 0
         case .radio: return 1
         case .text: return 2
-        case .beacon: return 3
-        case .position: return 4
-        case .site: return 5
-        case .passage: return 6
+        case .position: return 3
+        case .site: return 4
+        case .passage: return 5
         }
     }
 }
@@ -435,7 +433,6 @@ public struct BucketEnvelope: Codable, Equatable, Sendable, Identifiable {
     public var site: DisasterSite?
     public var passage: PassageSample?
     public var radio: RadioPacket?
-    public var beacon: RepeaterBeacon?
 
     public init(
         id: UUID,
@@ -450,8 +447,7 @@ public struct BucketEnvelope: Codable, Equatable, Sendable, Identifiable {
         text: DisasterText? = nil,
         site: DisasterSite? = nil,
         passage: PassageSample? = nil,
-        radio: RadioPacket? = nil,
-        beacon: RepeaterBeacon? = nil
+        radio: RadioPacket? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -466,7 +462,6 @@ public struct BucketEnvelope: Codable, Equatable, Sendable, Identifiable {
         self.site = site
         self.passage = passage
         self.radio = radio
-        self.beacon = beacon
     }
 }
 
@@ -481,7 +476,6 @@ public enum BucketRelay {
         case .text: return 6 * 60 * 60
         case .site, .passage: return 24 * 60 * 60
         case .radio: return 2 * 60
-        case .beacon: return 2 * 60
         }
     }
 
@@ -498,8 +492,7 @@ public enum BucketRelay {
         text: DisasterText? = nil,
         site: DisasterSite? = nil,
         passage: PassageSample? = nil,
-        radio: RadioPacket? = nil,
-        beacon: RepeaterBeacon? = nil
+        radio: RadioPacket? = nil
     ) -> BucketEnvelope {
         BucketEnvelope(
             id: id,
@@ -514,8 +507,7 @@ public enum BucketRelay {
             text: text,
             site: site,
             passage: passage,
-            radio: radio,
-            beacon: beacon
+            radio: radio
         )
     }
 }
@@ -623,8 +615,6 @@ extension BucketEnvelope {
             return passage != nil
         case .radio:
             return radio != nil
-        case .beacon:
-            return beacon != nil
         }
     }
 }

@@ -106,23 +106,9 @@ final class FieldModel: ObservableObject {
     @Published private(set) var disasterPending = 0
     @Published private(set) var disasterMessage: String?
     @Published var showsDisaster = false
-    @Published var repeaterMode = false
-    @Published var repeaterDimmed = false
-    @Published var loraCertified = false
-    @Published private(set) var repeaterInstall: RepeaterInstall?
-    @Published private(set) var repeaterLinks: [RepeaterLink] = []
-    @Published private(set) var repeaterBattery: Int?
-    @Published private(set) var repeaterCharging = false
-    @Published private(set) var loraStatus = "LoRaは未接続です。"
-    @Published var showsRepeater = false
+    @Published private(set) var meshBattery: Int?
+    @Published private(set) var meshCharging = false
     @Published private(set) var meshPresence: MeshDuty.Presence = .active
-    var repeaterBoard = RepeaterBoard()
-    var loraOutbox = LoRaOutbox()
-    var repeaterLoadedProject: String?
-    var lastRepeaterBeacon: Date?
-    let lora = LoRaLink()
-    var savedBrightness: Double?
-    var lastLoRaPosition: Date?
     @Published private(set) var firstEpisode: FirstEpisode?
     @Published private(set) var firstView: FirstView?
     @Published private(set) var aidArrows: [AidArrow] = []
@@ -976,16 +962,6 @@ final class FieldModel: ObservableObject {
                 self?.relayRadio(packet)
             }
         }
-        lora.onStatus = { [weak self] text in
-            DispatchQueue.main.async {
-                self?.loraStatus = text
-            }
-        }
-        lora.onText = { [weak self] text in
-            DispatchQueue.main.async {
-                self?.ingestLoRaLine(text)
-            }
-        }
         crew.arm()
         nearby.onFall = { [weak self] notice in
             DispatchQueue.main.async {
@@ -1543,8 +1519,8 @@ final class FieldModel: ObservableObject {
         aidRelay.isReachable = radio.relayReachable
         aidRelay.flush()
         flushDisasterSync()
+        readMeshBattery()
         relayDisasterHeld(now: now)
-        maintainRepeater(now: now)
         let results = (try? incidents.closeDue(
             projectName: project.name,
             at: drawing.projectsRoot,

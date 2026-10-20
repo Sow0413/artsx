@@ -19,7 +19,6 @@ final class RadioController: ObservableObject {
     /// 受信中の話者を、空間オーディオの位置に変える。方向不明なら nil。
     var spacePoint: () -> TalkPoint? = { nil }
     var onRelay: ((RadioPacket) -> Void)?
-    var suppressPlayback = false
     private var heardRadio: [String] = []
 
     #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
@@ -166,7 +165,7 @@ final class RadioController: ObservableObject {
     }
 
     private func playIncoming(_ data: Data) {
-        guard spaceAudio, !suppressPlayback else { return }
+        guard spaceAudio else { return }
         if let point = spacePoint() {
             space.place(point)
         } else {

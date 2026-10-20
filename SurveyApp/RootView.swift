@@ -69,11 +69,6 @@ struct RootView: View {
         .onAppear { field.start() }
         .onDisappear { field.stop() }
         .modifier(MeshPresenceWatcher(field: field))
-        .overlay {
-            if field.repeaterMode && field.repeaterDimmed {
-                RepeaterCover(field: field)
-            }
-        }
     }
 }
 
