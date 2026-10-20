@@ -3,6 +3,7 @@ import SwiftUI
 import SurveyCore
 
 struct RootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var field: FieldModel
 
     init(
@@ -30,6 +31,14 @@ struct RootView: View {
             }
             if field.extras.sharesLocation {
                 LocationShareBanner(field: field)
+            }
+            if field.gnssState == .connecting || field.gnssState == .reconnecting {
+                Text(field.gnssState.label)
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
             }
             if field.tab != .seat {
                 AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
@@ -73,6 +82,13 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .onAppear { field.start() }
         .onDisappear { field.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                field.resumeGNSS()
+            } else {
+                field.pauseGNSS()
+            }
+        }
         .modifier(MeshPresenceWatcher(field: field))
         .sheet(isPresented: $field.showsPrivacy) {
             LocationPrivacySheet(field: field)

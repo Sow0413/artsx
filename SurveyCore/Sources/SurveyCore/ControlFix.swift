@@ -35,6 +35,14 @@ public struct ControlFixSession: Sendable, Equatable {
 
     public init() {}
 
+    /// 強制終了の直前まで続いていた FIX。秒数は開始時刻から数え直す。
+    public init(restoring began: Date?, latest: GeodeticPosition?, epochCount: Int, restarted: Bool) {
+        fixBeganAt = began
+        self.latest = latest
+        self.epochCount = epochCount
+        self.restarted = restarted
+    }
+
     public mutating func observe(_ position: GeodeticPosition, at time: Date) {
         latest = position
         if position.isTrustedRTKFix {
@@ -144,6 +152,10 @@ public enum SiteCoordinateBook {
     public static let fileName = "座標簿.json"
 
     public static func load(from directory: URL) -> [CoordinateBookEntry] {
+        if FieldJournal.exists(in: directory) {
+            let stored = FieldJournal(directory: directory).bookEntries()
+            if !stored.isEmpty { return stored }
+        }
         let url = directory.appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: url) else { return [] }
         let decoder = JSONDecoder()
@@ -152,12 +164,6 @@ public enum SiteCoordinateBook {
     }
 
     public static func append(_ entry: CoordinateBookEntry, to directory: URL) throws {
-        var entries = load(from: directory)
-        entries.append(entry)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(entries).write(to: directory.appendingPathComponent(fileName), options: .atomic)
+        try FieldJournal(directory: directory).upsertBook(entry)
     }
 }

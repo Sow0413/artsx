@@ -40,10 +40,19 @@ struct MeasureLogView: View {
                         .foregroundStyle(SurveyColor.amber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if field.gnssAvailable {
+                    gnssSection
+                }
                 if field.observations.observations.isEmpty {
-                    Text("まだ点がありません。")
+                    Text(field.observationCount == 0 ? "まだ点がありません。" : "点は端末に残しています。")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(SurveyColor.muted)
+                }
+                if field.observationCount > field.observations.observations.count {
+                    Text("画面には新しい \(field.observations.observations.count) 点だけ出します。ほか \(field.observationCount - field.observations.observations.count) 点は端末に残しています。")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 ForEach(field.observations.observations.reversed()) { observation in
                     observationRow(observation)
@@ -100,6 +109,36 @@ struct MeasureLogView: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var gnssSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("GNSS")
+                .font(.system(size: 18, weight: .heavy))
+            Text(field.gnssState == .idle ? "受信機を選ぶと、切れたときにつなぎ直します。" : field.gnssState.label)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(field.gnssState == .reconnecting ? SurveyColor.amber : SurveyColor.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: field.scanGNSS) {
+                Text("近くの GNSS を探す")
+                    .font(.system(size: 16, weight: .heavy))
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(SurveyColor.card)
+                    .foregroundStyle(SurveyColor.text)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            ForEach(field.gnssChoices.prefix(8)) { choice in
+                Button {
+                    field.chooseGNSS(choice.id)
+                } label: {
+                    Text(choice.name)
+                        .font(.system(size: 16, weight: .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private var prefixBinding: Binding<String> {

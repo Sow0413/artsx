@@ -72,6 +72,8 @@ final class DrawingSession: ObservableObject {
     /// 図面の読込。解析が終わる前から、プロジェクト自体は使える。
     @Published private(set) var importProgress: WorkProgress?
 
+    var onProjectCommitted: (() -> Void)?
+
     let projectsRoot: URL
     private var reference: (latitude: Double, longitude: Double, name: String)?
     private var referenceStamp: (latitude: Double, longitude: Double)?
@@ -148,6 +150,7 @@ final class DrawingSession: ObservableObject {
         applyCab(from: selected)
         refresh()
         refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
+        onProjectCommitted?()
         guard let drawing = selected.drawings.last else { return }
         let drawingName = drawing.fileName
         let projectName = selected.name
@@ -233,6 +236,7 @@ final class DrawingSession: ObservableObject {
                 DispatchQueue.main.async {
                     guard generation == self.loadGeneration else { return }
                     self.project = draft
+                    self.onProjectCommitted?()
                     if ext == "sfc" { self.axis = .cadEastNorth }
                     self.reload()
                     self.adopt(parsed, fileName: stored)

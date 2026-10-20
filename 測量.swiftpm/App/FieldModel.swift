@@ -131,6 +131,9 @@ final class FieldModel: ObservableObject {
     @Published private(set) var privacyMessage: String?
     @Published var extras: ExtraSwitches
     @Published var showsExtras = false
+    @Published private(set) var gnssState: GNSSLinkState = .idle
+    @Published private(set) var gnssChoices: [GNSSChoice] = []
+    @Published private(set) var observationCount = 0
     @Published private(set) var incidentStatRows: [IncidentStatRow] = []
     @Published private(set) var sealedIncidents: [SealedIncidentRow] = []
     @Published private(set) var incidentHeat: [IncidentHeatCell] = []
@@ -139,7 +142,11 @@ final class FieldModel: ObservableObject {
     private var incidentTimer: Timer?
     private var restoredIncidentProject: String?
     let controlPoints: [ControlPoint]
+    let journal: FieldJournal
+    let gnss: GNSSLink
+    let gnssAvailable: Bool
     private var prefixStore: PointPrefixStore
+    private var lastFixSave = Date.distantPast
     private let source: any PositionSource
     private var camera: MapCameraFollow
     private var readTask: Task<Void, Never>?
@@ -172,7 +179,14 @@ final class FieldModel: ObservableObject {
         self.controlPointNotice = controlPointNotice
         self.workCatalog = WorkCatalog.load(from: siteDirectory)
         self.instrumentTrust = InstrumentTrust.load(from: siteDirectory)
-        self.observations = FieldObservationLog.load(from: siteDirectory)
+        let journal = FieldJournal(directory: siteDirectory)
+        journal.importLegacyIfNeeded()
+        self.journal = journal
+        self.observations = FieldObservationLog(observations: journal.recent())
+        self.observationCount = journal.count()
+        let gnssBox = GNSSRadioBox.make()
+        self.gnss = gnssBox.link
+        self.gnssAvailable = gnssBox.available
         self.correctionStore = CorrectionStore.load(from: siteDirectory)
         let prefixes = PointPrefixStore.load(from: siteDirectory)
         self.prefixStore = prefixes
@@ -230,6 +244,34 @@ final class FieldModel: ObservableObject {
         }
         HiyariHook.fire = { [weak self] in
             self?.recordIncident(trigger: .manual)
+        }
+        drawing.onProjectCommitted = { [weak self] in
+            self?.rememberSession()
+        }
+        $tab.dropFirst().sink { [weak self] _ in
+            self?.rememberSession()
+        }.store(in: &cancellables)
+        let saved = journal.session()
+        if let tab = FieldTab(rawValue: saved.tab) {
+            self.tab = tab
+        }
+        if let workID = saved.workID, workCatalog.works.contains(where: { $0.id == workID }) {
+            workCatalog = workCatalog.selecting(workID)
+        }
+        controlFix = saved.controlFix
+        if let name = saved.projectName, let project = drawing.projects.first(where: { $0.name == name }) {
+            drawing.select(project)
+        }
+        gnss.onState = { [weak self] state in
+            self?.gnssState = state
+        }
+        gnss.onDiscover = { [weak self] choice in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if !self.gnssChoices.contains(where: { $0.id == choice.id }) {
+                    self.gnssChoices.append(choice)
+                }
+            }
         }
     }
 
@@ -849,6 +891,7 @@ final class FieldModel: ObservableObject {
     func selectWork(_ id: String) {
         workCatalog = workCatalog.selecting(id)
         try? workCatalog.save(to: siteDirectory)
+        rememberSession()
     }
 
     func applyWorkEdits(_ works: [WorkRequirement], safetyFactor: Double) {
@@ -930,8 +973,7 @@ final class FieldModel: ObservableObject {
             appliedCorrectionID: shifted == nil ? nil : correction?.id,
             condition: condition
         )
-        observations = observations.appending(observation)
-        try? observations.save(to: siteDirectory)
+        store(observation)
         remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
         captureMessage = shifted == nil
             ? "\(observation.name)を残しました。下見の座標は捨てません。"
@@ -970,8 +1012,7 @@ final class FieldModel: ObservableObject {
             fixDurationSeconds: fix.fixDurationSeconds,
             condition: condition
         )
-        observations = observations.appending(observation)
-        try? observations.save(to: siteDirectory)
+        store(observation)
         remember(CoordinateBookIndex.entry(from: observation, kind: "基準点"))
         let satellites = condition.satelliteNote
         let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
@@ -982,8 +1023,10 @@ final class FieldModel: ObservableObject {
         guard let source = observations.observations.first(where: { $0.id == observationID }),
               let target = observations.observations.first(where: { $0.id == targetID }),
               source.id != target.id else { return }
-        observations = observations.replacing(source.rebase(onto: target.captured))
-        try? observations.save(to: siteDirectory)
+        let replaced = source.rebase(onto: target.captured)
+        observations = observations.replacing(replaced)
+        try? journal.commit(replaced)
+        observationCount = journal.count()
         captureMessage = "\(source.name)を\(target.name)の座標に乗せ替えました。取得時の精度は残しています。"
     }
 
@@ -1045,6 +1088,7 @@ final class FieldModel: ObservableObject {
             self?.closeIncidents(now: Date())
         }
         source.start()
+        resumeGNSS()
         if readTask == nil {
             let readings = source.readings
             readTask = Task { [weak self] in
@@ -1071,6 +1115,7 @@ final class FieldModel: ObservableObject {
     }
 
     func stop() {
+        pauseGNSS()
         source.stop()
     }
 
@@ -1246,11 +1291,13 @@ final class FieldModel: ObservableObject {
     func chooseReturn(_ choice: ClosureChoice) {
         guard let start = correctionStore.active, let comparison, let point = campaignPoint, start.pointID == point.id else { return }
         let endAt = rounds.last?.samples.last?.loggedAt ?? Date()
+        let span = journal.between(start.acquiredAt, and: endAt)
+        let sourceRows = span.isEmpty ? observations.observations : span
         let updated: [FieldObservation]
         switch choice {
         case .apportion:
             updated = ClosureAdjustmentMath.apportion(
-                observations: observations.observations,
+                observations: sourceRows,
                 start: start,
                 end: comparison.overall,
                 endAt: endAt
@@ -1258,14 +1305,17 @@ final class FieldModel: ObservableObject {
             benchmarkMessage = "途中の点に、時刻の割合で差を振りました。元の座標は残しています。"
         case .resurvey:
             updated = ClosureAdjustmentMath.markResurvey(
-                observations: observations.observations,
+                observations: sourceRows,
                 start: start,
                 endAt: endAt
             )
             benchmarkMessage = "途中の点に要再測の印を付けました。元の座標は残しています。"
         }
-        observations = FieldObservationLog(observations: updated)
-        try? observations.save(to: siteDirectory)
+        for (before, after) in zip(sourceRows, updated) where before != after {
+            try? journal.commit(after)
+        }
+        observations = FieldObservationLog(observations: journal.recent())
+        observationCount = journal.count()
         let check = ReturnCheck.compare(start: start, end: comparison.overall)
         correctionStore.lastReturnCheck = ReturnCheckRecord(
             pointID: point.id,
@@ -1400,7 +1450,8 @@ final class FieldModel: ObservableObject {
     private func occupiedNames() -> Set<String> {
         var names = Set(observations.observations.map(\.name))
         names.formUnion(controlPoints.map(\.name))
-        names.formUnion(SiteCoordinateBook.load(from: siteDirectory).map(\.name))
+        names.formUnion(journal.names())
+        names.formUnion(journal.bookNames())
         if let project = drawing.project {
             names.formUnion(ProjectStore.coordinateBookNames(projectName: project.name, at: drawing.projectsRoot))
         }
@@ -1478,11 +1529,12 @@ final class FieldModel: ObservableObject {
         let projectName = drawing.project?.name
         let root = drawing.projectsRoot
         let site = siteDirectory
-        let observations = observations.observations
         let known = controlPoints
-        let siteBook = SiteCoordinateBook.load(from: site)
+        let journal = journal
         exportMessage = "書き出しています。"
         DispatchQueue.global(qos: .userInitiated).async {
+            let observations = journal.allObservations()
+            let siteBook = journal.bookEntries()
             let entries: [CoordinateBookEntry]
             if let projectName {
                 entries = ProjectStore.filteredCoordinates(
@@ -1531,10 +1583,56 @@ final class FieldModel: ObservableObject {
     }
 
     private func remember(_ entry: CoordinateBookEntry) {
-        try? SiteCoordinateBook.append(entry, to: siteDirectory)
+        try? journal.upsertBook(entry)
         if let project = drawing.project {
             try? ProjectStore.saveCoordinate(entry, projectName: project.name, at: drawing.projectsRoot)
         }
+    }
+
+    private func store(_ observation: FieldObservation) {
+        observations = observations.appending(observation)
+        if observations.observations.count > FieldJournal.recentLimit {
+            observations = FieldObservationLog(observations: Array(observations.observations.suffix(FieldJournal.recentLimit)))
+        }
+        try? journal.commit(observation)
+        observationCount = journal.count()
+        rememberSession()
+    }
+
+    private func rememberSession() {
+        try? journal.save(FieldSession(
+            tab: tab.rawValue,
+            projectName: drawing.project?.name,
+            workID: workCatalog.selected.id,
+            fixBeganAt: controlFix.fixBeganAt,
+            fixEpochCount: controlFix.epochCount,
+            fixRestarted: controlFix.restarted,
+            fixPosition: controlFix.latest
+        ))
+    }
+
+    private func persistFix(force: Bool) {
+        let now = Date()
+        if !force, now.timeIntervalSince(lastFixSave) < 1 { return }
+        lastFixSave = now
+        rememberSession()
+    }
+
+    func resumeGNSS() {
+        gnss.resume()
+    }
+
+    func pauseGNSS() {
+        gnss.pause()
+    }
+
+    func scanGNSS() {
+        gnssChoices = []
+        gnss.scan()
+    }
+
+    func chooseGNSS(_ id: String) {
+        gnss.choose(id)
     }
 
     private func apply(_ reading: PositionReading) {
@@ -1544,6 +1642,8 @@ final class FieldModel: ObservableObject {
             let transition = StageLadder.step(held: stageTransition.stage, reported: position)
             stageTransition = transition
             epochWatch.observe(position)
+            let began = controlFix.fixBeganAt
+            let wasRestarted = controlFix.restarted
             controlFix.observe(position, at: position.timestamp)
             if wasRecording && !StageGate.allowsRecording(workID: "boundary", stage: transition.stage) {
                 if controlFix.canRecord {
@@ -1551,6 +1651,7 @@ final class FieldModel: ObservableObject {
                 }
                 captureMessage = Self.stageDroppedRecording
             }
+            persistFix(force: controlFix.fixBeganAt != began || controlFix.restarted != wasRestarted)
         }
         if let position = workingReading.position, position.isPlottable {
             drawing.noteReference(

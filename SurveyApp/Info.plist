@@ -26,6 +26,10 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>GNSS 受信機とつなぐために使います。切れたら、アプリが前面にあるあいだだけつなぎ直します。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>GNSS 受信機とつなぐために使います。切れたら、アプリが前面にあるあいだだけつなぎ直します。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>現在地と精度の円を地図に出すために使います。座標は端末内に WGS84/ITRF で保持します。</string>
 	<key>NSMotionUsageDescription</key>

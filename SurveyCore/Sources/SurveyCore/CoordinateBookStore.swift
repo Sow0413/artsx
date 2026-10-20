@@ -17,6 +17,17 @@ public enum CoordinateBookStore {
         FileManager.default.fileExists(atPath: fileURL(projectDirectory: projectDirectory).path)
     }
 
+    /// 強制終了のあとでも、コミット済みの行は WAL に残る。
+    public static func journalMode(projectDirectory: URL) -> String {
+        guard exists(projectDirectory: projectDirectory), let db = try? open(projectDirectory) else { return "" }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA journal_mode", -1, &statement, nil) == SQLITE_OK else { return "" }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW, let raw = sqlite3_column_text(statement, 0) else { return "" }
+        return String(cString: raw)
+    }
+
     public static func upsert(_ entries: [CoordinateBookEntry], projectDirectory: URL) throws {
         guard !entries.isEmpty else { return }
         let db = try open(projectDirectory)
