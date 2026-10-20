@@ -36,6 +36,14 @@ struct SurveyMapView: UIViewRepresentable {
             points: field.visibleControlPoints,
             selectedID: field.selectedControlPointID
         )
+        context.coordinator.syncDrawing(
+            on: map,
+            paths: field.drawing.mapPaths,
+            revision: field.drawing.mapRevision
+        )
+        context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
+            field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
+        }
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
@@ -55,6 +63,10 @@ struct SurveyMapView: UIViewRepresentable {
         private var didSetInitialRegion = false
         private var applyingProgrammaticRegion = false
         private var wasFollowing = true
+        private var drawingLines: [MKPolyline] = []
+        private var drawingRevision = -1
+        private var mapPick = false
+        private var onMapTap: (Double, Double) -> Void = { _, _ in }
 
         func attach(field: FieldModel, map: MKMapView) {
             store = field.tiles
@@ -69,7 +81,39 @@ struct SurveyMapView: UIViewRepresentable {
             }
             if tileOverlay == nil {
                 installTiles(on: map)
+                let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+                tap.cancelsTouchesInView = false
+                map.addGestureRecognizer(tap)
             }
+        }
+
+        func setMapPick(_ enabled: Bool, handler: @escaping (Double, Double) -> Void) {
+            mapPick = enabled
+            onMapTap = handler
+        }
+
+        func syncDrawing(on map: MKMapView, paths: [GeographicPath], revision: Int) {
+            guard revision != drawingRevision else { return }
+            drawingRevision = revision
+            if !drawingLines.isEmpty {
+                map.removeOverlays(drawingLines)
+            }
+            drawingLines = paths.compactMap { path in
+                var coordinates = path.coordinates.map {
+                    CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
+                }
+                guard coordinates.count >= 2 else { return nil }
+                return MKPolyline(coordinates: &coordinates, count: coordinates.count)
+            }
+            if !drawingLines.isEmpty {
+                map.addOverlays(drawingLines, level: .aboveLabels)
+            }
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard mapPick, let map = gesture.view as? MKMapView else { return }
+            let coordinate = map.convert(gesture.location(in: map), toCoordinateFrom: map)
+            onMapTap(coordinate.latitude, coordinate.longitude)
         }
 
         func update(
@@ -118,6 +162,12 @@ struct SurveyMapView: UIViewRepresentable {
             if let tiles = overlay as? MKTileOverlay {
                 return MKTileOverlayRenderer(tileOverlay: tiles)
             }
+            if let line = overlay as? MKPolyline {
+                let renderer = MKPolylineRenderer(polyline: line)
+                renderer.strokeColor = SurveyUIColor.amber
+                renderer.lineWidth = 1.5
+                return renderer
+            }
             if let circle = overlay as? MKCircle {
                 let renderer = MKCircleRenderer(circle: circle)
                 let color = tone.circle
@@ -164,6 +214,10 @@ struct SurveyMapView: UIViewRepresentable {
             if let circle {
                 map.removeOverlay(circle)
                 map.addOverlay(circle, level: .aboveLabels)
+            }
+            if !drawingLines.isEmpty {
+                map.removeOverlays(drawingLines)
+                map.addOverlays(drawingLines, level: .aboveLabels)
             }
         }
 

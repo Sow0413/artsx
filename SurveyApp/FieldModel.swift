@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SurveyCore
 
@@ -60,6 +61,7 @@ final class FieldModel: ObservableObject {
     let tiles: TileStore
     let packDirectory: URL
     let siteDirectory: URL
+    let drawing: DrawingSession
     let controlPoints: [ControlPoint]
     private let source: any PositionSource
     private var camera: MapCameraFollow
@@ -69,6 +71,7 @@ final class FieldModel: ObservableObject {
     private var visibleBounds: GeoBounds?
     private var visibleZoom: Int?
     private var campaignPoint: ControlPoint?
+    private var cancellables: Set<AnyCancellable> = []
 
     init(
         source: any PositionSource,
@@ -88,11 +91,31 @@ final class FieldModel: ObservableObject {
         self.instrumentTrust = InstrumentTrust.load(from: siteDirectory)
         self.observations = FieldObservationLog.load(from: siteDirectory)
         self.correctionStore = CorrectionStore.load(from: siteDirectory)
+        self.drawing = DrawingSession(projectsRoot: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true))
         self.reading = .waiting
         self.camera = MapCameraFollow()
         self.viewport = MapViewportPolicy.japanOverview
         self.followUser = true
         self.tab = .map
+        drawing.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+    }
+
+    func beginDrawingMapPick() {
+        guard drawing.beginMapPick() else { return }
+        followUser = false
+        tab = .map
+    }
+
+    func cancelDrawingMapPick() {
+        drawing.cancelPick()
+        tab = .drawing
+    }
+
+    func completeDrawingMapPick(latitude: Double, longitude: Double) {
+        drawing.addTarget(kind: .map, latitude: latitude, longitude: longitude, label: "地図")
+        tab = .drawing
     }
 
     var badge: AccuracyBadgeModel {
@@ -134,7 +157,7 @@ final class FieldModel: ObservableObject {
         var catalog = workCatalog
         guard safetyFactor.isFinite, safetyFactor >= 1 else { return }
         catalog.optimisticSafetyFactor = safetyFactor
-        for work in works where work.horizontalMeters > 0, work.verticalMeters > 0 {
+        for work in works where work.horizontalMeters > 0 && work.verticalMeters > 0 {
             catalog = catalog.replacing(work)
         }
         workCatalog = catalog
@@ -538,6 +561,13 @@ final class FieldModel: ObservableObject {
 
     private func apply(_ reading: PositionReading) {
         self.reading = reading
+        if let position = workingReading.position, position.isPlottable {
+            drawing.noteReference(
+                latitude: position.latitudeDegrees,
+                longitude: position.longitudeDegrees,
+                name: "現在地"
+            )
+        }
         refreshVisibleControlPoints()
         guard followUser, let position = workingReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)

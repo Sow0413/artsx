@@ -8,6 +8,9 @@ struct MapTabView: View {
             SurveyMapView(field: field)
             VStack(spacing: 0) {
                 WorkBar(field: field)
+                if field.drawing.pick == .mapPoint {
+                    mapPickBanner
+                }
                 Spacer(minLength: 0)
                 bottomChrome
             }
@@ -52,6 +55,25 @@ struct MapTabView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             .frame(maxWidth: 640)
+    }
+
+    private var mapPickBanner: some View {
+        HStack(spacing: 12) {
+            Text("図面の点に対応する場所をタップ")
+                .font(.system(size: 15, weight: .heavy))
+                .foregroundStyle(SurveyColor.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("戻る") {
+                field.cancelDrawingMapPick()
+            }
+            .font(.system(size: 15, weight: .heavy))
+            .foregroundStyle(SurveyColor.amber)
+        }
+        .padding(12)
+        .background(SurveyColor.amberBackground.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
     }
 
     private var captureButton: some View {

@@ -46,10 +46,7 @@ struct RootView: View {
                     .allowsHitTesting(field.tab == .map)
                     .accessibilityHidden(field.tab != .map)
                 if field.tab == .drawing {
-                    PlaceholderTabView(
-                        title: "図面",
-                        message: "DXF を重ねて、2点で合わせる画面は次のスライスです。RTK Fix になるまで、合わせは緑にしません。"
-                    )
+                    DrawingTabView(field: field, drawing: field.drawing)
                 } else if field.tab == .measure {
                     MeasureLogView(field: field)
                 } else if field.tab == .export {
