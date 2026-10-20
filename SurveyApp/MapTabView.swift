@@ -14,15 +14,26 @@ struct MapTabView: View {
                         field.recenter()
                     }
                 }
-                DownloadBar(
-                    message: field.downloadMessage,
-                    isDownloading: field.isDownloading,
-                    onSave: field.downloadVisibleArea,
-                    onCancel: field.cancelDownload
-                )
-                LocationPanel(reading: field.reading)
-                    .frame(maxWidth: 560)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if field.selectedControlPoint != nil || field.benchmark != nil {
+                    BenchmarkCard(field: field)
+                        .frame(maxHeight: 360)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    BenchmarkHint(
+                        notice: field.controlPointNotice,
+                        loadedCount: field.controlPoints.count,
+                        visibleCount: field.visibleControlPoints.count
+                    )
+                    DownloadBar(
+                        message: field.downloadMessage,
+                        isDownloading: field.isDownloading,
+                        onSave: field.downloadVisibleArea,
+                        onCancel: field.cancelDownload
+                    )
+                    LocationPanel(reading: field.reading)
+                        .frame(maxWidth: 560)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 12)

@@ -38,20 +38,38 @@ final class FieldModel: ObservableObject {
     @Published private(set) var downloadMessage = "表示中の範囲を、圏外用に保存します。"
     @Published private(set) var savedAreaCount = 0
     @Published private(set) var offlineRevision = 0
+    @Published private(set) var visibleControlPoints: [ControlPoint] = []
+    @Published var selectedControlPointID: String?
+    @Published var benchmarkDurationSeconds: TimeInterval = BenchmarkPlan.defaultDurationSeconds
+    @Published private(set) var benchmark: BenchmarkRecorder?
+    @Published private(set) var benchmarkStatistics: BenchmarkStatistics?
+    @Published private(set) var benchmarkExportURL: URL?
+    @Published private(set) var benchmarkMessage: String?
+    @Published private(set) var controlPointNotice: String?
 
     let tiles: TileStore
     let packDirectory: URL
+    let controlPoints: [ControlPoint]
     private let source: any PositionSource
     private var camera: MapCameraFollow
     private var readTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
+    private var benchmarkTask: Task<Void, Never>?
     private var visibleBounds: GeoBounds?
     private var visibleZoom: Int?
 
-    init(source: any PositionSource, tiles: TileStore, packDirectory: URL) {
+    init(
+        source: any PositionSource,
+        tiles: TileStore,
+        packDirectory: URL,
+        controlPoints: [ControlPoint] = [],
+        controlPointNotice: String? = nil
+    ) {
         self.source = source
         self.tiles = tiles
         self.packDirectory = packDirectory
+        self.controlPoints = controlPoints
+        self.controlPointNotice = controlPointNotice
         self.reading = .waiting
         self.camera = MapCameraFollow()
         self.viewport = MapViewportPolicy.japanOverview
@@ -61,6 +79,19 @@ final class FieldModel: ObservableObject {
 
     var badge: AccuracyBadgeModel {
         AccuracyPolicy.badge(for: reading)
+    }
+
+    var selectedControlPoint: ControlPoint? {
+        controlPoints.first { $0.id == selectedControlPointID }
+    }
+
+    var isBenchmarkRunning: Bool {
+        benchmark != nil && benchmarkStatistics == nil
+    }
+
+    var benchmarkProgressLabel: String? {
+        guard let benchmark, isBenchmarkRunning else { return nil }
+        return "三角点で検証 \(benchmark.samples.count)/\(benchmark.plan.expectedCount)"
     }
 
     func start() {
@@ -87,6 +118,7 @@ final class FieldModel: ObservableObject {
                 }
             }
         }
+        refreshVisibleControlPoints()
     }
 
     func stop() {
@@ -108,6 +140,118 @@ final class FieldModel: ObservableObject {
     func noteVisible(bounds: GeoBounds, zoom: Int) {
         visibleBounds = bounds
         visibleZoom = zoom
+        refreshVisibleControlPoints()
+    }
+
+    func selectControlPoint(_ id: String) {
+        guard !isBenchmarkRunning else { return }
+        guard controlPoints.contains(where: { $0.id == id }) else { return }
+        if benchmarkStatistics != nil {
+            clearBenchmarkResults()
+        }
+        selectedControlPointID = id
+        benchmarkMessage = nil
+    }
+
+    func startBenchmark() {
+        guard !isBenchmarkRunning, let point = selectedControlPoint else { return }
+        benchmarkTask?.cancel()
+        benchmarkStatistics = nil
+        benchmarkExportURL = nil
+        benchmarkMessage = nil
+        benchmark = BenchmarkRecorder(
+            point: point,
+            plan: BenchmarkPlan(durationSeconds: benchmarkDurationSeconds, intervalSeconds: 1),
+            startedAt: Date()
+        )
+        benchmarkTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let finished = await MainActor.run { self?.pumpBenchmark() ?? true }
+                if finished || Task.isCancelled { break }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    func cancelBenchmark() {
+        benchmarkTask?.cancel()
+        benchmarkTask = nil
+        guard let recorder = benchmark else { return }
+        if recorder.samples.isEmpty {
+            benchmark = nil
+            benchmarkMessage = "位置が取れないので、記録を残せませんでした。"
+            return
+        }
+        benchmarkMessage = "中止しました。取れた\(recorder.samples.count)点で集計しています。"
+        finishBenchmark(recorder)
+    }
+
+    func dismissBenchmark() {
+        benchmarkTask?.cancel()
+        benchmarkTask = nil
+        clearBenchmarkResults()
+        selectedControlPointID = nil
+        benchmarkMessage = nil
+    }
+
+    private func pumpBenchmark() -> Bool {
+        guard var recorder = benchmark, benchmarkStatistics == nil else { return true }
+        let now = Date()
+        if recorder.isFinished(at: now) {
+            finishBenchmark(recorder)
+            return true
+        }
+        recorder.tick(reading: reading, now: now)
+        benchmark = recorder
+        return false
+    }
+
+    private func finishBenchmark(_ recorder: BenchmarkRecorder) {
+        benchmark = recorder
+        benchmarkTask = nil
+        guard let statistics = BenchmarkStatistics.make(point: recorder.point, samples: recorder.samples) else {
+            benchmark = nil
+            benchmarkMessage = "位置が取れないので、記録を残せませんでした。"
+            return
+        }
+        benchmarkStatistics = statistics
+        writeExport(recorder: recorder, statistics: statistics)
+        if benchmarkMessage == nil {
+            benchmarkMessage = "記録が終わりました。"
+        }
+    }
+
+    private func writeExport(recorder: BenchmarkRecorder, statistics: BenchmarkStatistics) {
+        let csv = BenchmarkCSV.render(recorder: recorder, statistics: statistics)
+        let safe = recorder.point.id.replacingOccurrences(of: "/", with: "-")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("sankakuten-\(safe).csv")
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            benchmarkExportURL = url
+        } catch {
+            benchmarkExportURL = nil
+            benchmarkMessage = "CSVを書き出せませんでした。"
+        }
+    }
+
+    private func clearBenchmarkResults() {
+        benchmark = nil
+        benchmarkStatistics = nil
+        benchmarkExportURL = nil
+    }
+
+    private func refreshVisibleControlPoints() {
+        let position = reading.position
+        let userIsPlottable = position?.isPlottable == true
+        let next = ControlPointCatalog.visible(
+            controlPoints,
+            userLatitude: userIsPlottable ? position?.latitudeDegrees : nil,
+            userLongitude: userIsPlottable ? position?.longitudeDegrees : nil,
+            bounds: visibleBounds
+        )
+        if next.map(\.id) != visibleControlPoints.map(\.id) {
+            visibleControlPoints = next
+        }
     }
 
     func downloadVisibleArea() {
@@ -202,6 +346,7 @@ final class FieldModel: ObservableObject {
 
     private func apply(_ reading: PositionReading) {
         self.reading = reading
+        refreshVisibleControlPoints()
         guard followUser, let position = reading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
     }

@@ -24,4 +24,5 @@ enum GeoMath {
     static func hyperbolicSine(_ value: Double) -> Double { sinh(value) }
     static func squareRoot(_ value: Double) -> Double { sqrt(value) }
     static func log2(_ value: Double) -> Double { log(value) / log(2) }
+    static func hypotenuse(_ x: Double, _ y: Double) -> Double { squareRoot(x * x + y * y) }
 }

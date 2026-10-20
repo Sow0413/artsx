@@ -5,8 +5,20 @@ import SurveyCore
 struct RootView: View {
     @StateObject private var field: FieldModel
 
-    init(source: any PositionSource, tiles: TileStore, packDirectory: URL) {
-        _field = StateObject(wrappedValue: FieldModel(source: source, tiles: tiles, packDirectory: packDirectory))
+    init(
+        source: any PositionSource,
+        tiles: TileStore,
+        packDirectory: URL,
+        controlPoints: [ControlPoint] = [],
+        controlPointNotice: String? = nil
+    ) {
+        _field = StateObject(wrappedValue: FieldModel(
+            source: source,
+            tiles: tiles,
+            packDirectory: packDirectory,
+            controlPoints: controlPoints,
+            controlPointNotice: controlPointNotice
+        ))
     }
 
     var body: some View {
@@ -15,6 +27,14 @@ struct RootView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .padding(.bottom, 8)
+            if let progress = field.benchmarkProgressLabel {
+                Text(progress)
+                    .font(.system(size: 16, weight: .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+            }
             ZStack {
                 MapTabView(field: field)
                     .opacity(field.tab == .map ? 1 : 0)
@@ -28,7 +48,7 @@ struct RootView: View {
                 } else if field.tab == .measure {
                     PlaceholderTabView(
                         title: "測る",
-                        message: "点を取る画面は次のスライスです。地点と軌跡はジオグラフィカの考え方で足します。今は地図で現在地と精度を見ます。"
+                        message: "点を取る画面は次のスライスです。三角点で検証は地図タブです。地点と軌跡の記録は、その次に足します。"
                     )
                 } else if field.tab == .export {
                     PlaceholderTabView(
@@ -49,23 +69,25 @@ struct RootView: View {
 }
 
 enum AppEnvironment {
-    static func live() -> (source: CoreLocationPositionSource, tiles: TileStore, packs: URL) {
+    static func live() -> (source: CoreLocationPositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?) {
         let directories = directories(inTemporary: false)
         let tiles = TileStore(packDirectory: directories.packs, cacheDirectory: directories.cache)
-        return (CoreLocationPositionSource(), tiles, directories.packs)
+        let loaded = ControlPointLoader.load(siteDirectory: directories.site)
+        return (CoreLocationPositionSource(), tiles, directories.packs, loaded.points, loaded.notice)
     }
 
-    static func preview(source: any PositionSource) -> (source: any PositionSource, tiles: TileStore, packs: URL) {
+    static func preview(source: any PositionSource) -> (source: any PositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?) {
         let directories = directories(inTemporary: true)
         let tiles = TileStore(
             packDirectory: directories.packs,
             cacheDirectory: directories.cache,
             network: PreviewTileSource()
         )
-        return (source, tiles, directories.packs)
+        let loaded = ControlPointLoader.load(siteDirectory: directories.site)
+        return (source, tiles, directories.packs, loaded.points, loaded.notice)
     }
 
-    private static func directories(inTemporary: Bool) -> (packs: URL, cache: URL) {
+    private static func directories(inTemporary: Bool) -> (packs: URL, cache: URL, site: URL) {
         let manager = FileManager.default
         let base: URL
         if inTemporary {
@@ -74,11 +96,13 @@ enum AppEnvironment {
             base = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         }
         let packs = base.appendingPathComponent("BaseMapPacks", isDirectory: true)
+        let site = base.appendingPathComponent("SitePack", isDirectory: true)
         let cache = manager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(inTemporary ? "GSITileCache-\(UUID().uuidString)" : "GSITileCache", isDirectory: true)
         try? manager.createDirectory(at: packs, withIntermediateDirectories: true)
+        try? manager.createDirectory(at: site, withIntermediateDirectories: true)
         try? manager.createDirectory(at: cache, withIntermediateDirectories: true)
-        return (packs, cache)
+        return (packs, cache, site)
     }
 }
 
@@ -90,15 +114,33 @@ private struct PreviewTileSource: TileFetching {
 
 #Preview("段階0 iPhone") {
     let environment = AppEnvironment.preview(source: SimulatedPositionSource.iphonePreview())
-    return RootView(source: environment.source, tiles: environment.tiles, packDirectory: environment.packs)
+    return RootView(
+        source: environment.source,
+        tiles: environment.tiles,
+        packDirectory: environment.packs,
+        controlPoints: environment.points,
+        controlPointNotice: environment.notice
+    )
 }
 
 #Preview("段階1 CLAS") {
     let environment = AppEnvironment.preview(source: SimulatedPositionSource.clasPreview())
-    return RootView(source: environment.source, tiles: environment.tiles, packDirectory: environment.packs)
+    return RootView(
+        source: environment.source,
+        tiles: environment.tiles,
+        packDirectory: environment.packs,
+        controlPoints: environment.points,
+        controlPointNotice: environment.notice
+    )
 }
 
 #Preview("段階2 RTK Fix") {
     let environment = AppEnvironment.preview(source: SimulatedPositionSource.rtkFixPreview())
-    return RootView(source: environment.source, tiles: environment.tiles, packDirectory: environment.packs)
+    return RootView(
+        source: environment.source,
+        tiles: environment.tiles,
+        packDirectory: environment.packs,
+        controlPoints: environment.points,
+        controlPointNotice: environment.notice
+    )
 }

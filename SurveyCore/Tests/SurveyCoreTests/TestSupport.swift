@@ -43,6 +43,7 @@ func samplePosition(
     longitude: Double = 139.76712,
     height: Double? = 12.4,
     accuracy: Double = 3.2,
+    verticalAccuracy: Double? = nil,
     stage: PositionStage = .iphone,
     quality: FixQuality = .standalone,
     receiver: ReceiverKind = .iphoneGPS
@@ -52,7 +53,7 @@ func samplePosition(
         longitudeDegrees: longitude,
         ellipsoidalHeightMeters: height,
         horizontalAccuracyMeters: accuracy,
-        verticalAccuracyMeters: nil,
+        verticalAccuracyMeters: verticalAccuracy,
         timestamp: PreviewClock.instant,
         stage: stage,
         fixQuality: quality,

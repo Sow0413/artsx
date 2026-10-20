@@ -31,11 +31,19 @@ struct SurveyMapView: UIViewRepresentable {
             tone: field.badge.tone,
             offlineRevision: field.offlineRevision
         )
+        context.coordinator.syncControls(
+            on: map,
+            points: field.visibleControlPoints,
+            selectedID: field.selectedControlPointID
+        )
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         private var onUserPan: () -> Void = {}
         private var onVisible: (GeoBounds, Int) -> Void = { _, _ in }
+        private var onSelectControlPoint: (String) -> Void = { _ in }
+        private var controlAnnotations: [String: ControlPointAnnotation] = [:]
+        private var selectedControlID: String?
         private var store: TileStore?
         private var tileOverlay: MKTileOverlay?
         private var circle: MKCircle?
@@ -55,6 +63,9 @@ struct SurveyMapView: UIViewRepresentable {
             }
             onVisible = { [weak field] bounds, zoom in
                 field?.noteVisible(bounds: bounds, zoom: zoom)
+            }
+            onSelectControlPoint = { [weak field] id in
+                field?.selectControlPoint(id)
             }
             if tileOverlay == nil {
                 installTiles(on: map)
@@ -118,7 +129,20 @@ struct SurveyMapView: UIViewRepresentable {
             return MKOverlayRenderer(overlay: overlay)
         }
 
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            guard let point = view.annotation as? ControlPointAnnotation else { return }
+            onSelectControlPoint(point.pointID)
+            mapView.deselectAnnotation(point, animated: false)
+        }
+
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let point = annotation as? ControlPointAnnotation {
+                let marker = mapView.dequeueReusableAnnotationView(withIdentifier: ControlMarkerView.reuseID) as? ControlMarkerView
+                    ?? ControlMarkerView(annotation: point, reuseIdentifier: ControlMarkerView.reuseID)
+                marker.annotation = point
+                marker.configure(title: point.title ?? point.pointID, selected: point.pointID == selectedControlID)
+                return marker
+            }
             guard annotation is UserDotAnnotation else { return nil }
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: "user-dot")
                 ?? MKAnnotationView(annotation: annotation, reuseIdentifier: "user-dot")
@@ -189,6 +213,37 @@ struct SurveyMapView: UIViewRepresentable {
             map.addOverlay(overlay, level: .aboveLabels)
         }
 
+        func syncControls(on map: MKMapView, points: [ControlPoint], selectedID: String?) {
+            let ids = Set(points.map(\.id))
+            for (id, annotation) in controlAnnotations where !ids.contains(id) {
+                map.removeAnnotation(annotation)
+                controlAnnotations.removeValue(forKey: id)
+            }
+            for point in points {
+                let title = point.name
+                if let existing = controlAnnotations[point.id] {
+                    existing.coordinate = CLLocationCoordinate2D(
+                        latitude: point.latitudeDegrees,
+                        longitude: point.longitudeDegrees
+                    )
+                    existing.title = title
+                } else {
+                    let created = ControlPointAnnotation(
+                        pointID: point.id,
+                        coordinate: CLLocationCoordinate2D(latitude: point.latitudeDegrees, longitude: point.longitudeDegrees),
+                        title: title
+                    )
+                    controlAnnotations[point.id] = created
+                    map.addAnnotation(created)
+                }
+            }
+            selectedControlID = selectedID
+            for (id, annotation) in controlAnnotations {
+                guard let marker = map.view(for: annotation) as? ControlMarkerView else { continue }
+                marker.configure(title: annotation.title ?? id, selected: id == selectedID)
+            }
+        }
+
         private func reportVisible(_ map: MKMapView) {
             guard map.bounds.width > 1 else { return }
             let region = map.region
@@ -227,6 +282,77 @@ struct SurveyMapView: UIViewRepresentable {
                 context.cgContext.fillEllipse(in: CGRect(x: 4, y: 4, width: 20, height: 20))
             }
         }()
+    }
+}
+
+final class ControlPointAnnotation: NSObject, MKAnnotation {
+    let pointID: String
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    var title: String?
+
+    init(pointID: String, coordinate: CLLocationCoordinate2D, title: String) {
+        self.pointID = pointID
+        self.coordinate = coordinate
+        self.title = title
+        super.init()
+    }
+}
+
+final class ControlMarkerView: MKAnnotationView {
+    static let reuseID = "control-point"
+    private let nameLabel = UILabel()
+    private let triangle = UIImageView()
+
+    override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
+        super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
+        nameLabel.font = .systemFont(ofSize: 13, weight: .bold)
+        nameLabel.textColor = .black
+        nameLabel.backgroundColor = UIColor.white.withAlphaComponent(0.92)
+        nameLabel.layer.cornerRadius = 4
+        nameLabel.clipsToBounds = true
+        addSubview(triangle)
+        addSubview(nameLabel)
+        canShowCallout = false
+        isEnabled = true
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    func configure(title: String, selected: Bool) {
+        nameLabel.text = " \(title) "
+        nameLabel.sizeToFit()
+        let triangleSide: CGFloat = 22
+        let height: CGFloat = 44
+        let width = max(44, triangleSide + 6 + nameLabel.bounds.width)
+        bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        triangle.frame = CGRect(x: 0, y: (height - triangleSide) / 2, width: triangleSide, height: triangleSide)
+        triangle.image = Self.triangle(selected: selected)
+        nameLabel.frame = CGRect(
+            x: triangleSide + 4,
+            y: (height - nameLabel.bounds.height) / 2,
+            width: nameLabel.bounds.width,
+            height: nameLabel.bounds.height
+        )
+        centerOffset = CGPoint(x: bounds.midX - triangleSide / 2, y: 0)
+    }
+
+    private static func triangle(selected: Bool) -> UIImage {
+        let side: CGFloat = 22
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        return renderer.image { context in
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: side / 2, y: 1))
+            path.addLine(to: CGPoint(x: side - 1, y: side - 1))
+            path.addLine(to: CGPoint(x: 1, y: side - 1))
+            path.close()
+            (selected ? SurveyUIColor.amber : UIColor.white).setFill()
+            path.fill()
+            UIColor.black.setStroke()
+            path.lineWidth = 2
+            path.stroke()
+        }
     }
 }
 

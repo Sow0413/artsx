@@ -9,7 +9,9 @@ struct SurveyApp: App {
             RootView(
                 source: environment.source,
                 tiles: environment.tiles,
-                packDirectory: environment.packs
+                packDirectory: environment.packs,
+                controlPoints: environment.points,
+                controlPointNotice: environment.notice
             )
         }
     }
