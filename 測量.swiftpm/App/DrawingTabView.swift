@@ -24,7 +24,7 @@ struct DrawingTabView: View {
             }
         }
         .background(SurveyColor.background)
-        .fileImporter(isPresented: $importing, allowedContentTypes: [dxfType]) { result in
+        .fileImporter(isPresented: $importing, allowedContentTypes: drawingTypes) { result in
             switch result {
             case let .success(url):
                 guard let data = readSecurityScoped(url) else {
@@ -53,7 +53,7 @@ struct DrawingTabView: View {
                 onFit: { drawing.fit(in: $0) }
             )
             if drawing.document == nil {
-                Text(drawing.project == nil ? "プロジェクトを作って、DXF を読み込みます。" : "DXF を読み込むと、ここに図面が出ます。")
+                Text(drawing.project == nil ? "プロジェクトを作って、DXF か SFC を読み込みます。" : "DXF か SFC を読み込むと、ここに図面が出ます。")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .multilineTextAlignment(.center)
@@ -122,7 +122,7 @@ struct DrawingTabView: View {
                     TextField("記録の名前", text: $recordName)
                         .textFieldStyle(.roundedBorder)
                     Button("下見を記録") {
-                        drawing.addFieldRecord(date: todayString(), kind: "下見", name: recordName)
+                        field.addProjectRecord(date: todayString(), kind: "下見", name: recordName)
                     }
                     .buttonStyle(SurveyPlainButton())
                 }
@@ -138,7 +138,7 @@ struct DrawingTabView: View {
                     .foregroundStyle(SurveyColor.text)
                     .lineLimit(1)
                 Spacer()
-                Button("DXF を読む") { importing = true }
+                Button("図面を読む") { importing = true }
                     .buttonStyle(SurveyPlainButton())
             }
             if let document = drawing.document, !document.unsupportedSummary.isEmpty {
@@ -170,16 +170,29 @@ struct DrawingTabView: View {
             }
             .pickerStyle(.menu)
             .tint(SurveyColor.text)
+            if let document = drawing.document, document.has(.background) {
+                Toggle("背景を表示", isOn: roleBinding(.background))
+                    .font(.system(size: 15, weight: .semibold))
+                    .tint(SurveyColor.amber)
+                if document.has(.design) {
+                    Toggle("設計を表示", isOn: roleBinding(.design))
+                        .font(.system(size: 15, weight: .semibold))
+                        .tint(SurveyColor.amber)
+                }
+            }
             if let layers = drawing.document?.layers, !layers.isEmpty {
                 DisclosureGroup("レイヤ \(layers.filter(\.isVisible).count)/\(layers.count)") {
                     ForEach(layers) { layer in
-                        Toggle(layer.name, isOn: layerBinding(layer))
+                        Toggle(layerTitle(layer), isOn: layerBinding(layer))
                             .font(.system(size: 15, weight: .semibold))
                             .tint(SurveyColor.amber)
                     }
                 }
                 .font(.system(size: 15, weight: .heavy))
                 .foregroundStyle(SurveyColor.text)
+            }
+            if drawing.document?.has(.background) == true {
+                backgroundSection
             }
             Button("図面全体") {
                 drawing.showWholeDrawing()
@@ -189,6 +202,34 @@ struct DrawingTabView: View {
                 suggestionBlock(suggestion)
             } else if let warning = drawing.warning, !warning.candidates.isEmpty, warning.message != nil {
                 candidateButtons(warning.candidates, title: "近くに載る系", applyAxis: true)
+            }
+        }
+    }
+
+    private var backgroundSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("背景と地理院ベクトル")
+                .font(.system(size: 16, weight: .heavy))
+                .foregroundStyle(SurveyColor.text)
+            Text("背景の線を基盤地図の道路縁・建物と比べます。合えばそのまま使えます。ずれていれば、向きと距離を出して合わせます。合わない図面もあります。")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(SurveyColor.muted)
+            Button(drawing.backgroundBusy ? "照合しています" : "背景を照合") {
+                drawing.checkBackground()
+            }
+            .buttonStyle(SurveyPlainButton())
+            .disabled(drawing.backgroundBusy)
+            if let verdict = drawing.backgroundVerdict {
+                Text(verdict.message)
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(verdict.suggestsShift ? SurveyColor.amber : SurveyColor.text)
+                if verdict.suggestsShift {
+                    Button("このずれで合わせる") { drawing.applyBackgroundAlignment() }
+                        .buttonStyle(SurveyPlainButton())
+                    Text(AlignmentAccuracy.stakeoutNotice)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                }
             }
         }
     }
@@ -300,21 +341,26 @@ struct DrawingTabView: View {
     private var inspectionSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let inspection = drawing.inspection {
-                Text("タップした点")
+                Text(inspection.snapLabel.map { "タップした\($0)" } ?? "タップした点")
                     .font(.system(size: 13, weight: .heavy))
                     .foregroundStyle(SurveyColor.muted)
                 Text(String(format: "図面 X %.3f　Y %.3f", inspection.drawingX, inspection.drawingY))
                     .font(.system(size: 15, weight: .heavy))
                 if let east = inspection.eastingMeters, let north = inspection.northingMeters {
-                    Text(String(format: "%d系　東 %.3f m　北 %.3f m", drawing.zone, east, north))
+                    Text("\(drawing.zone)系　東 \(StakeoutText.meters(east, precision: stakeoutPrecision))　北 \(StakeoutText.meters(north, precision: stakeoutPrecision))")
                         .font(.system(size: 14, weight: .semibold))
                 }
                 if let latitude = inspection.latitudeDegrees, let longitude = inspection.longitudeDegrees {
                     Text("\(CoordinateText.latitude(latitude)), \(CoordinateText.longitude(longitude))")
                         .font(.system(size: 14, weight: .semibold))
                 }
+                if stakeoutPrecision == .centimeters {
+                    Text("座標簿で合わせてあるので、cm で出します。")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                }
                 if let distance = inspection.distanceMeters, let azimuth = inspection.azimuthDegrees {
-                    Text("現在地から \(formatMeters(distance))、北から時計回り \(String(format: "%.1f°", azimuth))")
+                    Text("現在地から \(StakeoutText.meters(distance, precision: stakeoutPrecision))、北から時計回り \(String(format: "%.1f°", azimuth))")
                         .font(.system(size: 15, weight: .heavy))
                 } else {
                     Text("現在地が無いので、距離と方向は出せません。")
@@ -384,6 +430,21 @@ struct DrawingTabView: View {
         Binding(get: { drawing.lockScale }, set: { drawing.setLockScale($0) })
     }
 
+    private var stakeoutPrecision: StakeoutPrecision {
+        StakeoutPrecision.decide(drawing.stakeoutAccuracy)
+    }
+
+    private func roleBinding(_ role: DrawingLayerRole) -> Binding<Bool> {
+        Binding(
+            get: { drawing.document?.shows(role) ?? false },
+            set: { drawing.setRole(role, visible: $0) }
+        )
+    }
+
+    private func layerTitle(_ layer: DrawingLayer) -> String {
+        layer.role == .background ? "\(layer.name)（背景）" : layer.name
+    }
+
     private func layerBinding(_ layer: DrawingLayer) -> Binding<Bool> {
         Binding(
             get: { drawing.document?.layers.first { $0.name == layer.name }?.isVisible ?? layer.isVisible },
@@ -402,7 +463,8 @@ struct DrawingTabView: View {
             horizontalAccuracyMeters: position.horizontalAccuracyMeters,
             zone: drawing.zone,
             axis: drawing.axis,
-            transform: drawing.activeTransform
+            transform: drawing.activeTransform,
+            composesAxis: drawing.activeComposesAxis
         )
     }
 
@@ -486,7 +548,10 @@ private struct SurveyPlainButton: ButtonStyle {
     }
 }
 
-private let dxfType = UTType(filenameExtension: "dxf") ?? .data
+private var drawingTypes: [UTType] {
+    let types = [UTType(filenameExtension: "dxf"), UTType(filenameExtension: "sfc")].compactMap { $0 }
+    return types.isEmpty ? [.data] : types
+}
 
 private extension Array {
     subscript(safe index: Int) -> Element? {

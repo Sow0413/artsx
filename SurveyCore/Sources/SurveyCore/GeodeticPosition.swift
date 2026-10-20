@@ -53,6 +53,8 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
     public var fixQuality: FixQuality
     public var receiver: ReceiverKind
     public var frame: CoordinateFrame
+    /// 受信機が報告した衛星数。iPhone の CoreLocation には無いので、無いときは nil。
+    public var satelliteCount: Int?
 
     public init(
         latitudeDegrees: Double,
@@ -64,7 +66,8 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         stage: PositionStage,
         fixQuality: FixQuality,
         receiver: ReceiverKind,
-        frame: CoordinateFrame = .wgs84ITRF
+        frame: CoordinateFrame = .wgs84ITRF,
+        satelliteCount: Int? = nil
     ) {
         self.latitudeDegrees = latitudeDegrees
         self.longitudeDegrees = longitudeDegrees
@@ -76,6 +79,7 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         self.fixQuality = fixQuality
         self.receiver = receiver
         self.frame = frame
+        self.satelliteCount = satelliteCount
     }
 
     public var isPlottable: Bool {

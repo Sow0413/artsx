@@ -226,6 +226,8 @@ public struct AlignmentRecord: Sendable, Equatable, Codable, Identifiable {
     public var accuracyTag: AlignmentAccuracy
     public var stakeoutNotice: String?
     public var drawingFileName: String
+    /// true のとき、変換は軸で読んだ公共座標の上に載せる。手合わせは false で、図面の X Y を直接写す。
+    public var composesAxis: Bool
 
     public var id: String { "\(name)-v\(version)" }
 
@@ -242,7 +244,8 @@ public struct AlignmentRecord: Sendable, Equatable, Codable, Identifiable {
         rmsMeters: Double,
         accuracyTag: AlignmentAccuracy,
         stakeoutNotice: String?,
-        drawingFileName: String
+        drawingFileName: String,
+        composesAxis: Bool = false
     ) {
         self.name = name
         self.version = version
@@ -257,6 +260,48 @@ public struct AlignmentRecord: Sendable, Equatable, Codable, Identifiable {
         self.accuracyTag = accuracyTag
         self.stakeoutNotice = stakeoutNotice
         self.drawingFileName = drawingFileName
+        self.composesAxis = composesAxis
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, version, createdAt, zone, axis, lockScale, transform, pairs
+        case residualsMeters, rmsMeters, accuracyTag, stakeoutNotice, drawingFileName, composesAxis
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        version = try container.decode(Int.self, forKey: .version)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        zone = try container.decode(Int.self, forKey: .zone)
+        axis = try container.decode(DrawingAxis.self, forKey: .axis)
+        lockScale = try container.decode(Bool.self, forKey: .lockScale)
+        transform = try container.decode(Similarity2D.self, forKey: .transform)
+        pairs = try container.decode([AlignmentPair].self, forKey: .pairs)
+        residualsMeters = try container.decode([Double].self, forKey: .residualsMeters)
+        rmsMeters = try container.decode(Double.self, forKey: .rmsMeters)
+        accuracyTag = try container.decode(AlignmentAccuracy.self, forKey: .accuracyTag)
+        stakeoutNotice = try container.decodeIfPresent(String.self, forKey: .stakeoutNotice)
+        drawingFileName = try container.decode(String.self, forKey: .drawingFileName)
+        composesAxis = try container.decodeIfPresent(Bool.self, forKey: .composesAxis) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(version, forKey: .version)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(zone, forKey: .zone)
+        try container.encode(axis, forKey: .axis)
+        try container.encode(lockScale, forKey: .lockScale)
+        try container.encode(transform, forKey: .transform)
+        try container.encode(pairs, forKey: .pairs)
+        try container.encode(residualsMeters, forKey: .residualsMeters)
+        try container.encode(rmsMeters, forKey: .rmsMeters)
+        try container.encode(accuracyTag, forKey: .accuracyTag)
+        try container.encodeIfPresent(stakeoutNotice, forKey: .stakeoutNotice)
+        try container.encode(drawingFileName, forKey: .drawingFileName)
+        try container.encode(composesAxis, forKey: .composesAxis)
     }
 }
 

@@ -44,13 +44,18 @@ public struct ProjectRecordNote: Codable, Equatable, Sendable {
     public var kind: String
     public var name: String
     public var createdAt: Date
+    /// この記録で点名の頭に使うアルファベット。無い記録は nil。
+    public var pointPrefix: String?
 
-    public init(date: String, kind: String, name: String, createdAt: Date) {
+    public init(date: String, kind: String, name: String, createdAt: Date, pointPrefix: String? = nil) {
         self.date = date
         self.kind = kind
         self.name = name
         self.createdAt = createdAt
+        self.pointPrefix = pointPrefix
     }
+
+    public var folderName: String { "\(date)_\(kind)_\(name)" }
 }
 
 public struct ConversionTag: Codable, Equatable, Sendable {
@@ -66,7 +71,44 @@ public struct ConversionTag: Codable, Equatable, Sendable {
         self.note = note
     }
 
-    public static let keptOriginal = "受け取った DXF はそのまま残している。座標の読み方だけをこの札に書く。"
+    public static let keptOriginal = "受け取った図面ファイルはそのまま残している。座標の読み方だけをこの札に書く。"
+}
+
+/// 基準点として座標簿に残す1点。点名の連番は、この名前を飛ばす。
+public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
+    public var name: String
+    public var latitudeDegrees: Double
+    public var longitudeDegrees: Double
+    public var ellipsoidalHeightMeters: Double?
+    public var horizontalAccuracyMeters: Double
+    public var verticalAccuracyMeters: Double?
+    public var satelliteCount: Int?
+    public var fixDurationSeconds: TimeInterval
+    public var recordedAt: Date
+
+    public var id: String { name }
+
+    public init(
+        name: String,
+        latitudeDegrees: Double,
+        longitudeDegrees: Double,
+        ellipsoidalHeightMeters: Double?,
+        horizontalAccuracyMeters: Double,
+        verticalAccuracyMeters: Double?,
+        satelliteCount: Int?,
+        fixDurationSeconds: TimeInterval,
+        recordedAt: Date
+    ) {
+        self.name = name
+        self.latitudeDegrees = latitudeDegrees
+        self.longitudeDegrees = longitudeDegrees
+        self.ellipsoidalHeightMeters = ellipsoidalHeightMeters
+        self.horizontalAccuracyMeters = horizontalAccuracyMeters
+        self.verticalAccuracyMeters = verticalAccuracyMeters
+        self.satelliteCount = satelliteCount
+        self.fixDurationSeconds = fixDurationSeconds
+        self.recordedAt = recordedAt
+    }
 }
 
 public enum ProjectStoreError: Error, Equatable, CustomStringConvertible {
@@ -206,19 +248,82 @@ public enum ProjectStore {
         name: String,
         projectName: String,
         at root: URL,
-        now: Date = Date()
+        now: Date = Date(),
+        pointPrefix: String? = nil
     ) throws -> ProjectRecordNote {
         guard let safeDate = safeComponent(date), let safeKind = safeComponent(kind), let safeName = safeComponent(name) else {
             throw ProjectStoreError.emptyName
         }
-        let note = ProjectRecordNote(date: safeDate, kind: safeKind, name: safeName, createdAt: now)
+        let note = ProjectRecordNote(
+            date: safeDate,
+            kind: safeKind,
+            name: safeName,
+            createdAt: now,
+            pointPrefix: pointPrefix
+        )
         let directory = try projectDirectory(projectName, at: root)
         let folder = directory
             .appendingPathComponent("記録", isDirectory: true)
-            .appendingPathComponent("\(safeDate)_\(safeKind)_\(safeName)", isDirectory: true)
+            .appendingPathComponent(note.folderName, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try write(note, to: folder.appendingPathComponent("record.json"))
         return note
+    }
+
+    public static func setRecordPrefix(
+        folder: String,
+        prefix: String?,
+        projectName: String,
+        at root: URL
+    ) throws {
+        guard let safeFolder = safeComponent(folder) else { throw ProjectStoreError.emptyName }
+        let directory = try projectDirectory(projectName, at: root)
+        let url = directory
+            .appendingPathComponent("記録", isDirectory: true)
+            .appendingPathComponent(safeFolder, isDirectory: true)
+            .appendingPathComponent("record.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { throw ProjectStoreError.missingProject }
+        var note = try read(ProjectRecordNote.self, from: url)
+        note.pointPrefix = prefix
+        try write(note, to: url)
+    }
+
+    public static func recordNote(folder: String, projectName: String, at root: URL) throws -> ProjectRecordNote {
+        guard let safeFolder = safeComponent(folder) else { throw ProjectStoreError.emptyName }
+        let directory = try projectDirectory(projectName, at: root)
+        let url = directory
+            .appendingPathComponent("記録", isDirectory: true)
+            .appendingPathComponent(safeFolder, isDirectory: true)
+            .appendingPathComponent("record.json")
+        return try read(ProjectRecordNote.self, from: url)
+    }
+
+    /// 座標簿へ1点を足す。同じ名前のファイルは上書きしない。元の図面ファイルは触らない。
+    public static func saveCoordinate(_ entry: CoordinateBookEntry, projectName: String, at root: URL) throws {
+        guard let safe = safeComponent(entry.name) else { throw ProjectStoreError.emptyName }
+        let directory = try projectDirectory(projectName, at: root)
+        let folder = directory.appendingPathComponent("座標簿", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var file = "\(safe).json"
+        var number = 2
+        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(file).path) {
+            file = "\(safe)-\(number).json"
+            number += 1
+        }
+        try write(entry, to: folder.appendingPathComponent(file))
+    }
+
+    public static func coordinateBookNames(projectName: String, at root: URL) -> Set<String> {
+        guard let directory = try? projectDirectory(projectName, at: root) else { return [] }
+        let folder = directory.appendingPathComponent("座標簿", isDirectory: true)
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
+        var names: Set<String> = []
+        for url in urls where url.pathExtension.lowercased() == "json" {
+            if let entry = try? read(CoordinateBookEntry.self, from: url) {
+                names.insert(entry.name)
+            }
+        }
+        return names
     }
 
     public static func projectDirectory(_ name: String, at root: URL) throws -> URL {

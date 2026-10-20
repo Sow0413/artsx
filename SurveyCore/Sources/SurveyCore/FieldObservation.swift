@@ -16,6 +16,8 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
     public var closureAdjustment: ClosureAdjustment?
     /// 戻り点検で付けた要再測。座標は消さない。
     public var needsResurvey: Bool
+    /// 基準点として、RTK FIX が切れずに続いていた秒数。普通の観測は nil。
+    public var fixDurationSeconds: TimeInterval?
 
     public init(
         id: UUID = UUID(),
@@ -26,7 +28,8 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         corrected: GeodeticPosition? = nil,
         appliedCorrectionID: UUID? = nil,
         closureAdjustment: ClosureAdjustment? = nil,
-        needsResurvey: Bool = false
+        needsResurvey: Bool = false,
+        fixDurationSeconds: TimeInterval? = nil
     ) {
         self.id = id
         self.name = name
@@ -37,10 +40,11 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         self.appliedCorrectionID = appliedCorrectionID
         self.closureAdjustment = closureAdjustment
         self.needsResurvey = needsResurvey
+        self.fixDurationSeconds = fixDurationSeconds
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, workID, captured, adopted, corrected, appliedCorrectionID, closureAdjustment, needsResurvey
+        case id, name, workID, captured, adopted, corrected, appliedCorrectionID, closureAdjustment, needsResurvey, fixDurationSeconds
     }
 
     public init(from decoder: Decoder) throws {
@@ -54,6 +58,7 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         appliedCorrectionID = try container.decodeIfPresent(UUID.self, forKey: .appliedCorrectionID)
         closureAdjustment = try container.decodeIfPresent(ClosureAdjustment.self, forKey: .closureAdjustment)
         needsResurvey = try container.decodeIfPresent(Bool.self, forKey: .needsResurvey) ?? false
+        fixDurationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .fixDurationSeconds)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -67,6 +72,7 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(appliedCorrectionID, forKey: .appliedCorrectionID)
         try container.encodeIfPresent(closureAdjustment, forKey: .closureAdjustment)
         try container.encode(needsResurvey, forKey: .needsResurvey)
+        try container.encodeIfPresent(fixDurationSeconds, forKey: .fixDurationSeconds)
     }
 
     public var horizontalAccuracyAtCapture: Double { captured.horizontalAccuracyMeters }

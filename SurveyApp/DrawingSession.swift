@@ -40,6 +40,9 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var mapRevision = 0
     @Published private(set) var overlayCapped = false
     @Published var camera = DrawingCamera()
+    @Published private(set) var backgroundVerdict: BackgroundVerdict?
+    @Published private(set) var backgroundBusy = false
+    @Published private(set) var activeRecordFolder: String?
 
     let projectsRoot: URL
     private var reference: (latitude: Double, longitude: Double, name: String)?
@@ -57,6 +60,20 @@ final class DrawingSession: ObservableObject {
 
     var accuracy: AlignmentAccuracy {
         AlignmentAccuracy.decide(pairs.map(\.kind))
+    }
+
+    /// 2組以上の手合わせが優先。なければ、使っている合わせの札。cm は座標簿の札だけ。
+    var stakeoutAccuracy: AlignmentAccuracy? {
+        if pairs.count >= 2 { return AlignmentAccuracy.decide(pairs.map(\.kind)) }
+        if pairs.isEmpty {
+            return alignments.first { $0.id == activeAlignmentID }?.accuracyTag
+        }
+        return nil
+    }
+
+    var activeComposesAxis: Bool {
+        if pairs.count >= 2 { return false }
+        return alignments.first { $0.id == activeAlignmentID }?.composesAxis ?? false
     }
 
     func reload() {
@@ -109,7 +126,15 @@ final class DrawingSession: ObservableObject {
             return
         }
         do {
-            let parsed = try DXFParser.parse(data)
+            let ext = (rawName as NSString).pathExtension.lowercased()
+            let parsed: DrawingDocument
+            if ext == "sfc" {
+                parsed = try SFCParser.parse(data)
+                axis = .cadEastNorth
+                current.axis = .cadEastNorth
+            } else {
+                parsed = try DXFParser.parse(data)
+            }
             let stored = try ProjectStore.importDXF(
                 data: data,
                 fileName: rawName,
@@ -123,15 +148,20 @@ final class DrawingSession: ObservableObject {
             document = parsed
             fileName = stored
             camera.fittedID = nil
-            var note = "設計に \(stored) を置きました。元の DXF は変えていません。"
-            if let unit = parsed.unitWarning { note += unit }
+            backgroundVerdict = nil
+            var note = ext == "sfc"
+                ? "設計に \(stored) を置きました。公共座標として読みました。系を選ぶと地図に載ります。元の SFC は変えていません。"
+                : "設計に \(stored) を置きました。元の DXF は変えていません。"
+            if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
             if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
             message = note
             refresh()
         } catch let error as DXFError {
             message = error.description
+        } catch let error as SFCError {
+            message = error.description
         } catch {
-            message = "DXF を読めませんでした。"
+            message = "図面を読めませんでした。"
         }
     }
 
@@ -152,6 +182,11 @@ final class DrawingSession: ObservableObject {
 
     func toggleLayer(_ name: String, visible: Bool) {
         document = document?.settingLayer(name, visible: visible)
+        refreshMap()
+    }
+
+    func setRole(_ role: DrawingLayerRole, visible: Bool) {
+        document = document?.settingRole(role, visible: visible)
         refreshMap()
     }
 
@@ -181,8 +216,8 @@ final class DrawingSession: ObservableObject {
 
     func takeDrawingTap(_ point: PlanarPoint, tolerance: Double) {
         guard let document else { return }
-        guard let hit = document.nearestVertex(to: point, tolerance: tolerance) else {
-            message = "図面の点の近くをタップしてください。"
+        guard let hit = DrawingSnap.nearest(in: document, to: point, tolerance: tolerance) else {
+            message = "交点・端点・点の近くをタップしてください。"
             return
         }
         if pick == .drawingVertex {
@@ -197,7 +232,9 @@ final class DrawingSession: ObservableObject {
             axis: axis,
             transform: activeTransform,
             fromLatitude: reference?.latitude,
-            fromLongitude: reference?.longitude
+            fromLongitude: reference?.longitude,
+            composesAxis: activeComposesAxis,
+            snapLabel: hit.kind.label
         )
     }
 
@@ -232,7 +269,7 @@ final class DrawingSession: ObservableObject {
 
     func saveAlignment() {
         guard let project, let fileName else {
-            message = "先に DXF を読み込んでください。"
+            message = "先に図面を読み込んでください。"
             return
         }
         guard let fit, pairs.count >= 2 else {
@@ -259,7 +296,7 @@ final class DrawingSession: ObservableObject {
             let stored = try ProjectStore.saveAlignment(record, projectName: project.name, at: projectsRoot)
             alignments = (try? ProjectStore.alignments(projectName: project.name, at: projectsRoot)) ?? alignments
             activeAlignmentID = stored.id
-            message = "合わせ「\(stored.name)」の版 \(stored.version) を設計に置きました。元の DXF は変えていません。"
+            message = "合わせ「\(stored.name)」の版 \(stored.version) を設計に置きました。元の図面は変えていません。"
         } catch let error as ProjectStoreError {
             message = error.description
         } catch {
@@ -280,10 +317,11 @@ final class DrawingSession: ObservableObject {
         refresh()
     }
 
-    func addFieldRecord(date: String, kind: String, name: String) {
+    @discardableResult
+    func addFieldRecord(date: String, kind: String, name: String, pointPrefix: String? = nil) -> String? {
         guard let project else {
             message = "先にプロジェクトを作ってください。"
-            return
+            return nil
         }
         do {
             let note = try ProjectStore.addRecord(
@@ -291,13 +329,92 @@ final class DrawingSession: ObservableObject {
                 kind: kind,
                 name: name,
                 projectName: project.name,
-                at: projectsRoot
+                at: projectsRoot,
+                pointPrefix: pointPrefix
             )
-            message = "記録 \(note.date)_\(note.kind)_\(note.name) を作りました。"
+            activeRecordFolder = note.folderName
+            message = "記録 \(note.folderName) を作りました。"
+            return note.folderName
         } catch let error as ProjectStoreError {
             message = error.description
         } catch {
             message = "記録を作れませんでした。"
+        }
+        return nil
+    }
+
+    func checkBackground() {
+        guard let document else {
+            message = "先に図面を読み込んでください。"
+            return
+        }
+        guard document.has(.background) else {
+            message = "背景レイヤがありません。地形・背景・BGD などの名前だけを地理院ベクトルと照合します。"
+            return
+        }
+        backgroundBusy = true
+        message = "地理院ベクトルと照合しています。"
+        let zone = zone
+        let axis = axis
+        let snapshot = document
+        Task {
+            do {
+                let reference = try await GSIVectorFetch.reference(document: snapshot, zone: zone)
+                let verdict = BackgroundChecker.judge(document: snapshot, reference: reference, currentAxis: axis)
+                await MainActor.run {
+                    self.backgroundVerdict = verdict
+                    self.backgroundBusy = false
+                    self.message = verdict.message
+                }
+            } catch {
+                await MainActor.run {
+                    self.backgroundBusy = false
+                    self.backgroundVerdict = nil
+                    self.message = "地理院ベクトルを取れませんでした。"
+                }
+            }
+        }
+    }
+
+    func applyBackgroundAlignment() {
+        guard var current = project, let fileName, let verdict = backgroundVerdict,
+              case let .shifted(_, _, transform, rms) = verdict.outcome else {
+            message = "自動で合わせるずれはありません。"
+            return
+        }
+        axis = verdict.axis
+        current.axis = verdict.axis
+        project = current
+        pairs = []
+        fit = nil
+        pending = nil
+        let record = AlignmentRecord(
+            name: "背景合わせ",
+            version: 0,
+            createdAt: Date(),
+            zone: zone,
+            axis: verdict.axis,
+            lockScale: true,
+            transform: transform,
+            pairs: [],
+            residualsMeters: [],
+            rmsMeters: rms,
+            accuracyTag: .mapGrade,
+            stakeoutNotice: AlignmentAccuracy.stakeoutNotice,
+            drawingFileName: fileName,
+            composesAxis: true
+        )
+        do {
+            let stored = try ProjectStore.saveAlignment(record, projectName: current.name, at: projectsRoot)
+            alignments = (try? ProjectStore.alignments(projectName: current.name, at: projectsRoot)) ?? alignments
+            activeAlignmentID = stored.id
+            persistProject()
+            refresh()
+            message = "背景のずれで合わせました。札は\(AlignmentAccuracy.mapGrade.rawValue)です。\(AlignmentAccuracy.stakeoutNotice)"
+        } catch let error as ProjectStoreError {
+            message = error.description
+        } catch {
+            message = "合わせを保存できませんでした。"
         }
     }
 
@@ -321,7 +438,9 @@ final class DrawingSession: ObservableObject {
                 axis: axis,
                 transform: activeTransform,
                 fromLatitude: latitude,
-                fromLongitude: longitude
+                fromLongitude: longitude,
+                composesAxis: activeComposesAxis,
+                snapLabel: inspection?.snapLabel
             )
         }
     }
@@ -348,13 +467,16 @@ final class DrawingSession: ObservableObject {
     }
 
     private func applyParsed(_ data: Data, fileName: String) {
-        guard let parsed = try? DXFParser.parse(data) else {
-            message = "保存してある DXF を読めませんでした。"
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        let parsed = ext == "sfc" ? (try? SFCParser.parse(data)) : (try? DXFParser.parse(data))
+        guard let parsed else {
+            message = ext == "sfc" ? "保存してある SFC を読めませんでした。" : "保存してある DXF を読めませんでした。"
             return
         }
         document = parsed
         self.fileName = fileName
         camera.fittedID = nil
+        backgroundVerdict = nil
     }
 
     private func persistProject() {
@@ -407,7 +529,8 @@ final class DrawingSession: ObservableObject {
             document: document,
             zone: zone,
             axis: axis,
-            transform: activeTransform
+            transform: activeTransform,
+            composesAxis: activeComposesAxis
         )
         mapPaths = built.paths
         overlayCapped = built.capped

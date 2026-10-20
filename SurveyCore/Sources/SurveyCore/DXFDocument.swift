@@ -178,17 +178,42 @@ public struct DrawingEntity: Sendable, Equatable, Identifiable {
     }
 }
 
+/// 図面のレイヤを、地形図などの背景と、設計の線に分ける。
+public enum DrawingLayerRole: String, Codable, Sendable, Equatable {
+    case background
+    case design
+
+    public var label: String {
+        switch self {
+        case .background: return "背景"
+        case .design: return "設計"
+        }
+    }
+
+    /// SFC の地形図レイヤに多い名前。DXF は既定で設計のまま。
+    public static func classify(layerName: String) -> DrawingLayerRole {
+        let folded = layerName.uppercased()
+        let markers = ["BGD", "TOPO", "地形図", "地形", "背景", "現況", "2500", "基盤", "等高", "DM"]
+        for marker in markers where folded.contains(marker.uppercased()) {
+            return .background
+        }
+        return .design
+    }
+}
+
 public struct DrawingLayer: Sendable, Equatable, Identifiable {
     public var name: String
     public var color: DrawingColor
     public var isVisible: Bool
+    public var role: DrawingLayerRole
 
     public var id: String { name }
 
-    public init(name: String, color: DrawingColor, isVisible: Bool) {
+    public init(name: String, color: DrawingColor, isVisible: Bool, role: DrawingLayerRole = .design) {
         self.name = name
         self.color = color
         self.isVisible = isVisible
+        self.role = role
     }
 }
 
@@ -262,9 +287,27 @@ public struct DrawingDocument: Sendable, Equatable {
         var copy = self
         copy.layers = layers.map { layer in
             guard layer.name == name else { return layer }
-            return DrawingLayer(name: layer.name, color: layer.color, isVisible: visible)
+            return DrawingLayer(name: layer.name, color: layer.color, isVisible: visible, role: layer.role)
         }
         return copy
+    }
+
+    /// 背景だけ、または設計だけをまとめて出す・消す。
+    public func settingRole(_ role: DrawingLayerRole, visible: Bool) -> DrawingDocument {
+        var copy = self
+        copy.layers = layers.map { layer in
+            guard layer.role == role else { return layer }
+            return DrawingLayer(name: layer.name, color: layer.color, isVisible: visible, role: layer.role)
+        }
+        return copy
+    }
+
+    public func shows(_ role: DrawingLayerRole) -> Bool {
+        layers.contains { $0.role == role && $0.isVisible }
+    }
+
+    public func has(_ role: DrawingLayerRole) -> Bool {
+        layers.contains { $0.role == role }
     }
 }
 
@@ -932,6 +975,8 @@ public struct DrawingInspect: Sendable, Equatable {
     public var longitudeDegrees: Double?
     public var distanceMeters: Double?
     public var azimuthDegrees: Double?
+    /// 測設で吸いついた種類。端点、交点、点。
+    public var snapLabel: String?
 
     public init(
         drawingX: Double,
@@ -941,7 +986,8 @@ public struct DrawingInspect: Sendable, Equatable {
         latitudeDegrees: Double?,
         longitudeDegrees: Double?,
         distanceMeters: Double?,
-        azimuthDegrees: Double?
+        azimuthDegrees: Double?,
+        snapLabel: String? = nil
     ) {
         self.drawingX = drawingX
         self.drawingY = drawingY
@@ -951,6 +997,7 @@ public struct DrawingInspect: Sendable, Equatable {
         self.longitudeDegrees = longitudeDegrees
         self.distanceMeters = distanceMeters
         self.azimuthDegrees = azimuthDegrees
+        self.snapLabel = snapLabel
     }
 }
 
@@ -982,7 +1029,8 @@ public enum DrawingPlacement {
         document: DrawingDocument,
         zone: Int,
         axis: DrawingAxis,
-        transform: Similarity2D?
+        transform: Similarity2D?,
+        composesAxis: Bool = false
     ) -> OverlayBuild {
         var paths: [GeographicPath] = []
         var count = 0
@@ -997,7 +1045,7 @@ public enum DrawingPlacement {
             }
             var coordinates: [GeoCoord] = []
             for point in stroke {
-                guard let geo = geographic(point, zone: zone, axis: axis, transform: transform) else { continue }
+                guard let geo = geographic(point, zone: zone, axis: axis, transform: transform, composesAxis: composesAxis) else { continue }
                 coordinates.append(geo)
             }
             if coordinates.count >= 2 {
@@ -1012,9 +1060,10 @@ public enum DrawingPlacement {
         _ point: PlanarPoint,
         zone: Int,
         axis: DrawingAxis,
-        transform: Similarity2D?
+        transform: Similarity2D?,
+        composesAxis: Bool = false
     ) -> GeoCoord? {
-        let plane = eastNorth(point, axis: axis, transform: transform)
+        let plane = eastNorth(point, axis: axis, transform: transform, composesAxis: composesAxis)
         guard let geo = PlaneRectangular.inverse(
             northingMeters: plane.northing,
             eastingMeters: plane.easting,
@@ -1029,19 +1078,21 @@ public enum DrawingPlacement {
         horizontalAccuracyMeters: Double,
         zone: Int,
         axis: DrawingAxis,
-        transform: Similarity2D?
+        transform: Similarity2D?,
+        composesAxis: Bool = false
     ) -> UserOnDrawing? {
         guard let plane = PlaneRectangular.forward(
             latitudeDegrees: latitudeDegrees,
             longitudeDegrees: longitudeDegrees,
             zone: zone
         ) else { return nil }
-        let drawing: PlanarPoint?
-        if let transform {
-            drawing = transform.inverse(PlanarPoint(x: plane.eastingMeters, y: plane.northingMeters))
-        } else {
-            drawing = axis.drawing(easting: plane.eastingMeters, northing: plane.northingMeters)
-        }
+        let drawing = drawingPoint(
+            easting: plane.eastingMeters,
+            northing: plane.northingMeters,
+            axis: axis,
+            transform: transform,
+            composesAxis: composesAxis
+        )
         guard let drawing else { return nil }
         let scale = abs(transform?.scale ?? 1)
         let radius = scale > 1e-15 ? horizontalAccuracyMeters / scale : horizontalAccuracyMeters
@@ -1054,9 +1105,11 @@ public enum DrawingPlacement {
         axis: DrawingAxis,
         transform: Similarity2D?,
         fromLatitude: Double?,
-        fromLongitude: Double?
+        fromLongitude: Double?,
+        composesAxis: Bool = false,
+        snapLabel: String? = nil
     ) -> DrawingInspect {
-        let plane = eastNorth(point, axis: axis, transform: transform)
+        let plane = eastNorth(point, axis: axis, transform: transform, composesAxis: composesAxis)
         let geo = PlaneRectangular.inverse(northingMeters: plane.northing, eastingMeters: plane.easting, zone: zone)
         var distance: Double?
         var azimuth: Double?
@@ -1081,19 +1134,45 @@ public enum DrawingPlacement {
             latitudeDegrees: geo?.latitudeDegrees,
             longitudeDegrees: geo?.longitudeDegrees,
             distanceMeters: distance,
-            azimuthDegrees: azimuth
+            azimuthDegrees: azimuth,
+            snapLabel: snapLabel
         )
     }
 
+    /// 手合わせの変換は、図面の X Y をそのまま東・北へ写す。
+    /// 背景の自動合わせは、先に軸で公共座標へ読んでから、その上で移動・回転する。
     private static func eastNorth(
         _ point: PlanarPoint,
         axis: DrawingAxis,
-        transform: Similarity2D?
+        transform: Similarity2D?,
+        composesAxis: Bool
     ) -> (easting: Double, northing: Double) {
+        if let transform, composesAxis {
+            let read = axis.plane(drawingX: point.x, drawingY: point.y)
+            let placed = transform.apply(PlanarPoint(x: read.easting, y: read.northing))
+            return (placed.x, placed.y)
+        }
         if let transform {
             let placed = transform.apply(point)
             return (placed.x, placed.y)
         }
         return axis.plane(drawingX: point.x, drawingY: point.y)
+    }
+
+    private static func drawingPoint(
+        easting: Double,
+        northing: Double,
+        axis: DrawingAxis,
+        transform: Similarity2D?,
+        composesAxis: Bool
+    ) -> PlanarPoint? {
+        if let transform, composesAxis {
+            guard let interpreted = transform.inverse(PlanarPoint(x: easting, y: northing)) else { return nil }
+            return axis.drawing(easting: interpreted.x, northing: interpreted.y)
+        }
+        if let transform {
+            return transform.inverse(PlanarPoint(x: easting, y: northing))
+        }
+        return axis.drawing(easting: easting, northing: northing)
     }
 }

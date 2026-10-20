@@ -57,12 +57,15 @@ final class FieldModel: ObservableObject {
     @Published private(set) var comparison: CampaignComparison?
     @Published private(set) var campaignClosed = false
     @Published private(set) var correctionStore: CorrectionStore
+    @Published var pointPrefix: String
+    @Published private(set) var controlFix = ControlFixSession()
 
     let tiles: TileStore
     let packDirectory: URL
     let siteDirectory: URL
     let drawing: DrawingSession
     let controlPoints: [ControlPoint]
+    private var prefixStore: PointPrefixStore
     private let source: any PositionSource
     private var camera: MapCameraFollow
     private var readTask: Task<Void, Never>?
@@ -91,6 +94,9 @@ final class FieldModel: ObservableObject {
         self.instrumentTrust = InstrumentTrust.load(from: siteDirectory)
         self.observations = FieldObservationLog.load(from: siteDirectory)
         self.correctionStore = CorrectionStore.load(from: siteDirectory)
+        let prefixes = PointPrefixStore.load(from: siteDirectory)
+        self.prefixStore = prefixes
+        self.pointPrefix = prefixes.prefix(for: prefixes.activeKey)
         self.drawing = DrawingSession(projectsRoot: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true))
         self.reading = .waiting
         self.camera = MapCameraFollow()
@@ -164,17 +170,54 @@ final class FieldModel: ObservableObject {
         try? workCatalog.save(to: siteDirectory)
     }
 
+    var nextPointName: String? {
+        PointNamer.nextName(prefix: pointPrefix, existing: occupiedNames())
+    }
+
+    var canRecordControlPoint: Bool { controlFix.canRecord }
+
+    func setPointPrefix(_ raw: String) {
+        pointPrefix = raw
+        guard let prefix = PointNamer.normalizePrefix(raw) else { return }
+        let key = drawing.activeRecordFolder ?? prefixStore.activeKey
+        prefixStore.activeKey = key
+        prefixStore.prefixes[key] = prefix
+        try? prefixStore.save(to: siteDirectory)
+        if let folder = drawing.activeRecordFolder, let project = drawing.project {
+            try? ProjectStore.setRecordPrefix(
+                folder: folder,
+                prefix: prefix,
+                projectName: project.name,
+                at: drawing.projectsRoot
+            )
+        }
+    }
+
+    func addProjectRecord(date: String, kind: String, name: String) {
+        let prefix = PointNamer.normalizePrefix(pointPrefix)
+        guard let folder = drawing.addFieldRecord(date: date, kind: kind, name: name, pointPrefix: prefix) else { return }
+        prefixStore.activeKey = folder
+        if let prefix {
+            prefixStore.prefixes[folder] = prefix
+            pointPrefix = prefix
+        }
+        try? prefixStore.save(to: siteDirectory)
+    }
+
     func captureObservation() {
         guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
             captureMessage = "位置が無いので残せません。"
             return
         }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return
+        }
         let work = workCatalog.selected
-        let count = observations.observations.filter { $0.workID == work.id }.count + 1
         let correction = correctionStore.active
         let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
         let observation = FieldObservation(
-            name: "\(work.shortTitle)\(count)",
+            name: name,
             workID: work.id,
             captured: position,
             corrected: shifted,
@@ -185,6 +228,49 @@ final class FieldModel: ObservableObject {
         captureMessage = shifted == nil
             ? "\(observation.name)を残しました。下見の座標は捨てません。"
             : "\(observation.name)を残しました。補正を引いた座標も残し、取得時の位置は捨てません。"
+    }
+
+    func recordControlPoint() {
+        guard let position = reading.position else {
+            captureMessage = "位置が無いので残せません。"
+            return
+        }
+        guard let fix = controlFix.record(at: position.timestamp) else {
+            captureMessage = controlFix.restarted
+                ? "FIX が切れたので、やり直してください。"
+                : "RTK FIX のときだけ基準点を記録できます。FLOAT と単独は残せません。"
+            return
+        }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return
+        }
+        let observation = FieldObservation(
+            name: name,
+            workID: "boundary",
+            captured: fix.position,
+            fixDurationSeconds: fix.fixDurationSeconds
+        )
+        observations = observations.appending(observation)
+        try? observations.save(to: siteDirectory)
+        let entry = CoordinateBookEntry(
+            name: name,
+            latitudeDegrees: fix.position.latitudeDegrees,
+            longitudeDegrees: fix.position.longitudeDegrees,
+            ellipsoidalHeightMeters: fix.position.ellipsoidalHeightMeters,
+            horizontalAccuracyMeters: fix.horizontalAccuracyMeters,
+            verticalAccuracyMeters: fix.verticalAccuracyMeters,
+            satelliteCount: fix.satelliteCount,
+            fixDurationSeconds: fix.fixDurationSeconds,
+            recordedAt: fix.position.timestamp
+        )
+        try? SiteCoordinateBook.append(entry, to: siteDirectory)
+        if let project = drawing.project {
+            try? ProjectStore.saveCoordinate(entry, projectName: project.name, at: drawing.projectsRoot)
+        }
+        let satellites = fix.satelliteCount.map { "衛星 \($0)" } ?? "衛星 —"
+        let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
+        captureMessage = "\(name)を基準点にしました。FIX \(Int(fix.fixDurationSeconds.rounded()))秒、水平 \(CoordinateText.accuracyMeters(fix.horizontalAccuracyMeters))、高さ \(vertical)、\(satellites)。"
     }
 
     func rebase(_ observationID: UUID, onto targetID: UUID) {
@@ -559,8 +645,21 @@ final class FieldModel: ObservableObject {
         downloadTask?.cancel()
     }
 
+    private func occupiedNames() -> Set<String> {
+        var names = Set(observations.observations.map(\.name))
+        names.formUnion(controlPoints.map(\.name))
+        names.formUnion(SiteCoordinateBook.load(from: siteDirectory).map(\.name))
+        if let project = drawing.project {
+            names.formUnion(ProjectStore.coordinateBookNames(projectName: project.name, at: drawing.projectsRoot))
+        }
+        return names
+    }
+
     private func apply(_ reading: PositionReading) {
         self.reading = reading
+        if let position = reading.position {
+            controlFix.observe(position, at: position.timestamp)
+        }
         if let position = workingReading.position, position.isPlottable {
             drawing.noteReference(
                 latitude: position.latitudeDegrees,

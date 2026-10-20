@@ -73,6 +73,21 @@ public enum TileMath {
         return TileID(style: style, z: z, x: x, y: y)
     }
 
+    /// タイル内の割合。xFraction は西から東、yFraction は北から南（ベクトルタイルの Y は下向き）。
+    public static func unproject(
+        tileX: Int,
+        tileY: Int,
+        zoom: Int,
+        xFraction: Double,
+        yFraction: Double
+    ) -> GeoCoord {
+        let z = min(max(zoom, 0), 22)
+        let n = Double(1 << z)
+        let longitude = (Double(tileX) + xFraction) / n * 360 - 180
+        let latitude = latitude(mercatorY: Double(tileY) + yFraction, n: n)
+        return GeoCoord(latitudeDegrees: latitude, longitudeDegrees: longitude)
+    }
+
     public static func bounds(of tile: TileID) -> GeoBounds {
         let z = min(max(tile.z, 0), 22)
         let n = Double(1 << z)
