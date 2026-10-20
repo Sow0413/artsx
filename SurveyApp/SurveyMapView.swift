@@ -45,6 +45,7 @@ struct SurveyMapView: UIViewRepresentable {
         context.coordinator.syncCrew(on: map, field: field)
         context.coordinator.syncAid(on: map, field: field)
         context.coordinator.syncDisaster(on: map, field: field)
+        context.coordinator.syncRepeaters(on: map, field: field)
         context.coordinator.syncHeat(on: map, field: field)
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
@@ -80,6 +81,9 @@ struct SurveyMapView: UIViewRepresentable {
         private var disasterAnnotations: [MKAnnotation] = []
         private var disasterOverlays: [MKOverlay] = []
         private var disasterKey = ""
+        private var repeaterAnnotations: [MKAnnotation] = []
+        private var repeaterOverlays: [MKOverlay] = []
+        private var repeaterKey = ""
         private var heatOverlays: [MKOverlay] = []
         private var heatKey = ""
         private var mapPick = false
@@ -293,12 +297,76 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }
 
+        func syncRepeaters(on map: MKMapView, field: FieldModel) {
+            let install = field.repeaterInstall
+            let installKey = install.map {
+                "\($0.deviceID):\($0.latitudeDegrees):\($0.longitudeDegrees):\(field.repeaterBattery ?? -1):\(field.repeaterCharging)"
+            } ?? "-"
+            let linkKey = field.repeaterLinks.map {
+                "\($0.peerID):\($0.latitudeDegrees):\($0.longitudeDegrees):\($0.grade.rawValue):\($0.batteryPercent ?? -1):\($0.name)"
+            }.joined(separator: "|")
+            let key = installKey + "#" + linkKey
+            if key == repeaterKey { return }
+            repeaterKey = key
+            if !repeaterAnnotations.isEmpty {
+                map.removeAnnotations(repeaterAnnotations)
+                repeaterAnnotations = []
+            }
+            if !repeaterOverlays.isEmpty {
+                map.removeOverlays(repeaterOverlays)
+                repeaterOverlays = []
+            }
+            if let install {
+                let battery = field.repeaterBattery.map { "電池 \($0)%" } ?? "電池 不明"
+                let charge = field.repeaterCharging ? " 充電中" : ""
+                repeaterAnnotations.append(RepeaterInstallAnnotation(
+                    deviceID: install.deviceID,
+                    coordinate: CLLocationCoordinate2D(latitude: install.latitudeDegrees, longitude: install.longitudeDegrees),
+                    title: "設置 \(install.name)",
+                    subtitle: battery + charge
+                ))
+                for link in field.repeaterLinks {
+                    var coordinates = [
+                        CLLocationCoordinate2D(latitude: install.latitudeDegrees, longitude: install.longitudeDegrees),
+                        CLLocationCoordinate2D(latitude: link.latitudeDegrees, longitude: link.longitudeDegrees)
+                    ]
+                    let line = ReachLineOverlay(coordinates: &coordinates, count: coordinates.count)
+                    line.stroke = Self.linkColor(link.grade)
+                    repeaterOverlays.append(line)
+                }
+            }
+            for link in field.repeaterLinks {
+                let battery = link.batteryPercent.map { "電池 \($0)%" } ?? "電池 不明"
+                repeaterAnnotations.append(RepeaterPeerAnnotation(
+                    peerID: link.peerID,
+                    grade: link.grade,
+                    coordinate: CLLocationCoordinate2D(latitude: link.latitudeDegrees, longitude: link.longitudeDegrees),
+                    title: link.name,
+                    subtitle: "\(battery) \(link.grade.label)"
+                ))
+            }
+            if !repeaterAnnotations.isEmpty {
+                map.addAnnotations(repeaterAnnotations)
+            }
+            if !repeaterOverlays.isEmpty {
+                map.addOverlays(repeaterOverlays, level: .aboveLabels)
+            }
+        }
+
         private static func disasterColor(_ kind: DisasterKind) -> UIColor {
             switch kind {
             case .collapse, .roadCut: return SurveyUIColor.red
             case .flood: return SurveyUIColor.blue
             case .bridge, .sediment: return SurveyUIColor.amber
             case .other: return SurveyUIColor.grey
+            }
+        }
+
+        private static func linkColor(_ grade: LinkGrade) -> UIColor {
+            switch grade {
+            case .good: return SurveyUIColor.green
+            case .weak: return SurveyUIColor.amber
+            case .lost: return SurveyUIColor.red
             }
         }
 
@@ -461,6 +529,32 @@ struct SurveyMapView: UIViewRepresentable {
                 }
                 return view
             }
+            if let install = annotation as? RepeaterInstallAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "repeater-install")
+                    ?? MKMarkerAnnotationView(annotation: install, reuseIdentifier: "repeater-install")
+                view.annotation = install
+                if let marker = view as? MKMarkerAnnotationView {
+                    marker.markerTintColor = SurveyUIColor.amber
+                    marker.glyphText = "設"
+                    marker.titleVisibility = .visible
+                    marker.subtitleVisibility = .visible
+                }
+                view.canShowCallout = true
+                return view
+            }
+            if let peer = annotation as? RepeaterPeerAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "repeater-peer")
+                    ?? MKMarkerAnnotationView(annotation: peer, reuseIdentifier: "repeater-peer")
+                view.annotation = peer
+                if let marker = view as? MKMarkerAnnotationView {
+                    marker.markerTintColor = Self.linkColor(peer.grade)
+                    marker.glyphText = "中"
+                    marker.titleVisibility = .visible
+                    marker.subtitleVisibility = .visible
+                }
+                view.canShowCallout = true
+                return view
+            }
             if let peer = annotation as? DisasterPeerAnnotation {
                 let view = mapView.dequeueReusableAnnotationView(withIdentifier: "disaster-peer")
                     ?? MKMarkerAnnotationView(annotation: peer, reuseIdentifier: "disaster-peer")
@@ -529,6 +623,10 @@ struct SurveyMapView: UIViewRepresentable {
             if !heatOverlays.isEmpty {
                 map.removeOverlays(heatOverlays)
                 map.addOverlays(heatOverlays, level: .aboveLabels)
+            }
+            if !repeaterOverlays.isEmpty {
+                map.removeOverlays(repeaterOverlays)
+                map.addOverlays(repeaterOverlays, level: .aboveLabels)
             }
         }
 

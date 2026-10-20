@@ -118,6 +118,7 @@ extension FieldModel {
             guard try DisasterBook.appendText(text, projectName: project.name, at: drawing.projectsRoot) else { return }
             reloadDisaster()
             publishDisaster(kind: .text, text: text)
+            offerLoRa(kind: .text, name: text.author, latitude: nil, longitude: nil, text: text.body, id: text.id)
             disasterMessage = "文字を中継に出しました。"
         } catch {
             disasterMessage = "空の文字は送れません。"
@@ -216,12 +217,22 @@ extension FieldModel {
     }
 
     func relayDisasterSOS(_ packet: SOSPacket) {
-        guard disasterMode else { return }
+        guard disasterMode || repeaterMode else { return }
         publishDisaster(kind: .sos, sos: packet)
+        if let beacon = packet.beacon {
+            offerLoRa(
+                kind: .sos,
+                name: beacon.name,
+                latitude: beacon.latitudeDegrees,
+                longitude: beacon.longitudeDegrees,
+                text: nil,
+                id: beacon.id
+            )
+        }
     }
 
     func relayDisasterHeld(now: Date) {
-        guard disasterMode else { return }
+        guard disasterMode || repeaterMode else { return }
         let interval = BatterySaver.relayInterval(enabled: batterySaver)
         if let last = lastDisasterRelay, now.timeIntervalSince(last) < interval { return }
         lastDisasterRelay = now
@@ -280,13 +291,16 @@ extension FieldModel {
         publishDisaster(kind: .passage, passage: sample)
     }
 
-    private func publishDisaster(
+    func publishDisaster(
         kind: BucketKind,
         position: DisasterPosition? = nil,
         sos: SOSPacket? = nil,
         text: DisasterText? = nil,
         site: DisasterSite? = nil,
-        passage: PassageSample? = nil
+        passage: PassageSample? = nil,
+        radioPacket: RadioPacket? = nil,
+        beacon: RepeaterBeacon? = nil,
+        hopLimit: Int = BucketRelay.hopLimit
     ) {
         guard let project = drawing.project else { return }
         prepareBucket()
@@ -295,11 +309,14 @@ extension FieldModel {
             kind: kind,
             deviceID: crew.deviceID,
             at: Date(),
+            hopLimit: hopLimit,
             position: position,
             sos: sos,
             text: text,
             site: site,
-            passage: passage
+            passage: passage,
+            radio: radioPacket,
+            beacon: beacon
         )
         guard let sent = bucketDesk.originate(envelope, now: Date()) else { return }
         nearby.send(sent)
@@ -313,6 +330,16 @@ extension FieldModel {
         }
         if let sos = envelope.sos {
             ingestSOS(sos, arrived: .nearby)
+            if repeaterMode, let beacon = sos.beacon {
+                offerLoRa(
+                    kind: .sos,
+                    name: beacon.name,
+                    latitude: beacon.latitudeDegrees,
+                    longitude: beacon.longitudeDegrees,
+                    text: nil,
+                    id: beacon.id
+                )
+            }
         }
         if let text = envelope.text {
             _ = try? DisasterBook.appendText(text, projectName: projectName, at: drawing.projectsRoot)
@@ -322,6 +349,14 @@ extension FieldModel {
         }
         if let passage = envelope.passage {
             _ = try? DisasterBook.appendPassage(passage, projectName: projectName, at: drawing.projectsRoot)
+        }
+        if let packet = envelope.radio {
+            radio.ingestRelayed(packet, play: !repeaterMode)
+        }
+        if let beacon = envelope.beacon, beacon.deviceID != crew.deviceID {
+            repeaterBoard.hear(beacon, now: Date())
+            repeaterBoard.age(now: Date())
+            repeaterLinks = repeaterBoard.links
         }
         reloadDisaster()
     }

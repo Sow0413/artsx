@@ -44,6 +44,15 @@ struct MapTabView: View {
                     .background(SurveyColor.card.opacity(0.92))
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
+                    Button("中継") {
+                        field.showsRepeater = true
+                    }
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(field.repeaterMode ? Color.black : SurveyColor.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(field.repeaterMode ? SurveyColor.amber : SurveyColor.card.opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     Button("災害") {
                         field.showsDisaster = true
                     }
@@ -108,6 +117,9 @@ struct MapTabView: View {
         }
         .sheet(isPresented: $field.showsDisaster) {
             DisasterSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsRepeater) {
+            RepeaterSheet(field: field)
         }
     }
 

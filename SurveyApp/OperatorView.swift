@@ -96,9 +96,12 @@ struct OperatorView: View {
             }
         }
         .background(SurveyColor.background)
-        .onAppear { UIApplication.shared.isIdleTimerDisabled = !field.batterySaver }
-        .onChange(of: field.batterySaver) { _, saver in
-            UIApplication.shared.isIdleTimerDisabled = !saver
+        .onAppear { field.applyRepeaterScreen(field.repeaterMode) }
+        .onChange(of: field.batterySaver) { _, _ in
+            field.applyRepeaterScreen(field.repeaterMode)
+        }
+        .onChange(of: field.repeaterMode) { _, on in
+            field.applyRepeaterScreen(on)
         }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }

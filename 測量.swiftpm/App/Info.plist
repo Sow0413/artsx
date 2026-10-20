@@ -26,6 +26,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>技適を取った920MHzのMeshtastic互換ノードと、位置・SOS・短文をやり取りするために使います。音声は送りません。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>現在地と精度の円を地図に出すために使います。座標は端末内に WGS84/ITRF で保持します。</string>
 	<key>NSMotionUsageDescription</key>

@@ -67,6 +67,11 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .onAppear { field.start() }
         .onDisappear { field.stop() }
+        .overlay {
+            if field.repeaterMode && field.repeaterDimmed {
+                RepeaterCover(field: field)
+            }
+        }
     }
 }
 

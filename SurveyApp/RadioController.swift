@@ -18,6 +18,8 @@ final class RadioController: ObservableObject {
     private var systemBegan = false
     /// 受信中の話者を、空間オーディオの位置に変える。方向不明なら nil。
     var spacePoint: () -> TalkPoint? = { nil }
+    var onRelay: ((RadioPacket) -> Void)?
+    var suppressPlayback = false
 
     #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
     private let system = SystemPushToTalk()
@@ -77,6 +79,7 @@ final class RadioController: ObservableObject {
         nearby.onRadio = { [weak self] packet in
             self?.desk.receive(packet)
             self?.publish()
+            self?.onRelay?(packet)
         }
         nearby.observePeers { [weak self] count in
             guard RadioHardware.nearbyPeers else { return }
@@ -136,8 +139,16 @@ final class RadioController: ObservableObject {
         publish()
     }
 
+    func ingestRelayed(_ packet: RadioPacket, play: Bool) {
+        desk.receive(packet)
+        if play, let data = packet.audio {
+            playIncoming(data)
+        }
+        publish()
+    }
+
     private func playIncoming(_ data: Data) {
-        guard spaceAudio else { return }
+        guard spaceAudio, !suppressPlayback else { return }
         if let point = spacePoint() {
             space.place(point)
         } else {

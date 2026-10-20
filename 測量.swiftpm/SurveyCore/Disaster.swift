@@ -388,6 +388,21 @@ public enum BucketKind: String, Codable, Sendable {
     case text
     case site
     case passage
+    case radio
+    case beacon
+
+    /// 小さいほど先に送る。SOS が最優先。
+    public var relayRank: Int {
+        switch self {
+        case .sos: return 0
+        case .radio: return 1
+        case .text: return 2
+        case .beacon: return 3
+        case .position: return 4
+        case .site: return 5
+        case .passage: return 6
+        }
+    }
 }
 
 public enum BucketDrop: String, Equatable, Sendable {
@@ -396,6 +411,7 @@ public enum BucketDrop: String, Equatable, Sendable {
     case seen
     case loop
     case empty
+    case tooBig
 }
 
 public enum BucketDecision: Equatable, Sendable {
@@ -418,6 +434,8 @@ public struct BucketEnvelope: Codable, Equatable, Sendable, Identifiable {
     public var text: DisasterText?
     public var site: DisasterSite?
     public var passage: PassageSample?
+    public var radio: RadioPacket?
+    public var beacon: RepeaterBeacon?
 
     public init(
         id: UUID,
@@ -431,7 +449,9 @@ public struct BucketEnvelope: Codable, Equatable, Sendable, Identifiable {
         sos: SOSPacket? = nil,
         text: DisasterText? = nil,
         site: DisasterSite? = nil,
-        passage: PassageSample? = nil
+        passage: PassageSample? = nil,
+        radio: RadioPacket? = nil,
+        beacon: RepeaterBeacon? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -445,11 +465,14 @@ public struct BucketEnvelope: Codable, Equatable, Sendable, Identifiable {
         self.text = text
         self.site = site
         self.passage = passage
+        self.radio = radio
+        self.beacon = beacon
     }
 }
 
 public enum BucketRelay {
     public static let hopLimit = 6
+    public static let audioCap = 4096
 
     public static func ttl(for kind: BucketKind) -> TimeInterval {
         switch kind {
@@ -457,6 +480,8 @@ public enum BucketRelay {
         case .sos: return 60 * 60
         case .text: return 6 * 60 * 60
         case .site, .passage: return 24 * 60 * 60
+        case .radio: return 2 * 60
+        case .beacon: return 2 * 60
         }
     }
 
@@ -472,7 +497,9 @@ public enum BucketRelay {
         sos: SOSPacket? = nil,
         text: DisasterText? = nil,
         site: DisasterSite? = nil,
-        passage: PassageSample? = nil
+        passage: PassageSample? = nil,
+        radio: RadioPacket? = nil,
+        beacon: RepeaterBeacon? = nil
     ) -> BucketEnvelope {
         BucketEnvelope(
             id: id,
@@ -486,7 +513,9 @@ public enum BucketRelay {
             sos: sos,
             text: text,
             site: site,
-            passage: passage
+            passage: passage,
+            radio: radio,
+            beacon: beacon
         )
     }
 }
@@ -521,6 +550,10 @@ public struct BucketDesk: Sendable {
         guard envelope.carriesPayload else { return .drop(.empty) }
         if envelope.hops.contains(selfID) { return .drop(.loop) }
         if seen.contains(envelope.id) { return .drop(.seen) }
+        if let audio = envelope.radio?.audio, audio.count > BucketRelay.audioCap {
+            remember(envelope.id)
+            return .drop(.tooBig)
+        }
         remember(envelope.id)
         if envelope.hops.count >= envelope.hopLimit {
             return .keep(envelope)
@@ -536,7 +569,12 @@ public struct BucketDesk: Sendable {
 
     public mutating func forwardable(now: Date) -> [BucketEnvelope] {
         prune(now: now)
-        return held.filter { $0.hops.count < $0.hopLimit && now.timeIntervalSince($0.createdAt) < $0.ttlSeconds }
+        return held
+            .filter { $0.hops.count < $0.hopLimit && now.timeIntervalSince($0.createdAt) < $0.ttlSeconds }
+            .sorted { lhs, rhs in
+                if lhs.kind.relayRank != rhs.kind.relayRank { return lhs.kind.relayRank < rhs.kind.relayRank }
+                return lhs.createdAt < rhs.createdAt
+            }
     }
 
     private mutating func remember(_ id: UUID) {
@@ -551,10 +589,16 @@ public struct BucketDesk: Sendable {
         held.removeAll { $0.id == envelope.id }
         held.append(envelope)
         prune(now: now)
-        if held.count > Self.heldCap {
-            held.sort { $0.createdAt < $1.createdAt }
-            held.removeFirst(held.count - Self.heldCap)
+        while held.count > Self.heldCap {
+            guard let index = held.indices.min(by: { Self.dropFirst(held[$0], held[$1]) }) else { break }
+            held.remove(at: index)
         }
+    }
+
+    /// 先に捨てる方を true。優先度が低いもの、同じなら古いもの。
+    private static func dropFirst(_ lhs: BucketEnvelope, _ rhs: BucketEnvelope) -> Bool {
+        if lhs.kind.relayRank != rhs.kind.relayRank { return lhs.kind.relayRank > rhs.kind.relayRank }
+        return lhs.createdAt < rhs.createdAt
     }
 
     private mutating func prune(now: Date) {
@@ -576,6 +620,10 @@ extension BucketEnvelope {
             return site != nil
         case .passage:
             return passage != nil
+        case .radio:
+            return radio != nil
+        case .beacon:
+            return beacon != nil
         }
     }
 }
