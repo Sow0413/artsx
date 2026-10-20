@@ -101,6 +101,30 @@ jobs:
           set -euo pipefail
           brew install xcodegen
           xcodegen generate
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          xcode_app="$(python3 - <<'PY'
+          import os, re, sys
+          apps = []
+          for name in os.listdir("/Applications"):
+              if not re.fullmatch(r"Xcode_26(?:\.\d+)*\.app", name):
+                  continue
+              path = os.path.join("/Applications", name)
+              if not os.path.isdir(path):
+                  continue
+              nums = tuple(int(part) for part in name[len("Xcode_"):-len(".app")].split("."))
+              apps.append((nums, path))
+          if not apps:
+              print("Xcode 26 is not installed on this runner.", file=sys.stderr)
+              sys.exit(1)
+          apps.sort()
+          print(apps[-1][1])
+          PY
+          )"
+          sudo xcode-select -s "$xcode_app"
+          xcodebuild -version
+          xcodebuild -showsdks | awk '/iphoneos/ { print }'
       - name: Sign and upload artsx
         run: |
           set -euo pipefail
