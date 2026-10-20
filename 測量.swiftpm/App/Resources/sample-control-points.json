@@ -1,0 +1,50 @@
+{
+  "source": "bundled-sample",
+  "points": [
+    {
+      "id": "sample-desk",
+      "name": "見本点（机上）",
+      "kind": "見本",
+      "grade": null,
+      "latitudeDegrees": 35.68123,
+      "longitudeDegrees": 139.76712,
+      "heightMeters": 12.4,
+      "ellipsoidalHeightMeters": 12.4,
+      "heightKind": "ellipsoidal",
+      "sourceNote": "実在の三角点ではない。プレビューの現在地に置いた机上の点。"
+    },
+    {
+      "id": "jgd-origin",
+      "name": "日本経緯度原点",
+      "kind": "三角点",
+      "grade": "原点",
+      "latitudeDegrees": 35.658099222222,
+      "longitudeDegrees": 139.741357472222,
+      "heightMeters": null,
+      "heightKind": "unspecified",
+      "sourceNote": "測量法施行令の原点数値（緯度・経度、2011年10月21日改正）。金属標の標高は成果表を見て現場パックに入れる。"
+    },
+    {
+      "id": "jgd-level-origin",
+      "name": "日本水準原点",
+      "kind": "水準点",
+      "grade": "原点",
+      "latitudeDegrees": 35.677219416667,
+      "longitudeDegrees": 139.747847000000,
+      "heightMeters": 24.39,
+      "heightKind": "orthometric",
+      "sourceNote": "標高24.3900mは測量法施行令。緯度経度は基準点成果等閲覧サービス由来の公開値（2011年改測）。iPhoneの楕円体高との差にはジオイドが含まれる。"
+    },
+    {
+      "id": "fuji-2",
+      "name": "富士山",
+      "kind": "三角点",
+      "grade": "二等",
+      "latitudeDegrees": 35.360628055556,
+      "longitudeDegrees": 138.727365277778,
+      "heightMeters": 3775.56,
+      "heightKind": "orthometric",
+      "sourceNote": "緯度経度は平成14年の標石に示された世界測地系の値。標高3775.56mは令和7年の公表値。成果表の代わりにはしない。"
+    }
+  ]
+}

@@ -12,7 +12,7 @@ enum ControlPointLoader {
         if FileManager.default.fileExists(atPath: csv.path) {
             return loadFile(csv, csvText: true)
         }
-        guard let url = bundle.url(forResource: "sample-control-points", withExtension: "json"),
+        guard let url = bundledSampleURL(bundle),
               let data = try? Data(contentsOf: url),
               let points = try? ControlPointCatalog.loadJSON(data) else {
             return ([], "基準点の見本を読めませんでした。")
@@ -35,5 +35,17 @@ enum ControlPointLoader {
             return ([], "現場パックの基準点を読めませんでした。")
         }
         return (points, nil)
+    }
+
+    /// Xcode のアプリは main。Swift Playgrounds のパッケージは module に資源を置く。
+    private static func bundledSampleURL(_ bundle: Bundle) -> URL? {
+        if let url = bundle.url(forResource: "sample-control-points", withExtension: "json") {
+            return url
+        }
+        #if SWIFT_PACKAGE
+        return Bundle.module.url(forResource: "sample-control-points", withExtension: "json")
+        #else
+        return nil
+        #endif
     }
 }

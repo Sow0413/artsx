@@ -4,6 +4,19 @@
 
 iPhone / iPad 向けの測量アプリです。地図タブ、作業ごとの精度の色、三角点での検証、取った点の引き継ぎが動きます。図面と出すは置き場所だけあります。
 
+## iPad の Swift Playgrounds で開く
+
+Mac も Apple Developer の登録も要りません。iPadOS 17 以降の Swift Playgrounds で、自分の iPad 上で実行します。
+
+1. `測量.swiftpm.zip` を iPad に渡す。AirDrop、iCloud Drive、メールのどれでもよい。
+2. ファイル App で zip をタップして展開する。
+3. 出てきた `測量.swiftpm` をタップする。Swift Playgrounds で開く。開かなければ、共有から Swift Playgrounds を選ぶ。
+4. 右上の実行で起動し、位置情報を許可する。
+
+地図の地理院タイルは、最初の表示と範囲の保存に通信が要る。見本の基準点は同梱してある。カメラの利用目的は書いてあるが、撮影画面はまだない。
+
+ソースを直したあとは `scripts/refresh-playground.sh` を実行し、`測量.swiftpm` を zip し直す。
+
 ## 今できること
 
 - 地図に現在地と精度の円を出す。段階0は iPhone の GPS だけ。
@@ -22,7 +35,7 @@ iPhone / iPad 向けの測量アプリです。地図タブ、作業ごとの精
 - 地点と軌跡の型はある。画面に出す記録は、作業で残した点だけ。
 - 全国の三角点台帳は入っていない。同梱は見本だけ。
 - 地理院タイルはアプリに同梱しない。最初の表示と、範囲の保存には通信が要る。
-- この環境には Xcode がない。iOS アプリ本体はここではビルドしていない。
+- この環境には Xcode がない。iOS アプリ本体も、Playgrounds のパッケージも、ここではビルドしていない。
 
 ## 精度の色
 
@@ -111,6 +124,7 @@ OsmAnd と QField は GPL。それらのコードは読んでいないし、コ�
 
 - `SurveyCore/` — 純 Swift の計算。位置、作業の要求精度、タイル、範囲保存、地点と軌跡の型。
 - `SurveyApp/` — SwiftUI。iOS 17 以降、iPhone と iPad の1つのアプリ。
+- `測量.swiftpm/` — 同じソースを iPad の Swift Playgrounds で開くパッケージ。外部の依存はない。
 - `project.yml` — XcodeGen の定義。`Survey.xcodeproj` は生成物なのでコミットしない。
 
 ## Linux でテスト
