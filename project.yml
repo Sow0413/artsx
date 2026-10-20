@@ -46,6 +46,9 @@ targets:
     platform: watchOS
     sources:
       - path: SurveyWatch
+    dependencies:
+      - package: SurveyCore
+        product: SurveyCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.oshiro.survey.watch
@@ -53,6 +56,8 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: 測量
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: jp.oshiro.survey
+        INFOPLIST_KEY_NSMotionUsageDescription: "転倒と強い衝撃を、加速度から補助的に見るために使います。緊急通報の代わりではありません。"
+        INFOPLIST_KEY_NSFallDetectionUsageDescription: "Apple Watch の転倒を受け取り、近くの端末に知らせます。緊急通報の代わりではありません。"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "4"
         WATCHOS_DEPLOYMENT_TARGET: "10.0"

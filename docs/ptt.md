@@ -78,9 +78,15 @@ PushToTalk がシステムに頼むこと:
 
 `SURVEY_PLAYGROUND` が付いているビルドは、PushToTalk も MultipeerConnectivity も組み込まない。マイクの使用目的も、Push to Talk の背景モードも、Playgrounds の権限には出さない。ボタンは残り、発話と測点は端末内の記録だけになる。
 
+## 転倒
+
+転倒と衝撃の通知は、同じ近距離セッションの `LinkFrame`（kind `fall`）に載せる。P510 が届くときは `FallRelay` に控え、届かないあいだは端末内に留めて、あとから同じ口で送る。サーバーの受け口はまだ無い。通知の例は「右うしろ15m 転倒」。これは緊急通報の代わりではない。
+
 ## 未確認
 
 - 実機の PushToTalk、ロック中の受信、システムのボタン。
 - APNs の `pushtotalk` と、P510 のプロセス。
 - MultipeerConnectivity の発見と、Wi-Fi / Bluetooth の届く距離。
 - マイクの録音と再生。この版は PCM の枠だけ。
+- 転倒通知の近距離送信と、P510 の `FallRelay`。
+- CoreMotion の加速度と、Apple Watch の `CMFallDetectionManager`。資格は未取得。

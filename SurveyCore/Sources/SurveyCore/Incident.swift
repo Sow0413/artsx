@@ -4,11 +4,13 @@ import Foundation
 public enum IncidentTrigger: String, Codable, Sendable, Equatable {
     case alarm
     case manual
+    case fall
 
     public var label: String {
         switch self {
         case .alarm: return "接近警報"
         case .manual: return "ヒヤリ"
+        case .fall: return "転倒検知"
         }
     }
 }
@@ -893,7 +895,12 @@ enum IncidentReport {
     static func lines(_ record: IncidentRecord) -> [String] {
         var lines = [
             title,
-            record.notice,
+            record.notice
+        ]
+        if record.trigger == .fall, !record.notice.contains(FallCall.disclaimer) {
+            lines.append(FallCall.disclaimer)
+        }
+        lines.append(contentsOf: [
             "日時 \(stamp.string(from: record.occurredAt))",
             "きっかけ \(record.trigger.label)",
             "プロジェクト \(record.projectName)",
@@ -901,7 +908,7 @@ enum IncidentReport {
             "作業半径 \(tenths(record.machineRadiusMeters))m",
             "精度 \(record.accuracyMeters.map { tenths($0) + "m" } ?? "—") \(record.stageLabel) \(record.solutionLabel)",
             "関係者"
-        ]
+        ])
         for party in record.parties {
             let facing: String
             if let degrees = party.facingDegrees {

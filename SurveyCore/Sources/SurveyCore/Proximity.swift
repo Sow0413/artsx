@@ -908,6 +908,7 @@ public enum WatchCue: String, Codable, Sendable {
     case caution
     case alarm
     case clear
+    case fall
 
     public init(_ level: ProximityLevel) {
         switch level {

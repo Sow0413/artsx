@@ -76,6 +76,7 @@ struct SafetyWash: View {
 
 struct ThreatRim: View {
     var cues: [ThreatCue]
+    var fall: FallCue?
 
     var body: some View {
         GeometryReader { geo in
@@ -87,6 +88,14 @@ struct ThreatRim: View {
                     .frame(width: length, height: length)
                     .rotationEffect(.degrees(cue.relativeDegrees))
                     .position(point)
+            }
+            if let fall {
+                let point = rim(fall.relativeDegrees, in: size)
+                ThreatArrow(closeness: 1)
+                    .frame(width: 96, height: 96)
+                    .rotationEffect(.degrees(fall.relativeDegrees))
+                    .position(point)
+                    .accessibilityLabel(fall.speech)
             }
         }
         .allowsHitTesting(false)

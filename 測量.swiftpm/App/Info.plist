@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>現在地と精度の円を地図に出すために使います。座標は端末内に WGS84/ITRF で保持します。</string>
+	<key>NSMotionUsageDescription</key>
+	<string>転倒と強い衝撃を、加速度から補助的に見るために使います。緊急通報の代わりではありません。</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

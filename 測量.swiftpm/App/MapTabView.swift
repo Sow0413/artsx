@@ -23,6 +23,11 @@ struct MapTabView: View {
                 SafetyBanner(crew: field.crew) {
                     field.recordIncident(trigger: .manual)
                 }
+                FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
+                    field.cancelFall()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
                 IncidentTray(field: field)
                 HStack {
                     Button("統計") {
@@ -56,7 +61,10 @@ struct MapTabView: View {
         }
         .background(SurveyColor.mapBackdrop)
         .overlay {
-            SafetyWash(level: field.crew.worst)
+            ZStack {
+                SafetyWash(level: field.crew.worst)
+                ThreatRim(cues: [], fall: field.crew.fallCue)
+            }
         }
         .sheet(isPresented: $field.showsIncidentStats) {
             IncidentStatsSheet(field: field)

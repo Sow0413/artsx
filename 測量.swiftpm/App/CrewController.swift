@@ -13,11 +13,15 @@ final class CrewController: ObservableObject {
     @Published private(set) var limits = ProximityLimits.standard
     @Published private(set) var threats = ThreatPicture(facingDegrees: nil, facingSource: "", cues: [], headline: "近くに人はいません")
     @Published private(set) var callout: ApproachNotice?
+    @Published private(set) var fallSpeech: String?
+    @Published private(set) var fallCue: FallCue?
     @Published var speakDirections = false
     @Published private(set) var revision = 0
 
     var onAlarm: ((Date) -> Bool)?
     var onHiyari: (() -> Void)?
+    var onWatchFall: ((FallKind, Date, Bool) -> Void)?
+    var onWatchFallCancel: (() -> Void)?
     let notice = SafetyNotice.text
     private let relay = CrewRelayStub(reachable: false)
     private let mesh = CrewMesh(reachable: false)
@@ -37,6 +41,9 @@ final class CrewController: ObservableObject {
     private var approachRepeat = ApproachCallout.defaultRepeatSeconds
     private var openedAlarms: Set<UUID> = []
     private var speeches: [IncidentSpeech] = []
+    private var channelID = ""
+    private var heardFalls: Set<UUID> = []
+    private var fallUntil: Date?
     #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
     private let uwb = SystemUWB()
     #endif
@@ -74,6 +81,12 @@ final class CrewController: ObservableObject {
             watch.onHiyari = { [weak self] in
                 self?.onHiyari?()
             }
+            watch.onFall = { [weak self] kind, date, immediate in
+                self?.onWatchFall?(kind, date, immediate)
+            }
+            watch.onFallCancel = { [weak self] in
+                self?.onWatchFallCancel?()
+            }
             watch.start()
         }
         #endif
@@ -83,6 +96,39 @@ final class CrewController: ObservableObject {
     var displayName: String { desk.name }
 
     func recentSpeeches() -> [IncidentSpeech] { speeches }
+
+    func rememberFallSpeech(_ text: String, at date: Date) {
+        rememberSpeech(text, at: date)
+    }
+
+    func clearWatchFall() {
+        #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
+        if RadioHardware.watch {
+            watch.sendFallClear()
+        }
+        #endif
+    }
+
+    func askWatchFall(kind: FallKind, at date: Date) {
+        #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
+        if RadioHardware.watch {
+            watch.sendFallAsk(kind: kind, at: date)
+        }
+        #else
+        _ = kind
+        _ = date
+        #endif
+    }
+
+    func noteWatchFallSent(_ text: String) {
+        #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
+        if RadioHardware.watch {
+            watch.sendFallSent(text: text)
+        }
+        #else
+        _ = text
+        #endif
+    }
 
     func distances() -> [String: Double] {
         Dictionary(desk.hits.map { ($0.other.id, $0.distanceMeters) }, uniquingKeysWith: { first, _ in first })
@@ -127,7 +173,12 @@ final class CrewController: ObservableObject {
             callout = nil
             openedAlarms = []
             speeches = []
+            heardFalls = []
+            fallSpeech = nil
+            fallCue = nil
+            fallUntil = nil
         }
+        channelID = project.id
         limits = ProximityLimits.resolved(caution: project.cautionMeters, margin: project.proximityMarginMeters)
         desk.limits = limits
         workRadius = radius
@@ -173,7 +224,41 @@ final class CrewController: ObservableObject {
         publish(now: Date(), sound: true)
     }
 
+    func receiveFall(_ notice: FallNotice, position: GeodeticPosition?) {
+        guard notice.deviceID != deviceID, notice.channelID == channelID else { return }
+        guard heardFalls.insert(notice.id).inserted else { return }
+        let announcement: FallAnnouncement
+        if let position, position.isPlottable,
+           let made = FallCall.announce(
+            notice: notice,
+            fromLatitude: position.latitudeDegrees,
+            fromLongitude: position.longitudeDegrees,
+            courseDegrees: position.courseDegrees,
+            headingDegrees: position.headingDegrees
+           ) {
+            announcement = made
+        } else {
+            announcement = FallAnnouncement(speech: "\(notice.name) \(notice.kind.label)", cue: nil)
+        }
+        fallSpeech = announcement.speech
+        fallCue = announcement.cue
+        fallUntil = Date().addingTimeInterval(30)
+        rememberSpeech(announcement.speech, at: Date())
+        CrewVoice.say(announcement.speech)
+        pulseFall(announcement.speech)
+        revision += 1
+    }
+
+    func ageFall(now: Date) {
+        guard let fallUntil, now >= fallUntil else { return }
+        fallSpeech = nil
+        fallCue = nil
+        self.fallUntil = nil
+        revision += 1
+    }
+
     private func publish(now: Date, sound: Bool) {
+        ageFall(now: now)
         peers = desk.others
         worst = desk.worst
         if let origin = desk.selfFix {
@@ -284,6 +369,17 @@ final class CrewController: ObservableObject {
         #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
         if RadioHardware.watch, changed || repeatAlarm {
             watch.send(cue)
+        }
+        #endif
+    }
+
+    private func pulseFall(_ speech: String) {
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+        AudioServicesPlayAlertSound(SystemSoundID(kSystemSoundID_Vibrate))
+        AudioServicesPlayAlertSound(1005)
+        #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
+        if RadioHardware.watch {
+            watch.send(.fall, text: speech)
         }
         #endif
     }

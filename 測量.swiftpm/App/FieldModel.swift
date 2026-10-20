@@ -76,6 +76,8 @@ final class FieldModel: ObservableObject {
     let radio: RadioController
     let crew: CrewController
     let incidents = IncidentSession()
+    let fall = FallMonitor()
+    let fallRelay = FallRelay(reachable: false)
     @Published private(set) var incidentOpen = false
     @Published private(set) var incidentNote: String?
     @Published private(set) var incidentRecordingMemo = false
@@ -146,8 +148,29 @@ final class FieldModel: ObservableObject {
         crew.onHiyari = { [weak self] in
             self?.recordIncident(trigger: .manual)
         }
+        crew.onWatchFall = { [weak self] kind, date, immediate in
+            self?.fall.noteExternal(kind: kind, detectedAt: date, now: Date(), immediate: immediate)
+        }
+        crew.onWatchFallCancel = { [weak self] in
+            self?.fall.cancel()
+        }
+        fall.onAwaiting = { [weak self] kind, date in
+            self?.crew.askWatchFall(kind: kind, at: date)
+        }
+        fall.onConfirmed = { [weak self] kind in
+            self?.broadcastFall(kind)
+        }
+        fall.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
         HiyariHook.fire = { [weak self] in
             self?.recordIncident(trigger: .manual)
+        }
+    }
+
+    func cancelFall() {
+        if fall.cancel() {
+            crew.clearWatchFall()
         }
     }
 
@@ -177,7 +200,7 @@ final class FieldModel: ObservableObject {
     }
 
     @discardableResult
-    func recordIncident(trigger: IncidentTrigger) -> Bool {
+    func recordIncident(trigger: IncidentTrigger, workKind: String? = nil, workName: String? = nil) -> Bool {
         guard let project = drawing.project else {
             incidentNote = "先にプロジェクトを作ってください。"
             return false
@@ -214,8 +237,8 @@ final class FieldModel: ObservableObject {
             ),
             machineRadiusMeters: radius,
             work: IncidentWork(
-                kind: drawing.activeRecordKind ?? workCatalog.selected.shortTitle,
-                name: drawing.activeRecordName ?? workCatalog.selected.title
+                kind: workKind ?? drawing.activeRecordKind ?? workCatalog.selected.shortTitle,
+                name: workName ?? drawing.activeRecordName ?? workCatalog.selected.title
             ),
             accuracyMeters: position.horizontalAccuracyMeters,
             stageLabel: "段階\(position.stage.rawValue)",
@@ -223,18 +246,58 @@ final class FieldModel: ObservableObject {
             speeches: crew.recentSpeeches().filter { abs($0.at.timeIntervalSince(now)) <= IncidentBook.beforeSeconds },
             radio: radioClips(around: now),
             strokes: incidentStrokes(around: position),
+            notice: trigger == .fall ? "\(SafetyNotice.text) \(FallCall.disclaimer)" : SafetyNotice.text,
             weather: drawing.weatherLabel.isEmpty ? nil : drawing.weatherLabel
         )
         do {
             let id = try incidents.open(opening, projectName: project.name, at: drawing.projectsRoot)
             incidentOpen = incidents.latestID != nil
             if id == opening.id {
-                incidentNote = trigger == .alarm ? "接近警報を記録しています" : "ヒヤリを記録しています"
+                switch trigger {
+                case .alarm:
+                    incidentNote = "接近警報を記録しています"
+                case .manual:
+                    incidentNote = "ヒヤリを記録しています"
+                case .fall:
+                    incidentNote = "\(opening.work.kind)を記録しています"
+                }
             }
             return true
         } catch {
             incidentNote = "記録を作れませんでした。"
             return false
+        }
+    }
+
+    func broadcastFall(_ kind: FallKind) {
+        let now = Date()
+        guard let project = drawing.project else {
+            incidentNote = "プロジェクトが無いので、\(kind.label)は知らせていません。"
+            return
+        }
+        guard let position = workingReading.position, position.isPlottable else {
+            incidentNote = "位置が無いので、\(kind.label)は知らせていません。"
+            return
+        }
+        let notice = FallNotice(
+            at: now,
+            deviceID: crew.deviceID,
+            name: crew.displayName,
+            kind: kind,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            channelID: project.id
+        )
+        nearby.send(notice)
+        fallRelay.isReachable = radio.relayReachable
+        let delivery = fallRelay.submit(notice)
+        crew.rememberFallSpeech("\(kind.label)を知らせました", at: now)
+        crew.noteWatchFallSent("\(kind.label)を近くに知らせました")
+        let recorded = recordIncident(trigger: .fall, workKind: kind.label, workName: "転倒検知")
+        if recorded {
+            incidentNote = delivery == .sent
+                ? "\(kind.label)を記録し、P510へ渡しました"
+                : "\(kind.label)を記録しました。P510にはまだ渡していません"
         }
     }
 
@@ -476,8 +539,16 @@ final class FieldModel: ObservableObject {
     func start() {
         radio.arm()
         crew.arm()
+        nearby.onFall = { [weak self] notice in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.crew.receiveFall(notice, position: self.workingReading.position)
+            }
+        }
+        fall.start()
         incidentTimer?.invalidate()
         incidentTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.crew.ageFall(now: Date())
             self?.closeIncidents(now: Date())
         }
         source.start()
@@ -983,6 +1054,8 @@ final class FieldModel: ObservableObject {
     private func closeIncidents(now: Date) {
         guard let project = drawing.project else { return }
         incidents.relay.isReachable = radio.relayReachable
+        fallRelay.isReachable = radio.relayReachable
+        fallRelay.flush()
         let results = (try? incidents.closeDue(
             projectName: project.name,
             at: drawing.projectsRoot,

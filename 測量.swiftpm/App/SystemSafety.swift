@@ -43,6 +43,8 @@ import WatchConnectivity
 /// ペアの Apple Watch へ振動の合図を送る。Watch 側の再生は未確認。
 final class SystemWatch: NSObject, WCSessionDelegate {
     var onHiyari: (() -> Void)?
+    var onFall: ((FallKind, Date, Bool) -> Void)?
+    var onFallCancel: (() -> Void)?
 
     func start() {
         guard WCSession.isSupported() else { return }
@@ -51,10 +53,15 @@ final class SystemWatch: NSObject, WCSessionDelegate {
         session.activate()
     }
 
-    func send(_ cue: WatchCue) {
+    func send(_ cue: WatchCue, text: String? = nil) {
         guard WCSession.isSupported() else { return }
+        var payload: [String: Any] = ["cue": cue.rawValue]
+        if let text { payload["text"] = text }
         let session = WCSession.default
-        let payload = ["cue": cue.rawValue]
+        if cue == .fall {
+            deliver(payload, session: session)
+            return
+        }
         if session.isReachable {
             session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
         } else {
@@ -62,20 +69,75 @@ final class SystemWatch: NSObject, WCSessionDelegate {
         }
     }
 
+    func sendFallClear() {
+        guard WCSession.isSupported() else { return }
+        deliver(["action": "fall-clear"], session: WCSession.default)
+    }
+
+    func sendFallAsk(kind: FallKind, at date: Date) {
+        guard WCSession.isSupported() else { return }
+        deliver([
+            "action": "fall-ask",
+            "kind": kind.rawValue,
+            "at": date.timeIntervalSince1970
+        ], session: WCSession.default)
+    }
+
+    func sendFallSent(text: String) {
+        guard WCSession.isSupported() else { return }
+        deliver(["action": "fall-sent", "text": text], session: WCSession.default)
+    }
+
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        acceptHiyari(message)
+        accept(message)
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
-        acceptHiyari(message)
+        accept(message)
         replyHandler(["ok": "1"])
     }
 
-    private func acceptHiyari(_ message: [String: Any]) {
-        guard message["action"] as? String == "hiyari" else { return }
-        DispatchQueue.main.async { self.onHiyari?() }
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        accept(userInfo)
+    }
+
+    private func deliver(_ payload: [String: Any], session: WCSession) {
+        if session.isReachable {
+            session.sendMessage(payload, replyHandler: nil) { _ in
+                session.transferUserInfo(payload)
+            }
+        } else {
+            session.transferUserInfo(payload)
+        }
+    }
+
+    private func accept(_ message: [String: Any]) {
+        let action = message["action"] as? String
+        if action == "hiyari" {
+            DispatchQueue.main.async { self.onHiyari?() }
+            return
+        }
+        if action == "fall-cancel" {
+            DispatchQueue.main.async { self.onFallCancel?() }
+            return
+        }
+        guard action == "fall" else { return }
+        let kind: FallKind = (message["kind"] as? String) == FallKind.impact.rawValue ? .impact : .fall
+        let detectedAt = Self.time(from: message)
+        let immediate = (message["immediate"] as? String) == "1"
+        DispatchQueue.main.async { self.onFall?(kind, detectedAt, immediate) }
+    }
+
+    private static func time(from message: [String: Any]) -> Date {
+        if let value = message["at"] as? Double {
+            return Date(timeIntervalSince1970: value)
+        }
+        if let value = message["at"] as? NSNumber {
+            return Date(timeIntervalSince1970: value.doubleValue)
+        }
+        return Date()
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}

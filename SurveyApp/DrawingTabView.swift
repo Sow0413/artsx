@@ -16,6 +16,9 @@ struct DrawingTabView: View {
     @State private var marginDraft = ""
     @State private var approachDraft = ""
     @State private var repeatDraft = ""
+    @State private var impactDraft = ""
+    @State private var stillDraft = ""
+    @State private var fallNote = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -33,7 +36,10 @@ struct DrawingTabView: View {
         }
         .background(SurveyColor.background)
         .overlay {
-            SafetyWash(level: field.crew.worst)
+            ZStack {
+                SafetyWash(level: field.crew.worst)
+                ThreatRim(cues: [], fall: field.crew.fallCue)
+            }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: drawingTypes) { result in
             switch result {
@@ -77,6 +83,11 @@ struct DrawingTabView: View {
                 SafetyBanner(crew: field.crew) {
                     field.recordIncident(trigger: .manual)
                 }
+                FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
+                    field.cancelFall()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
                 IncidentTray(field: field)
                 Spacer()
             }
@@ -222,6 +233,8 @@ struct DrawingTabView: View {
         marginDraft = String(format: "%g", drawing.proximityMarginMeters)
         approachDraft = String(format: "%g", drawing.approachLeadMeters)
         repeatDraft = String(format: "%g", drawing.approachRepeatSeconds)
+        impactDraft = String(format: "%g", field.fall.impactG)
+        stillDraft = String(format: "%g", field.fall.stillSeconds)
     }
 
     private var proximitySection: some View {
@@ -267,6 +280,53 @@ struct DrawingTabView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(SurveyColor.muted)
         }
+    }
+
+    private var fallSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("転倒・衝撃")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            Toggle("加速度で検知する", isOn: fallEnabled)
+                .font(.system(size: 15, weight: .semibold))
+                .tint(SurveyColor.amber)
+            HStack {
+                TextField("衝撃の閾値 g", text: $impactDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                Button("保存") {
+                    fallNote = field.fall.setImpactG(impactDraft)
+                    impactDraft = String(format: "%g", field.fall.impactG)
+                }
+                .buttonStyle(SurveyPlainButton())
+            }
+            HStack {
+                TextField("静止の確認 秒", text: $stillDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                Button("保存") {
+                    fallNote = field.fall.setStillSeconds(stillDraft)
+                    stillDraft = String(format: "%g", field.fall.stillSeconds)
+                }
+                .buttonStyle(SurveyPlainButton())
+            }
+            if !fallNote.isEmpty {
+                Text(fallNote)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SurveyColor.amber)
+            }
+            Text("強い加速度のあと、動きが止まっていれば10秒だけ取り消せます。取り消さなければ近くへ方向つきで知らせ、記録の種類は転倒か衝撃になります。\(FallCall.disclaimer)")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(SurveyColor.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var fallEnabled: Binding<Bool> {
+        Binding(
+            get: { field.fall.enabled },
+            set: { field.fall.setEnabled($0) }
+        )
     }
 
     private var roleBinding: Binding<CrewRole> {
@@ -355,6 +415,7 @@ struct DrawingTabView: View {
                 .keyboardType(.numbersAndPunctuation)
             machineSection
             proximitySection
+            fallSection
             eyeSection
             Picker("都道府県", selection: prefectureBinding) {
                 Text("未選択").tag(Optional<String>.none)

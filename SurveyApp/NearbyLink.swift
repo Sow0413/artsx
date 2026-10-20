@@ -5,6 +5,7 @@ import SurveyCore
 final class NearbyLink {
     var onRadio: ((RadioPacket) -> Void)?
     var onCrew: ((CrewPacket) -> Void)?
+    var onFall: ((FallNotice) -> Void)?
     private var peerObservers: [(Int) -> Void] = []
 
     #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
@@ -18,6 +19,9 @@ final class NearbyLink {
         }
         peers.onCrew = { [weak self] packet in
             self?.onCrew?(packet)
+        }
+        peers.onFall = { [weak self] notice in
+            self?.onFall?(notice)
         }
         peers.onPeerCount = { [weak self] count in
             self?.peerObservers.forEach { $0(count) }
@@ -52,6 +56,14 @@ final class NearbyLink {
         peers.send(packet)
         #else
         _ = packet
+        #endif
+    }
+
+    func send(_ notice: FallNotice) {
+        #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
+        peers.send(notice)
+        #else
+        _ = notice
         #endif
     }
 }

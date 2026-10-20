@@ -30,7 +30,7 @@ struct OperatorView: View {
             ZStack {
                 SurveyColor.background
                 SafetyWash(level: field.crew.worst)
-                ThreatRim(cues: field.crew.threats.cues)
+                ThreatRim(cues: field.crew.threats.cues, fall: field.crew.fallCue)
                 if landscape {
                     VStack(spacing: 4) {
                         HStack(spacing: 8) {
@@ -70,6 +70,9 @@ struct OperatorView: View {
                     }
                     Spacer()
                     SafetyBanner(crew: field.crew)
+                    FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
+                        field.cancelFall()
+                    }
                     directionHeadline
                     hailButton
                     hiyariButton
@@ -111,12 +114,13 @@ struct OperatorView: View {
     }
 
     private var directionHeadline: some View {
+        let fallLine = field.crew.fallSpeech
         VStack(spacing: 0) {
-            Text(field.crew.threats.headline)
+            Text(fallLine ?? field.crew.threats.headline)
                 .font(.system(size: 40, weight: .black))
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
-                .foregroundStyle(field.crew.threats.cues.isEmpty ? SurveyColor.muted : SurveyColor.text)
+                .foregroundStyle(fallLine == nil ? (field.crew.threats.cues.isEmpty ? SurveyColor.muted : SurveyColor.text) : SurveyColor.red)
             if !field.crew.threats.facingSource.isEmpty {
                 Text(field.crew.threats.facingSource)
                     .font(.system(size: 13, weight: .heavy))
@@ -124,7 +128,7 @@ struct OperatorView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .accessibilityLabel(field.crew.threats.cues.first.map { "\($0.text)。\($0.speech)" } ?? field.crew.threats.headline)
+        .accessibilityLabel(fallLine ?? field.crew.threats.cues.first.map { "\($0.text)。\($0.speech)" } ?? field.crew.threats.headline)
     }
 
     private func stationText(position: GeodeticPosition?, guide: OperatorGuide?) -> String {
