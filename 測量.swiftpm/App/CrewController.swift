@@ -11,6 +11,8 @@ final class CrewController: ObservableObject {
     @Published private(set) var peers: [CrewFix] = []
     @Published private(set) var role: CrewRole = .worker
     @Published private(set) var limits = ProximityLimits.standard
+    @Published private(set) var threats = ThreatPicture(facingDegrees: nil, facingSource: "", cues: [], headline: "近くに人はいません")
+    @Published var speakDirections = false
     @Published private(set) var revision = 0
 
     let notice = SafetyNotice.text
@@ -23,6 +25,9 @@ final class CrewController: ObservableObject {
     private var savedSignature = ""
     private var lastCue: WatchCue?
     private var lastAlarmSound: Date?
+    private var courseDegrees: Double?
+    private var headingDegrees: Double?
+    private var lastSpoken = ""
     #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
     private let uwb = SystemUWB()
     #endif
@@ -62,9 +67,18 @@ final class CrewController: ObservableObject {
         #endif
     }
 
+    func setSpeakDirections(_ enabled: Bool) {
+        speakDirections = enabled
+        lastSpoken = ""
+        if enabled {
+            speak()
+        }
+    }
+
     func setRole(_ role: CrewRole) {
         self.role = role
         desk.role = role
+        threats = currentPicture()
         guard let projectName, let root else { return }
         let identity = CrewIdentity(deviceID: desk.deviceID, name: desk.name, role: role)
         try? CrewIdentityStore.save(identity, projectName: projectName, at: root)
@@ -91,6 +105,8 @@ final class CrewController: ObservableObject {
         }
         limits = ProximityLimits.resolved(caution: project.cautionMeters, margin: project.proximityMarginMeters)
         desk.limits = limits
+        courseDegrees = position?.courseDegrees
+        headingDegrees = position?.headingDegrees
         guard let position, position.isPlottable else {
             publish(now: now, sound: false)
             return
@@ -135,11 +151,30 @@ final class CrewController: ObservableObject {
         } else {
             marks = []
         }
+        threats = currentPicture()
         statusLine = describe()
         revision += 1
         persist()
         guard sound else { return }
         signal(now: now)
+        speak()
+    }
+
+    private func currentPicture() -> ThreatPicture {
+        ThreatBearing.picture(
+            selfRole: role,
+            marks: marks,
+            courseDegrees: courseDegrees,
+            headingDegrees: headingDegrees,
+            cautionMeters: limits.cautionMeters
+        )
+    }
+
+    private func speak() {
+        guard speakDirections, let cue = threats.cues.first else { return }
+        guard cue.speech != lastSpoken else { return }
+        lastSpoken = cue.speech
+        CrewVoice.say(cue.speech)
     }
 
     private func describe() -> String {

@@ -30,6 +30,7 @@ struct OperatorView: View {
             ZStack {
                 SurveyColor.background
                 SafetyWash(level: field.crew.worst)
+                ThreatRim(cues: field.crew.threats.cues)
                 if landscape {
                     VStack(spacing: 4) {
                         HStack(spacing: 8) {
@@ -69,11 +70,13 @@ struct OperatorView: View {
                     }
                     Spacer()
                     SafetyBanner(crew: field.crew)
+                    directionHeadline
                     CrewRadar(
                         marks: field.crew.marks,
                         selfRole: field.crew.role,
                         selfRadius: drawing.machineRadiusMeters,
-                        cautionMeters: drawing.cautionMeters
+                        cautionMeters: drawing.cautionMeters,
+                        facingDegrees: field.crew.threats.facingDegrees
                     )
                     talkButton
                 }
@@ -85,6 +88,23 @@ struct OperatorView: View {
         .background(SurveyColor.background)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+    }
+
+    private var directionHeadline: some View {
+        VStack(spacing: 0) {
+            Text(field.crew.threats.headline)
+                .font(.system(size: 40, weight: .black))
+                .minimumScaleFactor(0.4)
+                .lineLimit(1)
+                .foregroundStyle(field.crew.threats.cues.isEmpty ? SurveyColor.muted : SurveyColor.text)
+            if !field.crew.threats.facingSource.isEmpty {
+                Text(field.crew.threats.facingSource)
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(SurveyColor.muted)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(field.crew.threats.cues.first.map { "\($0.text)。\($0.speech)" } ?? field.crew.threats.headline)
     }
 
     private func stationText(position: GeodeticPosition?, guide: OperatorGuide?) -> String {
@@ -208,6 +228,11 @@ struct OperatorView: View {
                             }
                     )
                 VStack(spacing: 8) {
+                    Button(field.crew.speakDirections ? "読み上げオン" : "読み上げ") {
+                        field.crew.setSpeakDirections(!field.crew.speakDirections)
+                    }
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(field.crew.speakDirections ? SurveyColor.amber : SurveyColor.muted)
                     Button(field.crew.role.label) {
                         field.crew.setRole(field.crew.role == .machine ? .worker : .machine)
                     }

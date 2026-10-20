@@ -321,6 +321,153 @@ public enum ProximityJudge {
     }
 }
 
+/// 端末の向きを基準にした、近くの相手の方向。右が正、前が 0。
+public struct ThreatCue: Equatable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+    public var role: CrewRole
+    public var distanceMeters: Double
+    /// 前が 0、右が正。-180 から 180。
+    public var relativeDegrees: Double
+    public var sector: String
+    /// `右うしろ 12.0m`
+    public var text: String
+    /// `右うしろ、人`
+    public var speech: String
+    /// 注意の距離で 0、真横にいるとき 1。近いほど大きい。
+    public var closeness: Double
+
+    public init(
+        id: String,
+        name: String,
+        role: CrewRole,
+        distanceMeters: Double,
+        relativeDegrees: Double,
+        sector: String,
+        text: String,
+        speech: String,
+        closeness: Double
+    ) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.distanceMeters = distanceMeters
+        self.relativeDegrees = relativeDegrees
+        self.sector = sector
+        self.text = text
+        self.speech = speech
+        self.closeness = closeness
+    }
+}
+
+public struct ThreatPicture: Equatable, Sendable {
+    public var facingDegrees: Double?
+    /// 動いていれば「進行」、止まっていれば「方位」。
+    public var facingSource: String
+    public var cues: [ThreatCue]
+    public var headline: String
+
+    public init(facingDegrees: Double?, facingSource: String, cues: [ThreatCue], headline: String) {
+        self.facingDegrees = facingDegrees
+        self.facingSource = facingSource
+        self.cues = cues
+        self.headline = headline
+    }
+}
+
+public enum ThreatBearing {
+    /// 動いていれば進行方向。止まっていればコンパス。両方なければ nil。
+    public static func facing(courseDegrees: Double?, headingDegrees: Double?) -> (degrees: Double, source: String)? {
+        if let courseDegrees, courseDegrees.isFinite {
+            return (courseDegrees, "進行")
+        }
+        if let headingDegrees, headingDegrees.isFinite {
+            return (headingDegrees, "方位")
+        }
+        return nil
+    }
+
+    /// 相手の方位から、端末の向きを引く。右が正。
+    public static func relative(targetAzimuthDegrees: Double, facingDegrees: Double) -> Double {
+        var delta = targetAzimuthDegrees - facingDegrees
+        while delta > 180 { delta -= 360 }
+        while delta <= -180 { delta += 360 }
+        return delta
+    }
+
+    public static func sector(relativeDegrees: Double) -> String {
+        let turn = relative(targetAzimuthDegrees: relativeDegrees, facingDegrees: 0)
+        let absolute = abs(turn)
+        if absolute <= 22.5 { return "前" }
+        if absolute >= 157.5 { return "うしろ" }
+        if turn > 0 {
+            if turn <= 67.5 { return "右まえ" }
+            if turn <= 112.5 { return "右" }
+            return "右うしろ"
+        }
+        if turn >= -67.5 { return "左まえ" }
+        if turn >= -112.5 { return "左" }
+        return "左うしろ"
+    }
+
+    /// 重機からは人、作業員からは重機。注意の距離より近い相手だけ。近い順。
+    public static func picture(
+        selfRole: CrewRole,
+        marks: [CrewMark],
+        courseDegrees: Double?,
+        headingDegrees: Double?,
+        cautionMeters: Double
+    ) -> ThreatPicture {
+        let wanted: CrewRole = selfRole == .machine ? .worker : .machine
+        let limit = cautionMeters.isFinite && cautionMeters > 0 ? cautionMeters : ProximityLimits.defaultCautionMeters
+        let nearby = marks.filter { mark in
+            guard mark.role == wanted else { return false }
+            let distance = span(mark.eastMeters, mark.northMeters)
+            return distance <= limit || mark.level == .alarm
+        }.sorted { span($0.eastMeters, $0.northMeters) < span($1.eastMeters, $1.northMeters) }
+        guard let facing = facing(courseDegrees: courseDegrees, headingDegrees: headingDegrees) else {
+            let headline = nearby.isEmpty ? emptyLine(selfRole) : "向きがありません"
+            return ThreatPicture(facingDegrees: nil, facingSource: "", cues: [], headline: headline)
+        }
+        let cues = nearby.map { mark in
+            cue(mark, facing: facing.degrees, cautionMeters: limit)
+        }
+        let headline = cues.first?.text ?? emptyLine(selfRole)
+        return ThreatPicture(facingDegrees: facing.degrees, facingSource: facing.source, cues: cues, headline: headline)
+    }
+
+    private static func span(_ east: Double, _ north: Double) -> Double {
+        (east * east + north * north).squareRoot()
+    }
+
+    private static func emptyLine(_ role: CrewRole) -> String {
+        role == .machine ? "近くに人はいません" : "近くに重機はいません"
+    }
+
+    private static func cue(_ mark: CrewMark, facing: Double, cautionMeters: Double) -> ThreatCue {
+        let east = mark.eastMeters
+        let north = mark.northMeters
+        let distance = span(east, north)
+        let azimuth = GeoMath.degrees(fromRadians: GeoMath.arctangent(east, north))
+        let turn = relative(targetAzimuthDegrees: azimuth, facingDegrees: facing)
+        let sector = sector(relativeDegrees: turn)
+        let shown = MachineReach.roundTenths(distance)
+        let word = mark.role == .worker ? "人" : "重機"
+        let closeness = max(0, min(1, 1 - shown / cautionMeters))
+        return ThreatCue(
+            id: mark.id,
+            name: mark.name,
+            role: mark.role,
+            distanceMeters: shown,
+            relativeDegrees: turn,
+            sector: sector,
+            text: "\(sector) \(String(format: "%.1fm", shown))",
+            speech: "\(sector)、\(word)",
+            closeness: closeness
+        )
+    }
+}
+
 public enum CrewPlot {
     public static func marks(origin: CrewFix, hits: [ProximityHit]) -> [CrewMark] {
         hits.compactMap { hit in

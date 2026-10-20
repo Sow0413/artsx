@@ -113,6 +113,85 @@ final class ProximityTests: XCTestCase {
         XCTAssertEqual(stale?.rangeKind, .gnss)
     }
 
+    func testDirectionUsesTravelThenCompass() {
+        let person = CrewMark(id: "w", name: "歩", role: .worker, eastMeters: 0, northMeters: -12, workRadiusMeters: nil, level: .caution)
+        let moving = ThreatBearing.picture(
+            selfRole: .machine,
+            marks: [person],
+            courseDegrees: 0,
+            headingDegrees: 90,
+            cautionMeters: 50
+        )
+        XCTAssertEqual(moving.facingSource, "進行")
+        XCTAssertEqual(moving.cues.first?.sector, "うしろ")
+        XCTAssertEqual(moving.cues.first?.text, "うしろ 12.0m")
+        XCTAssertEqual(moving.cues.first?.speech, "うしろ、人")
+        XCTAssertEqual(moving.headline, "うしろ 12.0m")
+
+        let stopped = ThreatBearing.picture(
+            selfRole: .machine,
+            marks: [person],
+            courseDegrees: nil,
+            headingDegrees: 180,
+            cautionMeters: 50
+        )
+        XCTAssertEqual(stopped.facingSource, "方位")
+        XCTAssertEqual(stopped.cues.first?.sector, "前")
+
+        let lost = ThreatBearing.picture(
+            selfRole: .machine,
+            marks: [person],
+            courseDegrees: nil,
+            headingDegrees: nil,
+            cautionMeters: 50
+        )
+        XCTAssertEqual(lost.headline, "向きがありません")
+        XCTAssertTrue(lost.cues.isEmpty)
+    }
+
+    func testSectorsAndWhoIsShown() {
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: 0), "前")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: 45), "右まえ")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: 90), "右")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: 135), "右うしろ")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: 180), "うしろ")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: -180), "うしろ")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: -135), "左うしろ")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: -90), "左")
+        XCTAssertEqual(ThreatBearing.sector(relativeDegrees: -45), "左まえ")
+        XCTAssertEqual(ThreatBearing.relative(targetAzimuthDegrees: 10, facingDegrees: 350), 20, accuracy: 0.001)
+
+        let rightBehind = CrewMark(id: "w", name: "歩", role: .worker, eastMeters: 8.5, northMeters: -8.5, workRadiusMeters: nil, level: .alarm)
+        let otherMachine = CrewMark(id: "m2", name: "別", role: .machine, eastMeters: 5, northMeters: 0, workRadiusMeters: 9, level: .caution)
+        let far = CrewMark(id: "far", name: "遠", role: .worker, eastMeters: 0, northMeters: 80, workRadiusMeters: nil, level: .clear)
+        let fromCab = ThreatBearing.picture(
+            selfRole: .machine,
+            marks: [far, otherMachine, rightBehind],
+            courseDegrees: 0,
+            headingDegrees: nil,
+            cautionMeters: 50
+        )
+        XCTAssertEqual(fromCab.cues.map(\.id), ["w"])
+        XCTAssertEqual(fromCab.cues.first?.sector, "右うしろ")
+        XCTAssertGreaterThan(fromCab.cues[0].closeness, 0.5)
+
+        let behindTheWalker = CrewMark(id: "m2", name: "別", role: .machine, eastMeters: -5, northMeters: 0, workRadiusMeters: 9, level: .caution)
+        let fromFoot = ThreatBearing.picture(
+            selfRole: .worker,
+            marks: [rightBehind, behindTheWalker],
+            courseDegrees: 90,
+            headingDegrees: nil,
+            cautionMeters: 50
+        )
+        XCTAssertEqual(fromFoot.cues.map(\.id), ["m2"])
+        XCTAssertEqual(fromFoot.cues.first?.sector, "うしろ")
+        XCTAssertEqual(fromFoot.cues.first?.speech, "うしろ、重機")
+        XCTAssertEqual(
+            ThreatBearing.picture(selfRole: .worker, marks: [], courseDegrees: 0, headingDegrees: nil, cautionMeters: 50).headline,
+            "近くに重機はいません"
+        )
+    }
+
     func testEventsOpenUpgradeAndClose() throws {
         let relay = CrewRelayStub(reachable: false)
         let mesh = CrewMesh()
