@@ -4,9 +4,19 @@ struct MapTabView: View {
     @ObservedObject var field: FieldModel
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             SurveyMapView(field: field)
-            VStack(spacing: 10) {
+            VStack(spacing: 0) {
+                WorkBar(field: field)
+                Spacer(minLength: 0)
+                bottomChrome
+            }
+        }
+        .background(SurveyColor.mapBackdrop)
+    }
+
+    private var bottomChrome: some View {
+        VStack(spacing: 10) {
                 HStack(alignment: .top) {
                     AttributionLabel()
                     Spacer(minLength: 8)
@@ -33,12 +43,23 @@ struct MapTabView: View {
                     LocationPanel(reading: field.reading)
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    captureButton
                 }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             .frame(maxWidth: 640)
+    }
+
+    private var captureButton: some View {
+        Button(action: field.captureObservation) {
+            Text("この作業で点を残す")
+                .font(.system(size: 16, weight: .heavy))
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(SurveyColor.card)
+                .foregroundStyle(SurveyColor.text)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .background(SurveyColor.mapBackdrop)
+        .buttonStyle(.plain)
     }
 }

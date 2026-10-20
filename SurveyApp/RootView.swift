@@ -10,14 +10,16 @@ struct RootView: View {
         tiles: TileStore,
         packDirectory: URL,
         controlPoints: [ControlPoint] = [],
-        controlPointNotice: String? = nil
+        controlPointNotice: String? = nil,
+        siteDirectory: URL
     ) {
         _field = StateObject(wrappedValue: FieldModel(
             source: source,
             tiles: tiles,
             packDirectory: packDirectory,
             controlPoints: controlPoints,
-            controlPointNotice: controlPointNotice
+            controlPointNotice: controlPointNotice,
+            siteDirectory: siteDirectory
         ))
     }
 
@@ -46,10 +48,7 @@ struct RootView: View {
                         message: "DXF を重ねて、2点で合わせる画面は次のスライスです。RTK Fix になるまで、合わせは緑にしません。"
                     )
                 } else if field.tab == .measure {
-                    PlaceholderTabView(
-                        title: "測る",
-                        message: "点を取る画面は次のスライスです。三角点で検証は地図タブです。地点と軌跡の記録は、その次に足します。"
-                    )
+                    MeasureLogView(field: field)
                 } else if field.tab == .export {
                     PlaceholderTabView(
                         title: "出す",
@@ -69,14 +68,14 @@ struct RootView: View {
 }
 
 enum AppEnvironment {
-    static func live() -> (source: CoreLocationPositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?) {
+    static func live() -> (source: CoreLocationPositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
         let directories = directories(inTemporary: false)
         let tiles = TileStore(packDirectory: directories.packs, cacheDirectory: directories.cache)
         let loaded = ControlPointLoader.load(siteDirectory: directories.site)
-        return (CoreLocationPositionSource(), tiles, directories.packs, loaded.points, loaded.notice)
+        return (CoreLocationPositionSource(), tiles, directories.packs, loaded.points, loaded.notice, directories.site)
     }
 
-    static func preview(source: any PositionSource) -> (source: any PositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?) {
+    static func preview(source: any PositionSource) -> (source: any PositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
         let directories = directories(inTemporary: true)
         let tiles = TileStore(
             packDirectory: directories.packs,
@@ -84,7 +83,7 @@ enum AppEnvironment {
             network: PreviewTileSource()
         )
         let loaded = ControlPointLoader.load(siteDirectory: directories.site)
-        return (source, tiles, directories.packs, loaded.points, loaded.notice)
+        return (source, tiles, directories.packs, loaded.points, loaded.notice, directories.site)
     }
 
     private static func directories(inTemporary: Bool) -> (packs: URL, cache: URL, site: URL) {
@@ -119,7 +118,8 @@ private struct PreviewTileSource: TileFetching {
         tiles: environment.tiles,
         packDirectory: environment.packs,
         controlPoints: environment.points,
-        controlPointNotice: environment.notice
+        controlPointNotice: environment.notice,
+        siteDirectory: environment.site
     )
 }
 
@@ -130,7 +130,8 @@ private struct PreviewTileSource: TileFetching {
         tiles: environment.tiles,
         packDirectory: environment.packs,
         controlPoints: environment.points,
-        controlPointNotice: environment.notice
+        controlPointNotice: environment.notice,
+        siteDirectory: environment.site
     )
 }
 
@@ -141,6 +142,7 @@ private struct PreviewTileSource: TileFetching {
         tiles: environment.tiles,
         packDirectory: environment.packs,
         controlPoints: environment.points,
-        controlPointNotice: environment.notice
+        controlPointNotice: environment.notice,
+        siteDirectory: environment.site
     )
 }

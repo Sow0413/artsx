@@ -11,7 +11,8 @@ struct SurveyApp: App {
                 tiles: environment.tiles,
                 packDirectory: environment.packs,
                 controlPoints: environment.points,
-                controlPointNotice: environment.notice
+                controlPointNotice: environment.notice,
+                siteDirectory: environment.site
             )
         }
     }

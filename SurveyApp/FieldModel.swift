@@ -46,9 +46,15 @@ final class FieldModel: ObservableObject {
     @Published private(set) var benchmarkExportURL: URL?
     @Published private(set) var benchmarkMessage: String?
     @Published private(set) var controlPointNotice: String?
+    @Published private(set) var workCatalog: WorkCatalog
+    @Published private(set) var instrumentTrust: InstrumentTrust
+    @Published private(set) var observations: FieldObservationLog
+    @Published var showsWorkSettings = false
+    @Published private(set) var captureMessage: String?
 
     let tiles: TileStore
     let packDirectory: URL
+    let siteDirectory: URL
     let controlPoints: [ControlPoint]
     private let source: any PositionSource
     private var camera: MapCameraFollow
@@ -63,13 +69,18 @@ final class FieldModel: ObservableObject {
         tiles: TileStore,
         packDirectory: URL,
         controlPoints: [ControlPoint] = [],
-        controlPointNotice: String? = nil
+        controlPointNotice: String? = nil,
+        siteDirectory: URL
     ) {
         self.source = source
         self.tiles = tiles
         self.packDirectory = packDirectory
+        self.siteDirectory = siteDirectory
         self.controlPoints = controlPoints
         self.controlPointNotice = controlPointNotice
+        self.workCatalog = WorkCatalog.load(from: siteDirectory)
+        self.instrumentTrust = InstrumentTrust.load(from: siteDirectory)
+        self.observations = FieldObservationLog.load(from: siteDirectory)
         self.reading = .waiting
         self.camera = MapCameraFollow()
         self.viewport = MapViewportPolicy.japanOverview
@@ -78,7 +89,50 @@ final class FieldModel: ObservableObject {
     }
 
     var badge: AccuracyBadgeModel {
-        AccuracyPolicy.badge(for: reading)
+        AccuracyPolicy.badge(
+            for: reading,
+            work: workCatalog.selected,
+            trust: instrumentTrust,
+            safetyFactor: workCatalog.optimisticSafetyFactor
+        )
+    }
+
+    func selectWork(_ id: String) {
+        workCatalog = workCatalog.selecting(id)
+        try? workCatalog.save(to: siteDirectory)
+    }
+
+    func applyWorkEdits(_ works: [WorkRequirement], safetyFactor: Double) {
+        var catalog = workCatalog
+        guard safetyFactor.isFinite, safetyFactor >= 1 else { return }
+        catalog.optimisticSafetyFactor = safetyFactor
+        for work in works where work.horizontalMeters > 0, work.verticalMeters > 0 {
+            catalog = catalog.replacing(work)
+        }
+        workCatalog = catalog
+        try? workCatalog.save(to: siteDirectory)
+    }
+
+    func captureObservation() {
+        guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
+            captureMessage = "位置が無いので残せません。"
+            return
+        }
+        let work = workCatalog.selected
+        let count = observations.observations.filter { $0.workID == work.id }.count + 1
+        let observation = FieldObservation(name: "\(work.shortTitle)\(count)", workID: work.id, captured: position)
+        observations = observations.appending(observation)
+        try? observations.save(to: siteDirectory)
+        captureMessage = "\(observation.name)を残しました。下見の座標は捨てません。"
+    }
+
+    func rebase(_ observationID: UUID, onto targetID: UUID) {
+        guard let source = observations.observations.first(where: { $0.id == observationID }),
+              let target = observations.observations.first(where: { $0.id == targetID }),
+              source.id != target.id else { return }
+        observations = observations.replacing(source.rebase(onto: target.captured))
+        try? observations.save(to: siteDirectory)
+        captureMessage = "\(source.name)を\(target.name)の座標に乗せ替えました。取得時の精度は残しています。"
     }
 
     var selectedControlPoint: ControlPoint? {
@@ -215,6 +269,10 @@ final class FieldModel: ObservableObject {
             return
         }
         benchmarkStatistics = statistics
+        if let position = recorder.samples.last?.position, let optimistic = statistics.horizontalOptimistic {
+            instrumentTrust = instrumentTrust.setting(InstrumentState(position), optimistic: optimistic)
+            try? instrumentTrust.save(to: siteDirectory)
+        }
         writeExport(recorder: recorder, statistics: statistics)
         if benchmarkMessage == nil {
             benchmarkMessage = "記録が終わりました。"

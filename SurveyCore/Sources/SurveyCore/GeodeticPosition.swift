@@ -5,13 +5,13 @@ public enum CoordinateFrame: String, Sendable, Codable, Equatable {
     case wgs84ITRF = "WGS84/ITRF"
 }
 
-/// 精度の段階。つなぐ機械で上がる。緑にしてよいのは段階2以降の RTK Fix だけ。
+/// 精度の段階。つなぐ機械で上がる。バッジの色は、段階ではなく作業の要求精度で決める。
 public enum PositionStage: Int, Sendable, Codable, Equatable, CaseIterable {
     /// 段階0。iPhone 単独。数m。下見と概略。
     case iphone = 0
-    /// 段階1。CLAS。数cm〜10cm。緑にしない。
+    /// 段階1。CLAS。数cm〜10cm。
     case clas = 1
-    /// 段階2。基地局または NTRIP の RTK。Fix のときだけ緑。
+    /// 段階2。基地局または NTRIP の RTK。
     case rtk = 2
     /// 段階3。TS・レベル・UWB などとの併用。
     case hybrid = 3
@@ -23,11 +23,11 @@ public enum FixQuality: String, Sendable, Codable, Equatable {
     /// 単独測位。iPhone GPS は常にこれ。
     case standalone
     case dgps
-    /// RTK Float。緑にしない。
+    /// RTK Float。報告精度が要求以内なら緑になり得る。測設の合格にはしない。
     case float
-    /// RTK Fix。外部受信機が報告したときだけ緑。
+    /// RTK Fix。外部受信機が報告し、作業の要求も満たすときだけ測設の合格にする。
     case rtkFix
-    /// CLAS の収束。Fix ではないので緑にしない。
+    /// CLAS の収束。Fix ではない。
     case clas
 }
 

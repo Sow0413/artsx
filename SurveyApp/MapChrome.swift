@@ -9,10 +9,22 @@ struct AccuracyBadgeView: View {
             Circle()
                 .fill(badge.tone.tint)
                 .frame(width: 16, height: 16)
-            Text(badge.text)
-                .font(.system(size: 20, weight: .heavy))
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(badge.text)
+                    .font(.system(size: 20, weight: .heavy))
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                if !badge.caution.isEmpty {
+                    Text(badge.caution)
+                        .font(.system(size: 13, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !badge.guidance.isEmpty {
+                    Text(badge.guidance)
+                        .font(.system(size: 14, weight: .heavy))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
