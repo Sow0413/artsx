@@ -5,10 +5,8 @@ import SurveyCore
 struct PaceSheet: View {
     @ObservedObject var field: FieldModel
     @Environment(\.dismiss) private var dismiss
-    @State private var distanceText = "50"
     @State private var slopeText = "0"
     @State private var factorText = ""
-    @State private var manualCalibration = ""
     @State private var manualMeasure = ""
 
     var body: some View {
@@ -24,7 +22,7 @@ struct PaceSheet: View {
                     } else if let bridgeNotice = field.bridgeNotice {
                         notice(bridgeNotice)
                     }
-                    calibration
+                    notice(PersonalProfile.strideLine(field.pace) + "　校正は「自分の校正」です。")
                     measure
                     if let message = field.captureMessage {
                         Text(message)
@@ -49,46 +47,8 @@ struct PaceSheet: View {
         .modifier(SurveyScheme())
         .onAppear {
             slopeText = Self.format(field.pace.slope)
-            if let known = field.pace.calibratedDistanceMeters {
-                distanceText = Self.format(known)
-            }
             if let factor = field.pace.factorOverride {
                 factorText = Self.format(factor)
-            }
-        }
-    }
-
-    private var calibration: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("歩幅の校正")
-                .font(SurveyType(22, .heavy))
-            Text("平らな所で、分かっている距離を歩きます。")
-                .font(SurveyType(16, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            labeled("距離（m）", text: $distanceText)
-            if field.calibrating {
-                Text("\(field.calibrationSteps)歩")
-                    .font(SurveyType(40, .heavy))
-            }
-            if !StepHardware.available, field.calibrating {
-                labeled("歩数", text: $manualCalibration)
-                    .onChange(of: manualCalibration) { _, value in
-                        guard let count = Int(value) else { return }
-                        field.noteManualSteps(.calibration, count)
-                    }
-            }
-            Button(field.calibrating ? "校正を終える" : "校正を開始") {
-                if field.calibrating {
-                    field.endCalibration(distanceMeters: Double(distanceText) ?? .nan)
-                } else {
-                    field.beginCalibration()
-                }
-            }
-            .buttonStyle(PacePrimaryButton())
-            if let stride = field.pace.strideMeters {
-                Text("歩幅 \(Self.format(stride))m　\(field.pace.calibratedSteps ?? 0)歩")
-                    .font(SurveyType(18, .heavy))
             }
         }
     }

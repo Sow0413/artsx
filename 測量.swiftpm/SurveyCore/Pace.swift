@@ -16,25 +16,44 @@ public struct PaceProfile: Codable, Sendable, Equatable {
     public var factorOverride: Double?
     public var calibratedDistanceMeters: Double?
     public var calibratedSteps: Int?
+    /// 身長からの初期値か、既知距離を歩いた値か。
+    public var strideOrigin: StrideOrigin?
+    public var strideSetAt: Date?
 
     public init(
         strideMeters: Double? = nil,
         slope: Double = 0,
         factorOverride: Double? = nil,
         calibratedDistanceMeters: Double? = nil,
-        calibratedSteps: Int? = nil
+        calibratedSteps: Int? = nil,
+        strideOrigin: StrideOrigin? = nil,
+        strideSetAt: Date? = nil
     ) {
         self.strideMeters = strideMeters
         self.slope = slope
         self.factorOverride = factorOverride
         self.calibratedDistanceMeters = calibratedDistanceMeters
         self.calibratedSteps = calibratedSteps
+        self.strideOrigin = strideOrigin
+        self.strideSetAt = strideSetAt
+    }
+
+    /// 既知距離で合わせた歩幅は、身長を入れ直しても残す。
+    public var keepsWalkedStride: Bool {
+        guard strideMeters != nil else { return false }
+        if strideOrigin == .walked { return true }
+        if strideOrigin == .stature { return false }
+        return calibratedSteps != nil
     }
 
     public func sanitized() -> PaceProfile {
         var copy = self
         if let stride = copy.strideMeters, !stride.isFinite || stride < 0.3 || stride > 1.5 {
             copy.strideMeters = nil
+            copy.strideOrigin = nil
+            copy.strideSetAt = nil
+            copy.calibratedDistanceMeters = nil
+            copy.calibratedSteps = nil
         }
         if !copy.slope.isFinite { copy.slope = 0 }
         if let factor = copy.factorOverride, !factor.isFinite || factor <= 0 || factor > 2 {
@@ -56,6 +75,13 @@ public struct PaceProfile: Codable, Sendable, Equatable {
         }
         return stored.sanitized()
     }
+}
+
+public enum StrideOrigin: String, Codable, Sendable, Equatable {
+    /// 身長×0.45。既知距離を歩くと替わる。
+    case stature
+    /// 平らな既知距離を歩いて出した歩幅。
+    case walked
 }
 
 public struct PaceBadge: Equatable, Sendable {
@@ -205,8 +231,18 @@ public enum PaceMath {
     public static let paceFloorMeters = 0.5
     public static let bridgeFraction = 0.03
     public static let bridgeFloorMeters = 1.0
+    /// 身長から置く初期歩幅。既知距離で歩くと、その値に替わる。
+    public static let statureStrideFactor = 0.45
 
     private static var posix: Locale { Locale(identifier: "en_US_POSIX") }
+
+    /// 身長から置く初期歩幅。0.3m 未満、1.5m 超は採用しない。
+    public static func initialStride(statureMeters: Double) -> Double? {
+        guard statureMeters.isFinite, statureMeters > 0, statureMeters <= 3 else { return nil }
+        let stride = statureMeters * statureStrideFactor
+        guard stride.isFinite, stride >= 0.3, stride <= 1.5 else { return nil }
+        return stride
+    }
 
     /// 校正走路の道のり ÷ 歩数。平らな所で測った歩幅。
     public static func stride(distanceMeters: Double, steps: Int) -> Double? {

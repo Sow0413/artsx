@@ -1330,13 +1330,15 @@ final class FieldModel: ObservableObject {
         next.strideMeters = stride
         next.calibratedDistanceMeters = distanceMeters
         next.calibratedSteps = calibrationSteps
+        next.strideOrigin = .walked
+        next.strideSetAt = Date()
         savePace(next)
         captureMessage = "歩幅を\(Self.meters(stride))にしました。"
     }
 
     func beginPace() {
         guard let stride = pace.strideMeters else {
-            captureMessage = "先に歩幅を校正してください。"
+            captureMessage = "先に自分の校正で身長を入れるか、歩幅を合わせてください。"
             return
         }
         guard let origin = workingReading.position, origin.isPlottable else {
@@ -1416,9 +1418,17 @@ final class FieldModel: ObservableObject {
     }
 
     func saveStature(_ profile: StatureProfile) {
-        stature = profile
-        profile.save()
-        if profile.statureMeters != nil {
+        let stored: StatureProfile
+        if let meters = profile.statureMeters,
+           let adopted = PersonalProfile.adopt(statureMeters: meters, stature: profile, pace: pace, at: Date()) {
+            stored = adopted.stature
+            savePace(adopted.pace)
+        } else {
+            stored = profile
+        }
+        stature = stored
+        stored.save()
+        if stored.statureMeters != nil {
             asksStature = false
         }
         syncSightSensors()

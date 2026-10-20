@@ -13,15 +13,22 @@ struct MeasureLogView: View {
                 Button {
                     field.showsStature = true
                 } label: {
-                    Text(field.statureNotice ?? "身長")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.card)
-                        .foregroundStyle(SurveyColor.text)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
-                        )
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(PersonalProfile.title)
+                            .font(SurveyType(18, .heavy))
+                        if let notice = field.statureNotice {
+                            Text(notice)
+                                .font(SurveyType(15, .semibold))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .background(SurveyColor.card)
+                    .foregroundStyle(SurveyColor.text)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                    )
                 }
                 .buttonStyle(.plain)
                 Button {

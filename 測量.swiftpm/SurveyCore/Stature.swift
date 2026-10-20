@@ -87,17 +87,21 @@ public struct StatureProfile: Codable, Sendable, Equatable {
     public var style: HoldStyle
     public var manualMeters: Double
     public var coefficients: StatureCoefficients
+    /// 既知高さで合わせた持ち高さ。端末の中だけ。
+    public var holdCalibration: HoldCalibration?
 
     public init(
         statureMeters: Double? = nil,
         style: HoldStyle = .sight,
         manualMeters: Double = 1.2,
-        coefficients: StatureCoefficients = .standard
+        coefficients: StatureCoefficients = .standard,
+        holdCalibration: HoldCalibration? = nil
     ) {
         self.statureMeters = statureMeters
         self.style = style
         self.manualMeters = manualMeters
         self.coefficients = coefficients
+        self.holdCalibration = holdCalibration
     }
 
     public func save(to defaults: UserDefaults = .standard) {
@@ -332,17 +336,25 @@ public enum AntennaCatalog {
 }
 
 /// 既知の楕円体高で1回観測した、その人の持ち高さ。
-public struct HoldCalibration: Equatable, Sendable {
+public struct HoldCalibration: Codable, Equatable, Sendable {
     public var deviceHeightMeters: Double
     public var knownGroundMeters: Double
     public var holdMeters: Double
     public var elbowFactor: Double
+    public var at: Date?
 
-    public init(deviceHeightMeters: Double, knownGroundMeters: Double, holdMeters: Double, elbowFactor: Double) {
+    public init(
+        deviceHeightMeters: Double,
+        knownGroundMeters: Double,
+        holdMeters: Double,
+        elbowFactor: Double,
+        at: Date? = nil
+    ) {
         self.deviceHeightMeters = deviceHeightMeters
         self.knownGroundMeters = knownGroundMeters
         self.holdMeters = holdMeters
         self.elbowFactor = elbowFactor
+        self.at = at
     }
 }
 
@@ -517,10 +529,13 @@ public enum StatureMath {
         )
     }
 
-    public static func applying(_ calibration: HoldCalibration, to profile: StatureProfile) -> StatureProfile {
+    public static func applying(_ calibration: HoldCalibration, to profile: StatureProfile, at: Date = Date()) -> StatureProfile {
         var copy = profile
         copy.style = .elbow
         copy.coefficients.elbowFactor = calibration.elbowFactor
+        var stamped = calibration
+        if stamped.at == nil { stamped.at = at }
+        copy.holdCalibration = stamped
         return copy
     }
 

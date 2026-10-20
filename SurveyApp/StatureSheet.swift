@@ -12,13 +12,15 @@ struct StatureSheet: View {
     @State private var eyeText = ""
     @State private var cabText = ""
     @State private var knownText = ""
+    @State private var distanceText = "50"
+    @State private var manualSteps = ""
     @State private var problem = ""
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("段階0の iPhone だけで、端末の高さから持ち高さを引いて地盤高にします。既定は画面の角度です。鉛直で視線が水平のときは、端末の高さを目の高さにします。肘より上は代わりです。外部GNSSのポール高とは別にします。")
+                    Text("段階0の iPhone だけで、端末の高さから持ち高さを引いて地盤高にします。既定は画面の角度です。鉛直で視線が水平のときは、端末の高さを目の高さにします。肘より上は代わりです。外部GNSSのポール高とは別にします。身長を一度入れると、歩幅の初期値も身長×0.45で入ります。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -34,6 +36,10 @@ struct StatureSheet: View {
                             .keyboardType(.decimalPad)
                             .autocorrectionDisabled()
                     }
+                    Text("この身長で、目の高さと持ち高さを出します。歩幅の初期値は身長×0.45です。既知距離を歩くと、その歩幅に替わります。")
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text("持ち方")
                         .font(SurveyType(18, .heavy))
                     ForEach(HoldStyle.allCases, id: \.self) { item in
@@ -94,6 +100,17 @@ struct StatureSheet: View {
                     }
                     Text("校正")
                         .font(SurveyType(18, .heavy))
+                    Text("この画面の値は、この端末の中だけに残します。共有しません。")
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(PersonalProfile.recordLines(stature: field.stature, pace: field.pace), id: \.self) { line in
+                        Text(line)
+                            .font(SurveyType(16, .heavy))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("持ち高さ")
+                        .font(SurveyType(18, .heavy))
                     Text("既知の楕円体高の点で、今の持ち方のまま1回観測します。端末の高さと既知高さの差を、肘より上の係数にします。")
                         .font(SurveyType(14, .semibold))
                         .foregroundStyle(SurveyColor.muted)
@@ -113,6 +130,48 @@ struct StatureSheet: View {
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
                         )
+                    Text("歩幅")
+                        .font(SurveyType(18, .heavy))
+                    Text("平らな所で、分かっている距離を歩きます。")
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    fieldBlock("距離 m") {
+                        TextField("50", text: $distanceText)
+                            .keyboardType(.decimalPad)
+                            .autocorrectionDisabled()
+                    }
+                    if field.calibrating {
+                        Text("\(field.calibrationSteps)歩")
+                            .font(SurveyType(40, .heavy))
+                    }
+                    if !StepHardware.available, field.calibrating {
+                        fieldBlock("歩数") {
+                            TextField("70", text: $manualSteps)
+                                .keyboardType(.numberPad)
+                                .autocorrectionDisabled()
+                        }
+                        .onChange(of: manualSteps) { _, value in
+                            guard let count = Int(value) else { return }
+                            field.noteManualSteps(.calibration, count)
+                        }
+                    }
+                    Button(field.calibrating ? "校正を終える" : "歩幅の校正を開始") {
+                        if field.calibrating {
+                            field.endCalibration(distanceMeters: Double(distanceText.trimmingCharacters(in: .whitespaces)) ?? .nan)
+                        } else {
+                            field.beginCalibration()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(SurveyType(18, .heavy))
+                    .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                    .background(SurveyColor.card)
+                    .foregroundStyle(SurveyColor.text)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                    )
                     if !problem.isEmpty {
                         Text(problem)
                             .font(SurveyType(15, .heavy))
@@ -145,7 +204,7 @@ struct StatureSheet: View {
             }
             .background(SurveyColor.background)
             .foregroundStyle(SurveyColor.text)
-            .navigationTitle("身長")
+            .navigationTitle(PersonalProfile.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -232,11 +291,15 @@ struct StatureSheet: View {
         profile = StatureMath.applying(calibration, to: profile)
         style = profile.style
         elbowText = String(format: "%g", profile.coefficients.elbowFactor)
-        guard saveProfile() else { return }
+        guard saveProfile(hold: profile.holdCalibration) else { return }
         problem = ""
     }
 
     private func saveProfile() -> Bool {
+        saveProfile(hold: field.stature.holdCalibration)
+    }
+
+    private func saveProfile(hold: HoldCalibration?) -> Bool {
         let trimmed = statureText.trimmingCharacters(in: .whitespaces)
         let stature = trimmed.isEmpty ? nil : Double(trimmed)
         if trimmed.isEmpty == false, stature == nil || (stature ?? 0) <= 0 || (stature ?? 0) > 3 {
@@ -255,7 +318,8 @@ struct StatureSheet: View {
             statureMeters: stature,
             style: style,
             manualMeters: manual,
-            coefficients: StatureCoefficients(elbowFactor: elbow, chestFactor: chest, eyeDropMeters: eye, cabMeters: cab)
+            coefficients: StatureCoefficients(elbowFactor: elbow, chestFactor: chest, eyeDropMeters: eye, cabMeters: cab),
+            holdCalibration: hold
         ))
         problem = ""
         return true
@@ -272,7 +336,7 @@ struct StatureAskSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("身長を入れると、段階0の iPhone で地盤高を出せます。持ち方は画面の角度です。端末が鉛直で視線が水平のときは、端末の高さを目の高さにします。±1°以内は目線水平です。傾いていれば、目の高さから距離と傾きを引きます。肘より上は、代わりの持ち方です。")
+                Text("身長を一度入れると、段階0の iPhone で地盤高を出せます。持ち方は画面の角度です。端末が鉛直で視線が水平のときは、端末の高さを目の高さにします。±1°以内は目線水平です。同じ身長で、歩幅の初期値も身長×0.45で入ります。この値は端末の中だけに残し、共有しません。")
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -302,7 +366,7 @@ struct StatureAskSheet: View {
             .padding(20)
             .background(SurveyColor.background)
             .foregroundStyle(SurveyColor.text)
-            .navigationTitle("身長")
+            .navigationTitle(PersonalProfile.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
