@@ -41,6 +41,35 @@ struct IncidentStatsSheet: View {
                                 .minimumScaleFactor(0.7)
                         }
                     }
+                    Text("対外説明")
+                        .font(.system(size: 18, weight: .heavy))
+                    Text("確定した記録から、労基署や警察に見せるPDFを作ります。労働者死傷病報告の様式は作らず、提出もしません。氏名を出すか、関係者番号にするかを選べます。")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if field.sealedIncidents.isEmpty {
+                        Text("確定した記録はまだありません。")
+                            .font(.system(size: 15, weight: .heavy))
+                            .foregroundStyle(SurveyColor.muted)
+                    } else {
+                        ForEach(field.sealedIncidents) { item in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(item.title)
+                                    .font(.system(size: 16, weight: .heavy))
+                                HStack(spacing: 8) {
+                                    reportButton("氏名を出してPDF") {
+                                        field.exportAccidentReport(item.id, names: .shown)
+                                    }
+                                    reportButton("匿名でPDF") {
+                                        field.exportAccidentReport(item.id, names: .anonymous)
+                                    }
+                                }
+                                reportButton("救急到着を追記") {
+                                    field.noteAmbulance(item.id)
+                                }
+                            }
+                        }
+                    }
                     Button("集計CSVを書く") {
                         field.exportIncidentStats()
                     }
@@ -95,6 +124,15 @@ struct IncidentStatsSheet: View {
         .frame(maxWidth: .infinity, minHeight: 36)
         .background(selected ? SurveyColor.blue : SurveyColor.card)
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func reportButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(.system(size: 15, weight: .black))
+            .foregroundStyle(Color.white)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(SurveyColor.red)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func countBlock(_ title: String, _ rows: [IncidentStatCount]) -> some View {

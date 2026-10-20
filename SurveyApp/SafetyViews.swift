@@ -273,6 +273,17 @@ struct IncidentTray: View {
                 if field.incidentOpen {
                     HStack(spacing: 8) {
                         photoControl
+                        Button("救急到着") {
+                            if let id = field.incidents.latestID {
+                                field.noteAmbulance(id)
+                            }
+                        }
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundStyle(Color.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(SurveyColor.red)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                         Button(field.incidentRecordingMemo ? "録音中" : "音声メモ") {
                             field.toggleIncidentMemo()
                         }

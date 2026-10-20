@@ -173,6 +173,8 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
     public var weather: String?
     /// 初動の時刻。確定前だけ足せる。無い記録は nil。
     public var aidLog: [AidStamp]?
+    /// 発生時の現場住所。古い記録は nil。
+    public var address: String?
 
     public init(
         id: UUID = UUID(),
@@ -191,7 +193,8 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
         strokes: [IncidentStroke] = [],
         notice: String = SafetyNotice.text,
         weather: String? = nil,
-        aidLog: [AidStamp]? = nil
+        aidLog: [AidStamp]? = nil,
+        address: String? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -210,6 +213,7 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
         self.notice = notice
         self.weather = weather
         self.aidLog = aidLog
+        self.address = address
     }
 }
 
@@ -236,6 +240,7 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
     public var notice: String
     public var weather: String?
     public var aidLog: [AidStamp]?
+    public var address: String?
 
     public init(
         id: UUID,
@@ -259,7 +264,8 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
         voiceMemoFile: String?,
         notice: String,
         weather: String? = nil,
-        aidLog: [AidStamp]? = nil
+        aidLog: [AidStamp]? = nil,
+        address: String? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -283,6 +289,7 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
         self.notice = notice
         self.weather = weather
         self.aidLog = aidLog
+        self.address = address
     }
 }
 
@@ -471,6 +478,9 @@ public enum IncidentBook {
     public static let photoName = "添付写真.png"
     public static let voiceName = "音声メモ.caf"
     public static let sentName = "送信済.json"
+    public static let hashName = "ハッシュ.txt"
+    public static let noteName = "追記.jsonl"
+    public static let explanationDirectory = "対外説明"
 
     public static func clip(_ samples: [IncidentSample], around: Date, before: TimeInterval = beforeSeconds, after: TimeInterval = afterSeconds) -> [IncidentSample] {
         let unique = deduped(samples)
@@ -608,9 +618,12 @@ public enum IncidentBook {
             voiceMemoFile: voice,
             notice: opening.notice,
             weather: opening.weather,
-            aidLog: opening.aidLog
+            aidLog: opening.aidLog,
+            address: opening.address
         )
         try encode(record, to: recordURL)
+        let recordBytes = try Data(contentsOf: recordURL)
+        try Data((SHA256.hex(recordBytes) + "\n").utf8).write(to: directory.appendingPathComponent(hashName))
         try IncidentReport.pdf(record).write(to: directory.appendingPathComponent(pdfName))
         return record
     }
@@ -1056,6 +1069,86 @@ enum IncidentPDF {
         }
         body.append(Data(table.utf8))
         body.append(Data("trailer << /Size \(all.count + 1) /Root 1 0 R >>\nstartxref\n\(xref)\n%%EOF\n".utf8))
+        return body
+    }
+
+    static func illustrated(
+        sections: [[String]],
+        image: (width: Int, height: Int, rgb: [UInt8])?
+    ) -> Data {
+        var chunks: [[String]] = []
+        for section in sections {
+            let wrapped = section.flatMap { wrap($0) }
+            let source = wrapped.isEmpty ? [" "] : wrapped
+            for start in stride(from: 0, to: source.count, by: 44) {
+                let end = min(start + 44, source.count)
+                chunks.append(Array(source[start..<end]))
+            }
+        }
+        if chunks.isEmpty { chunks = [[" "]] }
+        let picture = image.flatMap { item -> (Int, Int, [UInt8])? in
+            guard item.width > 0, item.height > 0, item.rgb.count == item.width * item.height * 3 else { return nil }
+            return item
+        }
+        let imageNumber = 6
+        let textStart = picture == nil ? 6 : 7
+        var kids: [String] = []
+        var objects: [(Int, Data)] = []
+        func add(_ number: Int, _ body: String) {
+            objects.append((number, Data(body.utf8)))
+        }
+        for index in chunks.indices {
+            let pageNumber = textStart + index * 2
+            let contentNumber = pageNumber + 1
+            kids.append("\(pageNumber) 0 R")
+            add(pageNumber, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents \(contentNumber) 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>")
+            add(contentNumber, stream(chunks[index]))
+        }
+        if picture != nil {
+            let pageNumber = textStart + chunks.count * 2
+            let contentNumber = pageNumber + 1
+            kids.append("\(pageNumber) 0 R")
+            add(pageNumber, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents \(contentNumber) 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> /XObject << /Im1 \(imageNumber) 0 R >> >> >>")
+            let caption = "図面スナップショット。赤は重機、黄は人、灰は直前60秒の軌跡。"
+            let commands = "q\n360 0 0 360 117 420 cm\n/Im1 Do\nQ\nBT\n/F2 11 Tf\n40 390 Td\n<\(utf16(caption))> Tj\nET\n"
+            add(contentNumber, "<< /Length \(Data(commands.utf8).count) >>\nstream\n\(commands)endstream")
+        }
+        let pageCount = kids.count
+        var body = Data("%PDF-1.4\n".utf8)
+        var offsets: [Int] = [0]
+        func writeObject(_ number: Int, _ object: Data) {
+            offsets.append(body.count)
+            body.append(Data("\(number) 0 obj\n".utf8))
+            body.append(object)
+            body.append(Data("\nendobj\n".utf8))
+        }
+        let head = [
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [\(kids.joined(separator: " "))] /Count \(pageCount) >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /Font /Subtype /Type0 /BaseFont /HeiseiKakuGo-W5 /Encoding /UniJIS-UTF16-H /DescendantFonts [5 0 R] >>",
+            "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /HeiseiKakuGo-W5 /CIDSystemInfo << /Registry (Adobe) /Ordering (Japan1) /Supplement 2 >> >>"
+        ]
+        for (index, object) in head.enumerated() {
+            writeObject(index + 1, Data(object.utf8))
+        }
+        if let picture {
+            var image = Data("<< /Type /XObject /Subtype /Image /Width \(picture.0) /Height \(picture.1) /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length \(picture.2.count) >>\nstream\n".utf8)
+            image.append(Data(picture.2))
+            image.append(Data("\nendstream".utf8))
+            writeObject(imageNumber, image)
+        }
+        for (number, object) in objects.sorted(by: { $0.0 < $1.0 }) {
+            writeObject(number, object)
+        }
+        let xref = body.count
+        let size = offsets.count
+        var table = "xref\n0 \(size)\n0000000000 65535 f \n"
+        for offset in offsets.dropFirst() {
+            table += String(format: "%010d 00000 n \n", offset)
+        }
+        body.append(Data(table.utf8))
+        body.append(Data("trailer << /Size \(size) /Root 1 0 R >>\nstartxref\n\(xref)\n%%EOF\n".utf8))
         return body
     }
 

@@ -2,6 +2,11 @@ import Combine
 import Foundation
 import SurveyCore
 
+struct SealedIncidentRow: Identifiable, Equatable {
+    var id: UUID
+    var title: String
+}
+
 enum FieldTab: String, CaseIterable, Identifiable {
     case map
     case drawing
@@ -95,6 +100,7 @@ final class FieldModel: ObservableObject {
     @Published var showIncidentHeat = false
     @Published var anonymizeStats = true
     @Published private(set) var incidentStatRows: [IncidentStatRow] = []
+    @Published private(set) var sealedIncidents: [SealedIncidentRow] = []
     @Published private(set) var incidentHeat: [IncidentHeatCell] = []
     @Published private(set) var statMessage: String?
     private let statsRelay = IncidentStatsRelayStub(reachable: false)
@@ -612,7 +618,8 @@ final class FieldModel: ObservableObject {
             radio: radioClips(around: now),
             strokes: incidentStrokes(around: position),
             notice: sosNotice(trigger),
-            weather: drawing.weatherLabel.isEmpty ? nil : drawing.weatherLabel
+            weather: drawing.weatherLabel.isEmpty ? nil : drawing.weatherLabel,
+            address: siteAddress
         )
         do {
             let id = try incidents.open(opening, projectName: project.name, at: drawing.projectsRoot)
@@ -1490,10 +1497,67 @@ final class FieldModel: ObservableObject {
         guard let project = drawing.project else {
             incidentStatRows = []
             incidentHeat = []
+            sealedIncidents = []
             return
         }
         incidentStatRows = IncidentStats.load(project: project, at: drawing.projectsRoot, anonymize: anonymizeStats)
         incidentHeat = IncidentStats.heat(incidentStatRows)
+        sealedIncidents = IncidentBook.sealed(projectName: project.name, at: drawing.projectsRoot)
+            .sorted { $0.occurredAt > $1.occurredAt }
+            .prefix(8)
+            .map { record in
+                SealedIncidentRow(
+                    id: record.id,
+                    title: "\(AccidentReport.clock(record.occurredAt)) \(record.trigger.label) \(record.work.kind)"
+                )
+            }
+    }
+
+    func exportAccidentReport(_ id: UUID, names: AccidentNames) {
+        guard let project = drawing.project else {
+            statMessage = "先にプロジェクトを作ってください。"
+            return
+        }
+        do {
+            let result = try AccidentBook.export(
+                incidentID: id,
+                projectName: project.name,
+                at: drawing.projectsRoot,
+                names: names,
+                generatedAt: Date()
+            )
+            statMessage = "対外説明を書きました。照合は\(result.status)です。\(result.fileName)"
+        } catch {
+            statMessage = "対外説明を書けませんでした。"
+        }
+    }
+
+    func noteAmbulance(_ id: UUID) {
+        guard let project = drawing.project else {
+            statMessage = "先にプロジェクトを作ってください。"
+            return
+        }
+        let stamp = AidStamp(at: Date(), text: "救急到着")
+        if incidents.open[id] != nil {
+            do {
+                try incidents.noteAid(stamp, incidentID: id, projectName: project.name, at: drawing.projectsRoot)
+                incidentNote = "救急到着を記録しました"
+            } catch {
+                incidentNote = "確定した記録には足せません。"
+            }
+            return
+        }
+        do {
+            _ = try AccidentBook.append(text: "救急到着", at: Date(), incidentID: id, projectName: project.name, root: drawing.projectsRoot)
+            statMessage = "救急到着を追記しました。記録.jsonは変えていません。"
+        } catch {
+            statMessage = "救急到着を追記できませんでした。"
+        }
+    }
+
+    private var siteAddress: String? {
+        let raw = drawing.project?.siteAid?.address.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? nil : raw
     }
 
     func exportIncidentStats() {
