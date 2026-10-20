@@ -46,6 +46,17 @@ struct MeasureLogView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                Button {
+                    field.showsPace = true
+                } label: {
+                    Text("歩測")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                        .background(SurveyColor.blue)
+                        .foregroundStyle(SurveyColor.onAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
                 if field.stature.style == .sight {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }

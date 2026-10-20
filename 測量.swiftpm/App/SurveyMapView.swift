@@ -32,7 +32,7 @@ struct SurveyMapView: UIViewRepresentable {
         context.coordinator.attach(field: field, map: map)
         context.coordinator.update(
             map: map,
-            reading: field.workingReading,
+            reading: field.navigationReading,
             viewport: field.viewport,
             followUser: field.followUser,
             tone: field.badge.tone,
@@ -117,7 +117,7 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func syncReach(on map: MKMapView, field: FieldModel) {
-            let position = field.workingReading.position
+            let position = field.navigationReading.position
             let radius = field.drawing.machineRadiusMeters
             let target = field.drawing.operatorTarget(control: field.selectedControlPoint)
             let graphics: (center: PlanarPoint, radius: Double, ranges: [ReachRange], rings: [ReachRing])?

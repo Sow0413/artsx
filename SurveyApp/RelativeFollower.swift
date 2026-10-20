@@ -1,10 +1,6 @@
 import SwiftUI
 import SurveyCore
 
-#if !SURVEY_PLAYGROUND && canImport(ARKit)
-import ARKit
-#endif
-
 #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
 import CoreMotion
 #endif
@@ -28,10 +24,8 @@ final class RelativeFollower: ObservableObject {
     private var pole: Double?
     private var lastPublish = Date.distantPast
     private var started = false
+    private let visionID = UUID()
 
-    #if !SURVEY_PLAYGROUND && canImport(ARKit)
-    private let vision = RelativeVision()
-    #endif
     #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
     private let altimeter = CMAltimeter()
     private let altimeterQueue = OperationQueue()
@@ -40,11 +34,10 @@ final class RelativeFollower: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
-        #if !SURVEY_PLAYGROUND && canImport(ARKit) && canImport(CoreMotion)
-        vision.onFrame = { [weak self] up, x, z, quality in
-            self?.noteVision(up: up, x: x, z: z, quality: quality)
+        #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
+        SurveyVision.shared.add(visionID) { [weak self] frame in
+            self?.noteVision(up: frame.up, x: frame.x, z: frame.z, quality: frame.quality)
         }
-        vision.start()
         if CMAltimeter.isRelativeAltitudeAvailable() {
             altimeter.startRelativeAltitudeUpdates(to: altimeterQueue) { [weak self] data, _ in
                 guard let meters = data?.relativeAltitude.doubleValue, meters.isFinite else { return }
@@ -68,8 +61,8 @@ final class RelativeFollower: ObservableObject {
     func stop() {
         guard started else { return }
         started = false
-        #if !SURVEY_PLAYGROUND && canImport(ARKit) && canImport(CoreMotion)
-        vision.stop()
+        #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
+        SurveyVision.shared.remove(visionID)
         altimeter.stopRelativeAltitudeUpdates()
         SystemMotion.shared.setRelativeMotion(false)
         #endif
@@ -188,46 +181,3 @@ struct RelativeStageBadge: View {
         .accessibilityLabel(badge.accessibilityText)
     }
 }
-
-#if !SURVEY_PLAYGROUND && canImport(ARKit)
-private final class RelativeVision: NSObject, ARSessionDelegate {
-    let session = ARSession()
-    var onFrame: ((Double, Double, Double, RelativeQuality) -> Void)?
-    private var last = Date.distantPast
-
-    func start() {
-        guard ARWorldTrackingConfiguration.isSupported else { return }
-        let configuration = ARWorldTrackingConfiguration()
-        configuration.worldAlignment = .gravity
-        session.delegate = self
-        session.run(configuration, options: [.resetTracking, .removeExistingAnchors])
-    }
-
-    func stop() {
-        session.pause()
-        onFrame = nil
-    }
-
-    func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        let now = Date()
-        guard now.timeIntervalSince(last) >= 0.1 else { return }
-        last = now
-        let column = frame.camera.transform.columns.3
-        let quality: RelativeQuality
-        switch frame.camera.trackingState {
-        case .normal:
-            quality = .normal
-        case .limited:
-            quality = .limited
-        case .notAvailable:
-            quality = .lost
-        }
-        let up = Double(column.y)
-        let x = Double(column.x)
-        let z = Double(column.z)
-        DispatchQueue.main.async { [weak self] in
-            self?.onFrame?(up, x, z, quality)
-        }
-    }
-}
-#endif

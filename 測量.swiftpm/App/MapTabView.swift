@@ -8,7 +8,7 @@ struct MapTabView: View {
             SurveyMapView(field: field)
             VStack(spacing: 0) {
                 WorkBar(field: field)
-                if let station = field.drawing.operatorGuide(at: field.workingReading.position)?.line,
+                if let station = field.drawing.operatorGuide(at: field.navigationReading.position)?.line,
                    field.drawing.stationLine != nil {
                     Text(station)
                         .font(SurveyType(34, .heavy))
@@ -175,8 +175,8 @@ struct MapTabView: View {
                         onCancel: field.cancelDownload
                     )
                     LocationPanel(
-                        reading: field.workingReading,
-                        note: field.showsCorrectedPosition ? "三角点補正を引いた位置" : nil,
+                        reading: field.navigationReading,
+                        note: field.navigationNote,
                         statureNotice: field.statureNotice,
                         onStature: { field.showsStature = true },
                         showsLevel: field.stature.style == .sight,
@@ -200,6 +200,18 @@ struct MapTabView: View {
                         field.showsBatter = true
                     } label: {
                         Text("丁張")
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: 560, minHeight: OutdoorContrast.primaryPoints)
+                            .frame(maxWidth: .infinity)
+                            .background(SurveyColor.blue)
+                            .foregroundStyle(SurveyColor.onAccent)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        field.showsPace = true
+                    } label: {
+                        Text("歩測")
                             .font(SurveyType(18, .heavy))
                             .frame(maxWidth: 560, minHeight: OutdoorContrast.primaryPoints)
                             .frame(maxWidth: .infinity)

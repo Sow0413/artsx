@@ -8,7 +8,7 @@ struct OperatorView: View {
     @ObservedObject var drawing: DrawingSession
 
     var body: some View {
-        let position = field.workingReading.position
+        let position = field.navigationReading.position
         let guide = drawing.operatorGuide(at: position)
         let station = stationText(position: position, guide: guide)
         let arrow = guide.flatMap {

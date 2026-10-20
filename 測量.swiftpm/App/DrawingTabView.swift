@@ -801,7 +801,7 @@ struct DrawingTabView: View {
     }
 
     private var reachGraphics: (center: PlanarPoint, radius: Double, ranges: [ReachRange], rings: [ReachRing])? {
-        guard let position = field.workingReading.position, position.isPlottable else { return nil }
+        guard let position = field.navigationReading.position, position.isPlottable else { return nil }
         return drawing.reachGraphics(latitude: position.latitudeDegrees, longitude: position.longitudeDegrees)
     }
 
@@ -847,7 +847,7 @@ struct DrawingTabView: View {
 
     private var userOnDrawing: UserOnDrawing? {
         guard drawing.document != nil,
-              let position = field.workingReading.position,
+              let position = field.navigationReading.position,
               position.isPlottable,
               position.hasValidHorizontalAccuracy else { return nil }
         return DrawingPlacement.user(
@@ -862,7 +862,7 @@ struct DrawingTabView: View {
     }
 
     private var accuracyText: String {
-        guard let position = field.workingReading.position, position.hasValidHorizontalAccuracy else { return "精度なし" }
+        guard let position = field.navigationReading.position, position.hasValidHorizontalAccuracy else { return "精度なし" }
         return CoordinateText.accuracyMeters(position.horizontalAccuracyMeters)
     }
 
@@ -886,7 +886,7 @@ struct DrawingTabView: View {
     }
 
     private func useCurrentPosition() {
-        guard let position = field.workingReading.position, position.isPlottable else {
+        guard let position = field.navigationReading.position, position.isPlottable else {
             drawing.report("現在地がありません。")
             return
         }

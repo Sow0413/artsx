@@ -79,6 +79,16 @@ final class FieldModel: ObservableObject {
     @Published var asksStature = false
     @Published var showsCrosshair = false
     @Published var showsBatter = false
+    @Published var showsPace = false
+    @Published var pace = PaceProfile.load()
+    @Published private(set) var walkMode: WalkMode = .gnss
+    @Published private(set) var bridgeFix: WalkFix?
+    @Published private(set) var bridgeNotice: String?
+    @Published private(set) var calibrating = false
+    @Published private(set) var calibrationSteps = 0
+    @Published private(set) var pacing = false
+    @Published private(set) var measureSteps = 0
+    @Published private(set) var paceFix: WalkFix?
     @Published var batter = BatterSettings.load()
     @Published var poleHeight = PoleHeight.load()
     @Published var tiltZero = TiltZero.load()
@@ -179,6 +189,17 @@ final class FieldModel: ObservableObject {
     private var lastIncidentID: UUID?
     private var spokenFirst = ""
     private var cancellables: Set<AnyCancellable> = []
+    private let paceSession = PaceSession()
+    private var measureBridge: WalkBridge?
+    private var deadReckon: WalkBridge?
+    private var bridgeSteps = 0
+    private let paceVision = UUID()
+    private var paceVisionOn = false
+    private var measureSeenX: Double?
+    private var measureSeenZ: Double?
+    private var bridgeSeenX: Double?
+    private var bridgeSeenZ: Double?
+    private var paceYaw: Double?
 
     init(
         source: any PositionSource,
@@ -290,6 +311,9 @@ final class FieldModel: ObservableObject {
                 }
             }
         }
+        paceSession.onSteps = { [weak self] slot, count in
+            self?.ingestSteps(slot, count)
+        }
     }
 
     func cancelFall() {
@@ -324,7 +348,7 @@ final class FieldModel: ObservableObject {
 
     func stopSOS() {
         guard sosDesk.session.active, let project = drawing.project else { return }
-        let position = workingReading.position
+        let position = navigationReading.position
         let plottable = position?.isPlottable == true
         guard let beacon = sosDesk.end(
             deviceID: crew.deviceID,
@@ -344,7 +368,7 @@ final class FieldModel: ObservableObject {
         sosRelay.isReachable = radio.relayReachable
         sosRelay.flush()
         guard sosDesk.session.active, let project = drawing.project else { return }
-        let position = workingReading.position
+        let position = navigationReading.position
         let plottable = position?.isPlottable == true
         guard let beacon = sosDesk.beacon(
             deviceID: crew.deviceID,
@@ -378,7 +402,7 @@ final class FieldModel: ObservableObject {
         guard extras.sos else { return }
         if let beacon = packet.beacon {
             guard beacon.channelID == drawing.project?.id, beacon.deviceID != crew.deviceID else { return }
-            let position = workingReading.position
+            let position = navigationReading.position
             let plottable = position?.isPlottable == true
             let heard = sosDesk.hear(
                 beacon,
@@ -872,7 +896,7 @@ final class FieldModel: ObservableObject {
     /// 受信中だけ。オペ画面は重機の向き、それ以外は自分の進行か方位。
     var talkPointer: TalkPointer? {
         guard let speaker = radio.hearingSpeaker else { return nil }
-        let position = workingReading.position
+        let position = navigationReading.position
         let plottable = position?.isPlottable == true
         return TalkDirection.pointer(
             speaker: speaker,
@@ -892,6 +916,71 @@ final class FieldModel: ObservableObject {
             return reading
         }
         return PositionReading(position: shifted, availability: reading.availability)
+    }
+
+    /// 地図と共有に出す位置。GNSS が弱いあいだは歩行推測。観測の記録は workingReading のまま。
+    var navigationReading: PositionReading {
+        let base = workingReading
+        guard walkMode == .bridge, let bridge = deadReckon else { return base }
+        let fix = bridgeFix
+        let sigma = fix?.sigmaMeters ?? PaceMath.bridgeSigma(pathMeters: 0, disagreementMeters: 0)
+        let latitude = fix?.latitudeDegrees ?? bridge.originLatitude
+        let longitude = fix?.longitudeDegrees ?? bridge.originLongitude
+        if var position = base.position {
+            position.latitudeDegrees = latitude
+            position.longitudeDegrees = longitude
+            position.horizontalAccuracyMeters = sigma
+            position.stage = .iphone
+            position.fixQuality = .standalone
+            position.receiver = .iphoneGPS
+            position.correctionAgeSeconds = nil
+            position.correctionSource = nil
+            position.timestamp = Date()
+            return PositionReading(position: position, availability: base.availability)
+        }
+        return PositionReading(
+            position: IPhonePosition.make(
+                latitudeDegrees: latitude,
+                longitudeDegrees: longitude,
+                ellipsoidalHeightMeters: nil,
+                horizontalAccuracyMeters: sigma,
+                verticalAccuracyMeters: nil,
+                timestamp: Date()
+            ),
+            availability: .available
+        )
+    }
+
+    var navigationNote: String? {
+        var parts: [String] = []
+        if showsCorrectedPosition { parts.append("三角点補正を引いた位置") }
+        if walkMode == .bridge {
+            let sigma = bridgeFix?.sigmaMeters ?? PaceMath.bridgeSigma(pathMeters: 0, disagreementMeters: 0)
+            parts.append("歩行推測　\(PaceMath.estimateText(sigma))")
+        } else if let bridgeNotice {
+            parts.append(bridgeNotice)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "。")
+    }
+
+    var pacePathMeters: Double {
+        paceFix?.pathMeters ?? measureBridge?.pathMeters ?? 0
+    }
+
+    var paceWaitsForHeading: Bool {
+        pacing && paceFix == nil && measureSteps > 0 && pacePathMeters == 0
+    }
+
+    var paceBadge: PaceBadge {
+        let walking = pacing || paceFix != nil
+        let distance = walking ? pacePathMeters : nil
+        let sigma = distance.map { PaceMath.paceSigma(distanceMeters: $0) }
+        return PaceMath.badge(distanceMeters: distance, sigmaMeters: sigma)
+    }
+
+    var paceFactorText: String {
+        guard let factor = PaceMath.factor(slope: pace.slope, override: pace.factorOverride) else { return "—" }
+        return String(format: "%.3f", locale: Self.posix, factor)
     }
 
     var showsCorrectedPosition: Bool {
@@ -1198,6 +1287,132 @@ final class FieldModel: ObservableObject {
     func setSightForeground(_ active: Bool) {
         sightInForeground = active
         syncSightSensors()
+        if active {
+            paceSession.resume()
+        } else {
+            paceSession.pause()
+        }
+    }
+
+    func savePace(_ profile: PaceProfile) {
+        let clean = profile.sanitized()
+        pace = clean
+        clean.save()
+        if let stride = clean.strideMeters {
+            measureBridge?.strideMeters = stride
+            deadReckon?.strideMeters = stride
+        }
+        measureBridge?.slope = clean.slope
+        measureBridge?.factorOverride = clean.factorOverride
+        deadReckon?.slope = clean.slope
+        deadReckon?.factorOverride = clean.factorOverride
+        if clean.strideMeters == nil, walkMode == .bridge {
+            finishBridge(restored: false)
+        }
+        refreshPace()
+        refreshBridge()
+    }
+
+    func beginCalibration() {
+        calibrating = true
+        calibrationSteps = 0
+        paceSession.watch(.calibration, from: Date())
+    }
+
+    func endCalibration(distanceMeters: Double) {
+        paceSession.unwatch(.calibration)
+        calibrating = false
+        guard let stride = PaceMath.stride(distanceMeters: distanceMeters, steps: calibrationSteps) else {
+            captureMessage = "歩幅にできません。平らな所で、5m以上を5歩以上歩いてください。"
+            return
+        }
+        var next = pace
+        next.strideMeters = stride
+        next.calibratedDistanceMeters = distanceMeters
+        next.calibratedSteps = calibrationSteps
+        savePace(next)
+        captureMessage = "歩幅を\(Self.meters(stride))にしました。"
+    }
+
+    func beginPace() {
+        guard let stride = pace.strideMeters else {
+            captureMessage = "先に歩幅を校正してください。"
+            return
+        }
+        guard let origin = workingReading.position, origin.isPlottable else {
+            captureMessage = "開始の位置が無いので、歩けません。"
+            return
+        }
+        pacing = true
+        measureSteps = 0
+        paceFix = nil
+        measureSeenX = nil
+        measureSeenZ = nil
+        measureBridge = WalkBridge(
+            originLatitude: origin.latitudeDegrees,
+            originLongitude: origin.longitudeDegrees,
+            strideMeters: stride,
+            slope: pace.slope,
+            factorOverride: pace.factorOverride
+        )
+        paceSession.watch(.measure, from: Date())
+        holdPaceVision()
+        refreshPace()
+    }
+
+    func endPace() {
+        guard pacing else { return }
+        pacing = false
+        paceSession.unwatch(.measure)
+        measureBridge?.add(totalSteps: measureSteps, headingDegrees: headingNow)
+        refreshPace()
+        releasePaceVisionIfIdle()
+    }
+
+    func noteManualSteps(_ slot: PaceSlot, _ count: Int) {
+        guard count >= 0 else { return }
+        ingestSteps(slot, count)
+    }
+
+    /// 歩いた終わりを種別「歩測」で残す。身長補正は掛けない。段階は 0。
+    @discardableResult
+    func recordPace() -> Bool {
+        guard let fix = paceFix else {
+            captureMessage = measureBridge == nil
+                ? "先に歩測を始めてください。"
+                : "方位が無いので、点は残せません。"
+            return false
+        }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return false
+        }
+        let sigma = PaceMath.paceSigma(distanceMeters: fix.pathMeters)
+        let position = IPhonePosition.make(
+            latitudeDegrees: fix.latitudeDegrees,
+            longitudeDegrees: fix.longitudeDegrees,
+            ellipsoidalHeightMeters: reading.position?.ellipsoidalHeightMeters,
+            horizontalAccuracyMeters: sigma,
+            verticalAccuracyMeters: nil,
+            timestamp: Date(),
+            headingDegrees: headingNow
+        )
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: .iphone,
+            durationSeconds: nil,
+            epochCount: nil
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: workCatalog.selected.id,
+            captured: position,
+            condition: condition
+        )
+        store(observation)
+        remember(CoordinateBookIndex.entry(from: observation, kind: PaceMath.kind))
+        captureMessage = "\(name)を歩測で残しました。\(PaceMath.distanceText(fix.pathMeters))、段階0。\(PaceMath.estimateText(sigma))。"
+        return true
     }
 
     func saveStature(_ profile: StatureProfile) {
@@ -1418,7 +1633,7 @@ final class FieldModel: ObservableObject {
     func recenter() {
         followUser = true
         camera = MapCameraFollow()
-        if let position = workingReading.position, position.isPlottable {
+        if let position = navigationReading.position, position.isPlottable {
             viewport = camera.update(for: position)
         }
     }
@@ -1953,7 +2168,8 @@ final class FieldModel: ObservableObject {
             }
             persistFix(force: controlFix.fixBeganAt != began || controlFix.restarted != wasRestarted)
         }
-        if let position = workingReading.position, position.isPlottable {
+        updateWalk()
+        if let position = navigationReading.position, position.isPlottable {
             drawing.noteReference(
                 latitude: position.latitudeDegrees,
                 longitude: position.longitudeDegrees,
@@ -1972,12 +2188,12 @@ final class FieldModel: ObservableObject {
         }
         trackIncidents()
         refreshVisibleControlPoints()
-        guard followUser, let position = workingReading.position, position.isPlottable else { return }
+        guard followUser, let position = navigationReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
     }
 
     func applyShareGate(now: Date = Date()) {
-        let position = workingReading.position
+        let position = navigationReading.position
         let plottable = position?.isPlottable == true
         let state = extras.sharesLocation
             ? LocationPrivacy.gate(
@@ -2068,7 +2284,7 @@ final class FieldModel: ObservableObject {
             incidents.restore(projectName: project.name, at: drawing.projectsRoot)
         }
         var batch: [IncidentSample] = []
-        if let position = workingReading.position, position.isPlottable {
+        if let position = navigationReading.position, position.isPlottable {
             batch.append(IncidentSample(
                 at: now,
                 id: crew.deviceID,
@@ -2256,6 +2472,152 @@ final class FieldModel: ObservableObject {
         }
         guard east.count >= 2 else { return [] }
         return [IncidentStroke(eastMeters: east, northMeters: north)]
+    }
+
+    private static var posix: Locale { Locale(identifier: "en_US_POSIX") }
+
+    private static func meters(_ value: Double) -> String {
+        String(format: "%.2fm", locale: posix, value)
+    }
+
+    private var headingNow: Double? {
+        if let heading = reading.position?.headingDegrees, heading.isFinite { return heading }
+        if let course = reading.position?.courseDegrees, course.isFinite { return course }
+        return nil
+    }
+
+    private func ingestSteps(_ slot: PaceSlot, _ total: Int) {
+        switch slot {
+        case .calibration:
+            calibrationSteps = total
+        case .measure:
+            measureSteps = total
+            measureBridge?.add(totalSteps: total, headingDegrees: headingNow)
+            refreshPace()
+        case .bridge:
+            bridgeSteps = max(bridgeSteps, total)
+            deadReckon?.add(totalSteps: bridgeSteps, headingDegrees: headingNow)
+            refreshBridge()
+        }
+    }
+
+    private func updateWalk() {
+        guard StepHardware.available else {
+            if walkMode == .bridge { finishBridge(restored: false) }
+            return
+        }
+        let desired = PaceMath.nextMode(current: walkMode, accuracyMeters: reading.position?.horizontalAccuracyMeters)
+        if desired == .bridge {
+            guard pace.strideMeters != nil else {
+                if walkMode == .bridge { finishBridge(restored: false) }
+                return
+            }
+            if walkMode != .bridge {
+                guard startBridge() else { return }
+            }
+            deadReckon?.add(totalSteps: bridgeSteps, headingDegrees: headingNow)
+            refreshBridge()
+        } else if walkMode == .bridge {
+            finishBridge(restored: true)
+        }
+    }
+
+    @discardableResult
+    private func startBridge() -> Bool {
+        guard let stride = pace.strideMeters,
+              let position = workingReading.position,
+              position.isPlottable else { return false }
+        walkMode = .bridge
+        bridgeNotice = nil
+        bridgeSteps = 0
+        bridgeSeenX = nil
+        bridgeSeenZ = nil
+        deadReckon = WalkBridge(
+            originLatitude: position.latitudeDegrees,
+            originLongitude: position.longitudeDegrees,
+            strideMeters: stride,
+            slope: pace.slope,
+            factorOverride: pace.factorOverride
+        )
+        paceSession.watch(.bridge, from: Date())
+        holdPaceVision()
+        refreshBridge()
+        return true
+    }
+
+    private func finishBridge(restored: Bool) {
+        walkMode = .gnss
+        deadReckon = nil
+        bridgeFix = nil
+        bridgeSteps = 0
+        bridgeSeenX = nil
+        bridgeSeenZ = nil
+        bridgeNotice = restored ? "GNSSに戻りました。" : nil
+        paceSession.unwatch(.bridge)
+        releasePaceVisionIfIdle()
+    }
+
+    private func refreshPace() {
+        paceFix = measureBridge?.place()
+    }
+
+    private func refreshBridge() {
+        guard walkMode == .bridge else { return }
+        bridgeFix = deadReckon?.place()
+    }
+
+    private func holdPaceVision() {
+        guard !paceVisionOn else { return }
+        paceVisionOn = true
+        SurveyVision.shared.add(paceVision) { [weak self] frame in
+            self?.notePaceVision(frame)
+        }
+    }
+
+    private func releasePaceVisionIfIdle() {
+        guard !pacing, walkMode != .bridge, paceVisionOn else { return }
+        paceVisionOn = false
+        SurveyVision.shared.remove(paceVision)
+        paceYaw = nil
+        measureSeenX = nil
+        measureSeenZ = nil
+        bridgeSeenX = nil
+        bridgeSeenZ = nil
+    }
+
+    private func notePaceVision(_ frame: VisionFrame) {
+        guard frame.quality != .lost else { return }
+        if paceYaw == nil {
+            guard let heading = headingNow,
+                  let forward = PaceMath.forwardFromPlusZ(x: frame.forwardX, z: frame.forwardZ),
+                  let yaw = PaceMath.yawOfPlusZ(headingDegrees: heading, forwardFromPlusZDegrees: forward) else { return }
+            paceYaw = yaw
+        }
+        guard let yaw = paceYaw else { return }
+        if pacing, var track = measureBridge {
+            if measureSeenX == nil {
+                measureSeenX = frame.x
+                measureSeenZ = frame.z
+            }
+            if let originX = measureSeenX, let originZ = measureSeenZ,
+               let moved = PaceMath.horizontal(dx: frame.x - originX, dz: frame.z - originZ, yawDegrees: yaw) {
+                track.setVisual(east: moved.east, north: moved.north)
+                measureBridge = track
+                refreshPace()
+            }
+        }
+        if walkMode == .bridge, var track = deadReckon {
+            if bridgeSeenX == nil {
+                bridgeSeenX = frame.x
+                bridgeSeenZ = frame.z
+            }
+            if let originX = bridgeSeenX, let originZ = bridgeSeenZ,
+               let moved = PaceMath.horizontal(dx: frame.x - originX, dz: frame.z - originZ, yawDegrees: yaw) {
+                track.setVisual(east: moved.east, north: moved.north)
+                deadReckon = track
+                refreshBridge()
+            }
+        }
     }
 
     private static func message(for error: TileDownloadError) -> String {
