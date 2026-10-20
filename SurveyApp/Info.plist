@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>ja</string>
 	<key>CFBundleDisplayName</key>
-	<string>測量</string>
+	<string>artsx</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIconName</key>
@@ -15,7 +15,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>測量</string>
+	<string>artsx</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -26,16 +26,27 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>水準器の十字線、顔から端末までの距離、丁張の相対高と、歩行の位置をつなぐ視覚慣性に使います。映像は保存せず、誰かを識別するためにも使いません。</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>GNSS 受信機とつなぐために使います。切れたら、アプリが前面にあるあいだだけつなぎ直します。</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>GNSS 受信機とつなぐために使います。切れたら、アプリが前面にあるあいだだけつなぎ直します。</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_survey-ptt._tcp</string>
+		<string>_survey-ptt._udp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>水準器の十字線、顔から端末までの距離、丁張の相対高、位置出しの杖と、歩行の位置をつなぐ視覚慣性に使います。映像は保存せず、誰かを識別するためにも使いません。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>同じ現場の端末と、測点や無線のパケットを直接受け渡すために使います。現場の外へは出しません。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>現在地と精度の円を地図に出すために使います。座標は端末内に WGS84/ITRF で保持します。</string>
+	<string>現在地と精度の円を地図に出し、位置出しの方向を画面の上を前にして出すために使います。座標は端末内に WGS84/ITRF で保持します。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>押して話す無線で、同じプロジェクトの端末へ声を送ります。位置出しの「前です」などの読み上げはスピーカーで出し、マイクは使いません。</string>
 	<key>NSMotionUsageDescription</key>
 	<string>端末の傾きから、高さの補正、水準器の角度、丁張の高さの変化を出します。歩数と歩幅も見ます。おまけの転倒検知をオンにしたときは、加速度も見ます。緊急通報の代わりではありません。</string>
+	<key>NSNearbyInteractionUsageDescription</key>
+	<string>近くの端末との距離を、作業半径の警報に使います。UWB が無い端末では使いません。</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
