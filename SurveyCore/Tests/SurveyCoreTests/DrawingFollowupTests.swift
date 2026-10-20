@@ -174,6 +174,7 @@ final class DrawingFollowupTests: XCTestCase {
         let saved = try XCTUnwrap(session.record(at: start.addingTimeInterval(10)))
         XCTAssertEqual(saved.fixDurationSeconds, 10, accuracy: 1e-9)
         XCTAssertEqual(saved.satelliteCount, 18)
+        XCTAssertEqual(saved.epochCount, 2)
         XCTAssertEqual(saved.horizontalAccuracyMeters, 0.02, accuracy: 1e-9)
 
         session.observe(floated(), at: start.addingTimeInterval(11))
@@ -190,6 +191,14 @@ final class DrawingFollowupTests: XCTestCase {
         var phone = ControlFixSession()
         phone.observe(samplePosition(quality: .rtkFix, receiver: .iphoneGPS), at: start)
         XCTAssertFalse(phone.canRecord)
+
+        var held = ControlFixSession()
+        held.observe(fix(satellites: 9), at: start)
+        XCTAssertTrue(held.canRecord)
+        held.abort()
+        XCTAssertTrue(held.restarted)
+        XCTAssertFalse(held.canRecord)
+        XCTAssertNil(held.record(at: start.addingTimeInterval(3)))
     }
 
     func testPointNamesSkipBookAndStayOnTheRecord() throws {

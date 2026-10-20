@@ -47,7 +47,11 @@ func samplePosition(
     stage: PositionStage = .iphone,
     quality: FixQuality = .standalone,
     receiver: ReceiverKind = .iphoneGPS,
-    satelliteCount: Int? = nil
+    satelliteCount: Int? = nil,
+    satellites: [SatelliteCount]? = nil,
+    pdop: Double? = nil,
+    correctionAgeSeconds: Double? = nil,
+    correctionSource: String? = nil
 ) -> GeodeticPosition {
     GeodeticPosition(
         latitudeDegrees: latitude,
@@ -59,6 +63,10 @@ func samplePosition(
         stage: stage,
         fixQuality: quality,
         receiver: receiver,
-        satelliteCount: satelliteCount
+        satelliteCount: satelliteCount,
+        satellites: satellites,
+        pdop: pdop,
+        correctionAgeSeconds: correctionAgeSeconds,
+        correctionSource: correctionSource
     )
 }

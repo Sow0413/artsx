@@ -25,7 +25,7 @@ struct RootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AccuracyBadgeView(badge: field.badge)
+            AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .padding(.bottom, 8)
@@ -50,10 +50,7 @@ struct RootView: View {
                 } else if field.tab == .measure {
                     MeasureLogView(field: field)
                 } else if field.tab == .export {
-                    PlaceholderTabView(
-                        title: "出す",
-                        message: "PDF・DXF・SIMA の書き出しは次のスライスです。JGD2024 への変換は、出すときだけ行います。"
-                    )
+                    ExportTabView(field: field)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

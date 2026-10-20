@@ -32,13 +32,52 @@ public enum FixQuality: String, Sendable, Codable, Equatable {
 }
 
 /// 位置を出した機器。iPhone の GPS は、精度の数値が良くても外部受信機ではない。
-public enum ReceiverKind: String, Sendable, Codable, Equatable {
+public enum ReceiverKind: String, Sendable, Codable, Equatable, CaseIterable {
     case iphoneGPS
     case clas
     case rtk
     case totalStation
     case level
     case uwb
+
+    public var label: String {
+        switch self {
+        case .iphoneGPS: return "iPhone"
+        case .clas: return "CLAS"
+        case .rtk: return "RTK"
+        case .totalStation: return "TS"
+        case .level: return "レベル"
+        case .uwb: return "UWB"
+        }
+    }
+}
+
+public enum SatelliteSystem: String, Codable, Sendable, Equatable, CaseIterable {
+    case gps
+    case glonass
+    case galileo
+    case qzss
+    case beidou
+
+    public var label: String {
+        switch self {
+        case .gps: return "GPS"
+        case .glonass: return "GLONASS"
+        case .galileo: return "Galileo"
+        case .qzss: return "QZSS"
+        case .beidou: return "BeiDou"
+        }
+    }
+}
+
+public struct SatelliteCount: Codable, Sendable, Equatable {
+    public var system: SatelliteSystem
+    public var count: Int
+
+    public init(system: SatelliteSystem, count: Int) {
+        self.system = system
+        self.count = count
+    }
 }
 
 /// 内部保持の1点。緯度・経度・楕円体高。測地系の切り替えは持たない。
@@ -55,6 +94,13 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
     public var frame: CoordinateFrame
     /// 受信機が報告した衛星数。iPhone の CoreLocation には無いので、無いときは nil。
     public var satelliteCount: Int?
+    /// 系統ごとの衛星数。無い受信機は nil。
+    public var satellites: [SatelliteCount]?
+    public var pdop: Double?
+    /// 補正が届いてからの秒。補正が無いときは nil。
+    public var correctionAgeSeconds: Double?
+    /// VRS、基地局名など、補正の出どころ。
+    public var correctionSource: String?
 
     public init(
         latitudeDegrees: Double,
@@ -67,7 +113,11 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         fixQuality: FixQuality,
         receiver: ReceiverKind,
         frame: CoordinateFrame = .wgs84ITRF,
-        satelliteCount: Int? = nil
+        satelliteCount: Int? = nil,
+        satellites: [SatelliteCount]? = nil,
+        pdop: Double? = nil,
+        correctionAgeSeconds: Double? = nil,
+        correctionSource: String? = nil
     ) {
         self.latitudeDegrees = latitudeDegrees
         self.longitudeDegrees = longitudeDegrees
@@ -80,6 +130,21 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         self.receiver = receiver
         self.frame = frame
         self.satelliteCount = satelliteCount
+        self.satellites = satellites
+        self.pdop = pdop
+        self.correctionAgeSeconds = correctionAgeSeconds
+        self.correctionSource = correctionSource
+    }
+
+    /// バッジに常時出す解の文字。iPhone が Fix と名乗っても単独。
+    public var solutionLabel: String {
+        if receiver == .iphoneGPS { return "単独" }
+        switch fixQuality {
+        case .rtkFix: return receiver == .clas ? "CLAS" : "FIX"
+        case .float: return "FLOAT"
+        case .clas: return "CLAS"
+        case .standalone, .dgps, .none: return "単独"
+        }
     }
 
     public var isPlottable: Bool {

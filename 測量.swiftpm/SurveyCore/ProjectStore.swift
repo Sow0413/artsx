@@ -85,6 +85,16 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
     public var satelliteCount: Int?
     public var fixDurationSeconds: TimeInterval
     public var recordedAt: Date
+    public var kind: String?
+    public var source: String?
+    public var stage: PositionStage?
+    public var solution: FixQuality?
+    public var pdop: Double?
+    public var correctionAgeSeconds: Double?
+    public var correctionSource: String?
+    public var epochCount: Int?
+    public var receiverLabel: String?
+    public var satelliteNote: String?
 
     public var id: String { name }
 
@@ -97,7 +107,17 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         verticalAccuracyMeters: Double?,
         satelliteCount: Int?,
         fixDurationSeconds: TimeInterval,
-        recordedAt: Date
+        recordedAt: Date,
+        kind: String? = nil,
+        source: String? = nil,
+        stage: PositionStage? = nil,
+        solution: FixQuality? = nil,
+        pdop: Double? = nil,
+        correctionAgeSeconds: Double? = nil,
+        correctionSource: String? = nil,
+        epochCount: Int? = nil,
+        receiverLabel: String? = nil,
+        satelliteNote: String? = nil
     ) {
         self.name = name
         self.latitudeDegrees = latitudeDegrees
@@ -108,6 +128,16 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         self.satelliteCount = satelliteCount
         self.fixDurationSeconds = fixDurationSeconds
         self.recordedAt = recordedAt
+        self.kind = kind
+        self.source = source
+        self.stage = stage
+        self.solution = solution
+        self.pdop = pdop
+        self.correctionAgeSeconds = correctionAgeSeconds
+        self.correctionSource = correctionSource
+        self.epochCount = epochCount
+        self.receiverLabel = receiverLabel
+        self.satelliteNote = satelliteNote
     }
 }
 
@@ -313,17 +343,25 @@ public enum ProjectStore {
         try write(entry, to: folder.appendingPathComponent(file))
     }
 
-    public static func coordinateBookNames(projectName: String, at root: URL) -> Set<String> {
+    public static func coordinateBookEntries(projectName: String, at root: URL) -> [CoordinateBookEntry] {
         guard let directory = try? projectDirectory(projectName, at: root) else { return [] }
         let folder = directory.appendingPathComponent("座標簿", isDirectory: true)
         guard let urls = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
-        var names: Set<String> = []
-        for url in urls where url.pathExtension.lowercased() == "json" {
-            if let entry = try? read(CoordinateBookEntry.self, from: url) {
-                names.insert(entry.name)
-            }
-        }
-        return names
+        return urls.compactMap { url in
+            guard url.pathExtension.lowercased() == "json" else { return nil }
+            return try? read(CoordinateBookEntry.self, from: url)
+        }.sorted { $0.name < $1.name }
+    }
+
+    public static func coordinateBookNames(projectName: String, at root: URL) -> Set<String> {
+        Set(coordinateBookEntries(projectName: projectName, at: root).map(\.name))
+    }
+
+    public static func exportDirectory(projectName: String, at root: URL) throws -> URL {
+        let directory = try projectDirectory(projectName, at: root)
+        let folder = directory.appendingPathComponent("出す", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
     }
 
     public static func projectDirectory(_ name: String, at root: URL) throws -> URL {

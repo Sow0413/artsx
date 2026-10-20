@@ -71,6 +71,12 @@ struct MeasureLogView: View {
                 Text("基準点　FIX \(Int(seconds.rounded()))秒、\(satellites)")
                     .font(.system(size: 14, weight: .heavy))
             }
+            if let condition = observation.condition {
+                Text(condition.reportLines.joined(separator: "\n"))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if observation.needsResurvey {
                 Text("要再測")
                     .font(.system(size: 15, weight: .heavy))
@@ -125,7 +131,7 @@ struct MeasureLogView: View {
             }
             .buttonStyle(.plain)
             .disabled(!field.canRecordControlPoint)
-            Text("RTK FIX のあいだだけ残せます。観測中に FIX が切れたら、最初からやり直します。iPhone の GPS では衛星数は出ません。")
+            Text("段階2の RTK FIX のあいだだけ残せます。解が落ちて段階が下がると記録は止まり、測位は続きます。iPhone の GPS では衛星数・PDOP・補正の遅れは出ません。")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -136,6 +142,10 @@ struct MeasureLogView: View {
     }
 
     private var controlStatus: String {
+        if !StageGate.allowsRecording(workID: "boundary", stage: field.stageTransition.stage),
+           field.controlFix.restarted || field.stageTransition.steppedDown {
+            return FieldModel.stageDroppedRecording
+        }
         if field.controlFix.restarted && !field.controlFix.canRecord {
             return "FIX が切れたので、やり直してください。"
         }

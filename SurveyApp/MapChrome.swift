@@ -3,6 +3,7 @@ import SurveyCore
 
 struct AccuracyBadgeView: View {
     let badge: AccuracyBadgeModel
+    var stage: PositionStage?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -10,6 +11,18 @@ struct AccuracyBadgeView: View {
                 .fill(badge.tone.tint)
                 .frame(width: 16, height: 16)
             VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(badge.solutionLabel)
+                        .font(.system(size: 15, weight: .heavy))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(badge.tone.tint.opacity(0.22), in: Capsule())
+                    if let stage {
+                        Text("段階\(stage.rawValue)")
+                            .font(.system(size: 13, weight: .heavy))
+                            .foregroundStyle(SurveyColor.muted)
+                    }
+                }
                 Text(badge.text)
                     .font(.system(size: 20, weight: .heavy))
                     .minimumScaleFactor(0.6)

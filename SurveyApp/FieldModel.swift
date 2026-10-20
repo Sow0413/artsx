@@ -59,6 +59,11 @@ final class FieldModel: ObservableObject {
     @Published private(set) var correctionStore: CorrectionStore
     @Published var pointPrefix: String
     @Published private(set) var controlFix = ControlFixSession()
+    @Published private(set) var stageTransition = StageTransition.ground
+    @Published var bookQuery = CoordinateBookQuery()
+    @Published var enclosingBook = false
+    @Published private(set) var exportMessage: String?
+    private var epochWatch = EpochWatch()
 
     let tiles: TileStore
     let packDirectory: URL
@@ -131,7 +136,10 @@ final class FieldModel: ObservableObject {
             trust: instrumentTrust,
             safetyFactor: workCatalog.optimisticSafetyFactor,
             correction: correctionStore.active,
-            now: Date()
+            now: Date(),
+            operatingStage: stageTransition.stage,
+            stageNotice: stageTransition.notice,
+            demoteForStageDrop: stageTransition.steppedDown
         )
     }
 
@@ -174,7 +182,11 @@ final class FieldModel: ObservableObject {
         PointNamer.nextName(prefix: pointPrefix, existing: occupiedNames())
     }
 
-    var canRecordControlPoint: Bool { controlFix.canRecord }
+    var canRecordControlPoint: Bool {
+        controlFix.canRecord && StageGate.allowsRecording(workID: "boundary", stage: stageTransition.stage)
+    }
+
+    static let stageDroppedRecording = "段階が下がったので、基準点の記録を止めました。測位は続けます。"
 
     func setPointPrefix(_ raw: String) {
         pointPrefix = raw
@@ -205,6 +217,10 @@ final class FieldModel: ObservableObject {
     }
 
     func captureObservation() {
+        guard StageGate.allowsRecording(workID: workCatalog.selected.id, stage: stageTransition.stage) else {
+            captureMessage = Self.stageDroppedRecording
+            return
+        }
         guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
             captureMessage = "位置が無いので残せません。"
             return
@@ -216,21 +232,33 @@ final class FieldModel: ObservableObject {
         let work = workCatalog.selected
         let correction = correctionStore.active
         let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: stageTransition.stage,
+            durationSeconds: epochWatch.duration(at: position.timestamp),
+            epochCount: epochWatch.count
+        )
         let observation = FieldObservation(
             name: name,
             workID: work.id,
             captured: position,
             corrected: shifted,
-            appliedCorrectionID: shifted == nil ? nil : correction?.id
+            appliedCorrectionID: shifted == nil ? nil : correction?.id,
+            condition: condition
         )
         observations = observations.appending(observation)
         try? observations.save(to: siteDirectory)
+        remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
         captureMessage = shifted == nil
             ? "\(observation.name)を残しました。下見の座標は捨てません。"
             : "\(observation.name)を残しました。補正を引いた座標も残し、取得時の位置は捨てません。"
     }
 
     func recordControlPoint() {
+        guard StageGate.allowsRecording(workID: "boundary", stage: stageTransition.stage) else {
+            captureMessage = Self.stageDroppedRecording
+            return
+        }
         guard let position = reading.position else {
             captureMessage = "位置が無いので残せません。"
             return
@@ -245,32 +273,25 @@ final class FieldModel: ObservableObject {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return
         }
+        let condition = ObservationCondition.snapshot(
+            position: fix.position,
+            stage: stageTransition.stage,
+            durationSeconds: fix.fixDurationSeconds,
+            epochCount: fix.epochCount
+        )
         let observation = FieldObservation(
             name: name,
             workID: "boundary",
             captured: fix.position,
-            fixDurationSeconds: fix.fixDurationSeconds
+            fixDurationSeconds: fix.fixDurationSeconds,
+            condition: condition
         )
         observations = observations.appending(observation)
         try? observations.save(to: siteDirectory)
-        let entry = CoordinateBookEntry(
-            name: name,
-            latitudeDegrees: fix.position.latitudeDegrees,
-            longitudeDegrees: fix.position.longitudeDegrees,
-            ellipsoidalHeightMeters: fix.position.ellipsoidalHeightMeters,
-            horizontalAccuracyMeters: fix.horizontalAccuracyMeters,
-            verticalAccuracyMeters: fix.verticalAccuracyMeters,
-            satelliteCount: fix.satelliteCount,
-            fixDurationSeconds: fix.fixDurationSeconds,
-            recordedAt: fix.position.timestamp
-        )
-        try? SiteCoordinateBook.append(entry, to: siteDirectory)
-        if let project = drawing.project {
-            try? ProjectStore.saveCoordinate(entry, projectName: project.name, at: drawing.projectsRoot)
-        }
-        let satellites = fix.satelliteCount.map { "衛星 \($0)" } ?? "衛星 —"
+        remember(CoordinateBookIndex.entry(from: observation, kind: "基準点"))
+        let satellites = condition.satelliteNote
         let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
-        captureMessage = "\(name)を基準点にしました。FIX \(Int(fix.fixDurationSeconds.rounded()))秒、水平 \(CoordinateText.accuracyMeters(fix.horizontalAccuracyMeters))、高さ \(vertical)、\(satellites)。"
+        captureMessage = "\(name)を基準点にしました。\(condition.solutionLabel) \(Int(fix.fixDurationSeconds.rounded()))秒、水平 \(CoordinateText.accuracyMeters(fix.horizontalAccuracyMeters))、高さ \(vertical)、衛星 \(satellites)。"
     }
 
     func rebase(_ observationID: UUID, onto targetID: UUID) {
@@ -655,10 +676,90 @@ final class FieldModel: ObservableObject {
         return names
     }
 
+    func beginBookEnclosure() {
+        enclosingBook = true
+        followUser = false
+        tab = .map
+    }
+
+    func cancelBookEnclosure() {
+        enclosingBook = false
+        tab = .export
+    }
+
+    func confirmBookEnclosure() {
+        bookQuery.bounds = viewport.bounds
+        enclosingBook = false
+        tab = .export
+    }
+
+    func clearBookFilters() {
+        bookQuery = CoordinateBookQuery()
+    }
+
+    func filteredBookEntries() -> [CoordinateBookEntry] {
+        let projectBook = drawing.project.map {
+            ProjectStore.coordinateBookEntries(projectName: $0.name, at: drawing.projectsRoot)
+        } ?? []
+        let collected = CoordinateBookIndex.collect(
+            book: projectBook + SiteCoordinateBook.load(from: siteDirectory),
+            observations: observations.observations,
+            known: controlPoints
+        )
+        return CoordinateBookQuery.apply(collected, query: bookQuery)
+    }
+
+    func exportDelivery(_ format: DeliveryFormat) {
+        let entries = filteredBookEntries()
+        guard !entries.isEmpty else {
+            exportMessage = "絞り込みに合う点がありません。"
+            return
+        }
+        let bytes = CoordinateDelivery.data(entries, format: format, zone: drawing.zone)
+        do {
+            let folder = try deliveryFolder()
+            let url = folder.appendingPathComponent(format.filename)
+            try bytes.write(to: url, options: .atomic)
+            exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
+        } catch {
+            exportMessage = "書き出せませんでした。"
+        }
+    }
+
+    private func deliveryFolder() throws -> URL {
+        if let project = drawing.project {
+            return try ProjectStore.exportDirectory(projectName: project.name, at: drawing.projectsRoot)
+        }
+        let folder = siteDirectory.appendingPathComponent("出す", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    private func bookKind(for work: WorkRequirement) -> String {
+        work.id == "boundary" ? "基準点" : work.shortTitle
+    }
+
+    private func remember(_ entry: CoordinateBookEntry) {
+        try? SiteCoordinateBook.append(entry, to: siteDirectory)
+        if let project = drawing.project {
+            try? ProjectStore.saveCoordinate(entry, projectName: project.name, at: drawing.projectsRoot)
+        }
+    }
+
     private func apply(_ reading: PositionReading) {
         self.reading = reading
         if let position = reading.position {
+            let wasRecording = controlFix.canRecord
+            let transition = StageLadder.step(held: stageTransition.stage, reported: position)
+            stageTransition = transition
+            epochWatch.observe(position)
             controlFix.observe(position, at: position.timestamp)
+            if wasRecording && !StageGate.allowsRecording(workID: "boundary", stage: transition.stage) {
+                if controlFix.canRecord {
+                    controlFix.abort()
+                }
+                captureMessage = Self.stageDroppedRecording
+            }
         }
         if let position = workingReading.position, position.isPlottable {
             drawing.noteReference(

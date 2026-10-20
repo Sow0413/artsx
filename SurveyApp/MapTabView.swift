@@ -8,7 +8,9 @@ struct MapTabView: View {
             SurveyMapView(field: field)
             VStack(spacing: 0) {
                 WorkBar(field: field)
-                if field.drawing.pick == .mapPoint {
+                if field.enclosingBook {
+                    enclosureBanner
+                } else if field.drawing.pick == .mapPoint {
                     mapPickBanner
                 }
                 Spacer(minLength: 0)
@@ -55,6 +57,30 @@ struct MapTabView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
             .frame(maxWidth: 640)
+    }
+
+    private var enclosureBanner: some View {
+        HStack(spacing: 12) {
+            Text("見えている範囲で座標簿を絞る")
+                .font(.system(size: 15, weight: .heavy))
+                .foregroundStyle(SurveyColor.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("この範囲") {
+                field.confirmBookEnclosure()
+            }
+            .font(.system(size: 15, weight: .heavy))
+            .foregroundStyle(SurveyColor.green)
+            Button("やめる") {
+                field.cancelBookEnclosure()
+            }
+            .font(.system(size: 15, weight: .heavy))
+            .foregroundStyle(SurveyColor.amber)
+        }
+        .padding(12)
+        .background(SurveyColor.card.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
     }
 
     private var mapPickBanner: some View {

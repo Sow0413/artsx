@@ -6,19 +6,22 @@ public struct ControlObservation: Sendable, Equatable {
     public var horizontalAccuracyMeters: Double
     public var verticalAccuracyMeters: Double?
     public var satelliteCount: Int?
+    public var epochCount: Int
 
     public init(
         position: GeodeticPosition,
         fixDurationSeconds: TimeInterval,
         horizontalAccuracyMeters: Double,
         verticalAccuracyMeters: Double?,
-        satelliteCount: Int?
+        satelliteCount: Int?,
+        epochCount: Int = 0
     ) {
         self.position = position
         self.fixDurationSeconds = fixDurationSeconds
         self.horizontalAccuracyMeters = horizontalAccuracyMeters
         self.verticalAccuracyMeters = verticalAccuracyMeters
         self.satelliteCount = satelliteCount
+        self.epochCount = epochCount
     }
 }
 
@@ -28,6 +31,7 @@ public struct ControlFixSession: Sendable, Equatable {
     public private(set) var fixBeganAt: Date?
     public private(set) var latest: GeodeticPosition?
     public private(set) var restarted = false
+    public private(set) var epochCount = 0
 
     public init() {}
 
@@ -36,14 +40,26 @@ public struct ControlFixSession: Sendable, Equatable {
         if position.isTrustedRTKFix {
             if fixBeganAt == nil {
                 fixBeganAt = time
+                epochCount = 1
+            } else {
+                epochCount += 1
             }
             restarted = false
             return
         }
         if fixBeganAt != nil {
             fixBeganAt = nil
+            epochCount = 0
             restarted = true
         }
+    }
+
+    /// 段階が下がったとき、続いている FIX の秒数を捨てる。測位そのものは止めない。
+    public mutating func abort() {
+        guard fixBeganAt != nil else { return }
+        fixBeganAt = nil
+        epochCount = 0
+        restarted = true
     }
 
     public var canRecord: Bool {
@@ -63,7 +79,8 @@ public struct ControlFixSession: Sendable, Equatable {
             fixDurationSeconds: seconds,
             horizontalAccuracyMeters: latest.horizontalAccuracyMeters,
             verticalAccuracyMeters: latest.verticalAccuracyMeters,
-            satelliteCount: latest.satelliteCount
+            satelliteCount: latest.satelliteCount,
+            epochCount: epochCount
         )
     }
 }

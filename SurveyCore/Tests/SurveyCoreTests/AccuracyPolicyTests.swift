@@ -13,8 +13,9 @@ final class AccuracyPolicyTests: XCTestCase {
         let reading = SimulatedPositionSource.iphonePreview().script[0]
         let badge = AccuracyPolicy.badge(for: reading)
         XCTAssertEqual(badge.tone, .yellow)
-        XCTAssertEqual(badge.text, "iPhone GPS 約3m")
-        XCTAssertTrue(badge.accessibilityText.hasPrefix("下見。段階0。iPhone GPS 約3m"))
+        XCTAssertEqual(badge.solutionLabel, "単独")
+        XCTAssertEqual(badge.text, "単独　iPhone GPS 約3m")
+        XCTAssertTrue(badge.accessibilityText.hasPrefix("下見。段階0。単独　iPhone GPS 約3m"))
         XCTAssertTrue(badge.guidance.contains("高さがあと300cm"))
         XCTAssertFalse(badge.isStakeoutGrade)
         XCTAssertEqual(reading.position?.frame, .wgs84ITRF)
@@ -36,7 +37,8 @@ final class AccuracyPolicyTests: XCTestCase {
         XCTAssertFalse(preview.isStakeoutGrade)
         XCTAssertFalse(stakeout.isStakeoutGrade)
         XCTAssertFalse(within.isTrustedRTKFix)
-        XCTAssertFalse(preview.text.hasPrefix("RTK Fix"))
+        XCTAssertEqual(preview.solutionLabel, "単独")
+        XCTAssertFalse(preview.text.hasPrefix("FIX"))
 
         let invalid = [-1.0, Double.nan, Double.infinity]
         for accuracy in invalid {
@@ -69,14 +71,16 @@ final class AccuracyPolicyTests: XCTestCase {
         XCTAssertFalse(spoof.isTrustedRTKFix)
         let badge = AccuracyPolicy.badge(for: PositionReading(position: spoof, availability: .available))
         XCTAssertEqual(badge.tone, .green)
-        XCTAssertEqual(badge.text, "iPhone GPS 約2cm")
+        XCTAssertEqual(badge.solutionLabel, "単独")
+        XCTAssertEqual(badge.text, "単独　iPhone GPS 約2cm")
         XCTAssertFalse(badge.isStakeoutGrade)
     }
 
     func testCLASMeetsPreviewAndMissesStakeout() {
         let badge = AccuracyPolicy.badge(for: SimulatedPositionSource.clasPreview().script[0])
         XCTAssertEqual(badge.tone, .green)
-        XCTAssertEqual(badge.text, "CLAS 約5cm")
+        XCTAssertEqual(badge.solutionLabel, "CLAS")
+        XCTAssertEqual(badge.text, "CLAS　約5cm")
         XCTAssertFalse(badge.isStakeoutGrade)
         let stakeout = AccuracyPolicy.badge(
             for: SimulatedPositionSource.clasPreview().script[0],
@@ -89,7 +93,8 @@ final class AccuracyPolicyTests: XCTestCase {
         let position = samplePosition(accuracy: 0.05, verticalAccuracy: 0.05, stage: .clas, quality: .rtkFix, receiver: .clas)
         let badge = AccuracyPolicy.badge(for: PositionReading(position: position, availability: .available))
         XCTAssertEqual(badge.tone, .green)
-        XCTAssertEqual(badge.text, "CLAS 約5cm")
+        XCTAssertEqual(badge.solutionLabel, "CLAS")
+        XCTAssertEqual(badge.text, "CLAS　約5cm")
         XCTAssertFalse(position.isTrustedRTKFix)
         XCTAssertFalse(badge.isStakeoutGrade)
     }
@@ -98,14 +103,16 @@ final class AccuracyPolicyTests: XCTestCase {
         let position = samplePosition(accuracy: 0.2, verticalAccuracy: 0.2, stage: .rtk, quality: .float, receiver: .rtk)
         let badge = AccuracyPolicy.badge(for: PositionReading(position: position, availability: .available))
         XCTAssertEqual(badge.tone, .green)
-        XCTAssertEqual(badge.text, "RTK Float 約20cm")
+        XCTAssertEqual(badge.solutionLabel, "FLOAT")
+        XCTAssertEqual(badge.text, "FLOAT　約20cm")
         XCTAssertFalse(badge.isStakeoutGrade)
     }
 
     func testRTKFixIsGreen() {
         let badge = AccuracyPolicy.badge(for: SimulatedPositionSource.rtkFixPreview().script[0])
         XCTAssertEqual(badge.tone, .green)
-        XCTAssertEqual(badge.text, "RTK Fix 2cm")
+        XCTAssertEqual(badge.solutionLabel, "FIX")
+        XCTAssertEqual(badge.text, "FIX　2cm")
         XCTAssertTrue(badge.isStakeoutGrade)
         XCTAssertEqual(AccuracyPolicy.tone(for: badgePosition()), .green)
     }
@@ -117,7 +124,8 @@ final class AccuracyPolicyTests: XCTestCase {
         let uwb = samplePosition(accuracy: 0.15, verticalAccuracy: 0.15, stage: .hybrid, quality: .standalone, receiver: .uwb)
         let badge = AccuracyPolicy.badge(for: PositionReading(position: uwb, availability: .available))
         XCTAssertEqual(badge.tone, .green)
-        XCTAssertEqual(badge.text, "併用 約15cm")
+        XCTAssertEqual(badge.solutionLabel, "単独")
+        XCTAssertEqual(badge.text, "単独　併用 約15cm")
         XCTAssertFalse(badge.isStakeoutGrade)
     }
 

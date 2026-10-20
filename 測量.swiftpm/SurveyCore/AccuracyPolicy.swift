@@ -19,6 +19,8 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
     public var guidance: String
     /// 楽観的な機器に係数をかけたときの注記。かけていなければ空。
     public var caution: String
+    /// FIX / FLOAT / 単独 / CLAS。位置が無いときは「—」。
+    public var solutionLabel: String
 
     public init(
         tone: AccuracyTone,
@@ -26,7 +28,8 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
         accessibilityText: String,
         isStakeoutGrade: Bool,
         guidance: String = "",
-        caution: String = ""
+        caution: String = "",
+        solutionLabel: String = "—"
     ) {
         self.tone = tone
         self.text = text
@@ -34,6 +37,7 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
         self.isStakeoutGrade = isStakeoutGrade
         self.guidance = guidance
         self.caution = caution
+        self.solutionLabel = solutionLabel
     }
 }
 
@@ -73,7 +77,10 @@ public enum AccuracyPolicy {
         trust: InstrumentTrust = InstrumentTrust(),
         safetyFactor: Double = WorkCatalog.defaultSafetyFactor,
         correction: ControlCorrection? = nil,
-        now: Date = Date()
+        now: Date = Date(),
+        operatingStage: PositionStage? = nil,
+        stageNotice: String = "",
+        demoteForStageDrop: Bool = false
     ) -> AccuracyBadgeModel {
         switch reading.availability {
         case .denied:
@@ -89,7 +96,8 @@ public enum AccuracyPolicy {
                     tone: .grey,
                     text: "精度不明",
                     accessibilityText: "\(work.shortTitle)。段階\(position.stage.rawValue)。精度不明",
-                    isStakeoutGrade: false
+                    isStakeoutGrade: false,
+                    solutionLabel: position.solutionLabel
                 )
             }
             let judged = judgment(
@@ -100,22 +108,30 @@ public enum AccuracyPolicy {
                 correction: correction,
                 now: now
             )
-            let text = position.isTrustedRTKFix
-                ? "RTK Fix \(AccuracyFormat.label(meters: position.horizontalAccuracyMeters, approximate: false))"
-                : approximateTitle(for: position)
+            var tone = judged.tone
+            var guidance = judged.guidance
+            if demoteForStageDrop {
+                if tone == .green { tone = .yellow }
+                guidance = [stageNotice, guidance].filter { !$0.isEmpty }.joined(separator: " ")
+            } else if !stageNotice.isEmpty {
+                guidance = [stageNotice, guidance].filter { !$0.isEmpty }.joined(separator: " ")
+            }
+            let text = "\(position.solutionLabel)　\(detail(for: position))"
+            let stage = operatingStage ?? position.stage
             let accessibility = [
                 work.shortTitle,
-                "段階\(position.stage.rawValue)。\(text)",
-                judged.guidance,
+                "段階\(stage.rawValue)。\(text)",
+                guidance,
                 judged.caution
             ].filter { !$0.isEmpty }.joined(separator: "。")
             return AccuracyBadgeModel(
-                tone: judged.tone,
+                tone: tone,
                 text: text,
                 accessibilityText: accessibility,
-                isStakeoutGrade: position.isTrustedRTKFix && judged.tone == .green,
-                guidance: judged.guidance,
-                caution: judged.caution
+                isStakeoutGrade: position.isTrustedRTKFix && tone == .green,
+                guidance: guidance,
+                caution: judged.caution,
+                solutionLabel: position.solutionLabel
             )
         }
     }
@@ -163,26 +179,17 @@ public enum AccuracyPolicy {
         )
     }
 
-    private static func approximateTitle(for position: GeodeticPosition) -> String {
-        let magnitude = AccuracyFormat.label(meters: position.horizontalAccuracyMeters, approximate: true)
-        if position.receiver == .iphoneGPS || position.stage == .iphone {
+    private static func detail(for position: GeodeticPosition) -> String {
+        let magnitude = AccuracyFormat.label(
+            meters: position.horizontalAccuracyMeters,
+            approximate: !position.isTrustedRTKFix
+        )
+        if position.receiver == .iphoneGPS {
             return "iPhone GPS \(magnitude)"
         }
-        if position.fixQuality == .float, position.stage == .rtk || position.stage == .hybrid {
-            return "RTK Float \(magnitude)"
-        }
-        if position.fixQuality == .dgps {
-            return "DGPS \(magnitude)"
-        }
-        if position.stage == .clas || position.fixQuality == .clas {
-            return "CLAS \(magnitude)"
-        }
-        if position.stage == .hybrid {
+        if position.stage == .hybrid, position.fixQuality != .rtkFix {
             return "併用 \(magnitude)"
         }
-        if position.fixQuality == .standalone, position.stage == .rtk {
-            return "RTK 単独 \(magnitude)"
-        }
-        return "RTK \(magnitude)"
+        return magnitude
     }
 }
