@@ -13,4 +13,16 @@ enum RadioHardware {
     #else
     static let nearbyPeers = false
     #endif
+
+    #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
+    static let nearbyInteraction = true
+    #else
+    static let nearbyInteraction = false
+    #endif
+
+    #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
+    static let watch = true
+    #else
+    static let watch = false
+    #endif
 }

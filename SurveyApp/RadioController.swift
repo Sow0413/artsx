@@ -10,16 +10,15 @@ final class RadioController: ObservableObject {
     private let relay = P510RelayStub(reachable: false)
     private let mesh = NearbyMesh(reachable: false)
     private let desk: RadioDesk
+    private let nearby: NearbyLink
     private var systemBegan = false
 
     #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
     private let system = SystemPushToTalk()
     #endif
-    #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
-    private let peers = SystemNearbyRadio()
-    #endif
 
-    init() {
+    init(nearby: NearbyLink) {
+        self.nearby = nearby
         desk = RadioDesk(speaker: "この端末", relay: relay, nearby: mesh)
         if RadioHardware.pushToTalk || RadioHardware.nearbyPeers {
             status = "中継はまだありません。近くに同じ現場がいれば、そちらへ出します。"
@@ -36,21 +35,18 @@ final class RadioController: ObservableObject {
             system.start()
         }
         #endif
-        #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
-        if RadioHardware.nearbyPeers {
-            peers.onPacket = { [weak self] packet in
-                self?.desk.receive(packet)
-                self?.publish()
-            }
-            peers.onPeerCount = { [weak self] count in
-                self?.mesh.isReachable = count > 0
-                self?.publish()
-            }
-            mesh.onSent = { [weak self] packet in
-                self?.peers.send(packet)
-            }
+        nearby.onRadio = { [weak self] packet in
+            self?.desk.receive(packet)
+            self?.publish()
         }
-        #endif
+        nearby.observePeers { [weak self] count in
+            guard RadioHardware.nearbyPeers else { return }
+            self?.mesh.isReachable = count > 0
+            self?.publish()
+        }
+        mesh.onSent = { [weak self] packet in
+            self?.nearby.send(packet)
+        }
     }
 
     func begin(channel: RadioChannel, station: RadioStationStamp?) {
@@ -61,11 +57,7 @@ final class RadioController: ObservableObject {
             system.join(channel)
         }
         #endif
-        #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
-        if RadioHardware.nearbyPeers {
-            peers.start(channel: channel, name: desk.speaker)
-        }
-        #endif
+        nearby.start(channel: channel, name: desk.speaker)
         let started = desk.beginTalking(at: Date(), station: station) != nil
         systemBegan = started
         #if !SURVEY_PLAYGROUND && canImport(PushToTalk)

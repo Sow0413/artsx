@@ -102,6 +102,7 @@ final class SystemNearbyRadio: NSObject, MCSessionDelegate, MCNearbyServiceAdver
     private var browser: MCNearbyServiceBrowser?
     private var channel: RadioChannel?
     var onPacket: ((RadioPacket) -> Void)?
+    var onCrew: ((CrewPacket) -> Void)?
     var onPeerCount: ((Int) -> Void)?
 
     func start(channel: RadioChannel, name: String) {
@@ -134,10 +135,18 @@ final class SystemNearbyRadio: NSObject, MCSessionDelegate, MCNearbyServiceAdver
     }
 
     func send(_ packet: RadioPacket) {
+        send(LinkFrame(kind: .radio, radio: packet))
+    }
+
+    func send(_ packet: CrewPacket) {
+        send(LinkFrame(kind: .crew, crew: packet))
+    }
+
+    private func send(_ frame: LinkFrame) {
         guard let session, !session.connectedPeers.isEmpty else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(packet) else { return }
+        guard let data = try? encoder.encode(frame) else { return }
         try? session.send(data, toPeers: session.connectedPeers, with: .reliable)
     }
 
@@ -164,8 +173,14 @@ final class SystemNearbyRadio: NSObject, MCSessionDelegate, MCNearbyServiceAdver
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let packet = try? decoder.decode(RadioPacket.self, from: data) else { return }
-        onPacket?(packet)
+        if let frame = try? decoder.decode(LinkFrame.self, from: data) {
+            if let radio = frame.radio { onPacket?(radio) }
+            if let crew = frame.crew { onCrew?(crew) }
+            return
+        }
+        if let packet = try? decoder.decode(RadioPacket.self, from: data) {
+            onPacket?(packet)
+        }
     }
 
     func session(_ session: MCSession, didReceive stream: InputStream, withName streamName: String, fromPeer peerID: MCPeerID) {}

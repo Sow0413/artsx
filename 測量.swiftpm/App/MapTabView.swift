@@ -20,6 +20,7 @@ struct MapTabView: View {
                         .padding(.horizontal, 12)
                         .background(SurveyColor.card.opacity(0.94))
                 }
+                SafetyBanner(crew: field.crew)
                 HStack {
                     Spacer()
                     Text(reachCaption)
@@ -42,6 +43,9 @@ struct MapTabView: View {
             }
         }
         .background(SurveyColor.mapBackdrop)
+        .overlay {
+            SafetyWash(level: field.crew.worst)
+        }
     }
 
     private var reachCaption: String {

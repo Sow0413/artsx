@@ -37,6 +37,24 @@ targets:
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "押して話す無線で、同じプロジェクトの端末へ声を送ります。"
+        INFOPLIST_KEY_NSNearbyInteractionUsageDescription: "近くの端末との距離を、作業半径の警報に使います。UWB が無い端末では使いません。"
         INFOPLIST_KEY_UIBackgroundModes: push-to-talk
+    scheme:
+      gatherCoverageData: false
+  SurveyWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: SurveyWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.oshiro.survey.watch
+        PRODUCT_NAME: SurveyWatch
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: 測量
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: jp.oshiro.survey
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "4"
+        WATCHOS_DEPLOYMENT_TARGET: "10.0"
     scheme:
       gatherCoverageData: false

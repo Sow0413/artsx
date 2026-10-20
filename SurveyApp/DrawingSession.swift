@@ -50,6 +50,8 @@ final class DrawingSession: ObservableObject {
     @Published var designHeightMeters: Double?
     /// 作業半径。既定は 20t の目安 9m。project.json に保存する。
     @Published private(set) var machineRadiusMeters = MachineCatalog.twentyTon.radiusMeters
+    @Published private(set) var cautionMeters = ProximityLimits.defaultCautionMeters
+    @Published private(set) var proximityMarginMeters = ProximityLimits.defaultMarginMeters
     @Published private(set) var machinePresetID: String? = MachineCatalog.twentyTon.id
     /// 地盤または機体から目まで。端末を目の高さで持つときは下がりに足さない。
     @Published private(set) var eyeHeightMeters = 2.0
@@ -414,6 +416,9 @@ final class DrawingSession: ObservableObject {
         }
         sightDatum = project.sightDatum ?? .ground
         phoneAtEyes = project.phoneAtEyes ?? true
+        let limits = ProximityLimits.resolved(caution: project.cautionMeters, margin: project.proximityMarginMeters)
+        cautionMeters = limits.cautionMeters
+        proximityMarginMeters = limits.marginMeters
         if let interval = project.stationIntervalMeters, interval > 0 {
             stationIntervalMeters = interval
         } else {
@@ -430,8 +435,32 @@ final class DrawingSession: ObservableObject {
         current.eyeHeightMeters = eyeHeightMeters
         current.sightDatum = sightDatum
         current.phoneAtEyes = phoneAtEyes
+        current.cautionMeters = cautionMeters
+        current.proximityMarginMeters = proximityMarginMeters
         project = current
         persistProject()
+    }
+
+    func setCautionMeters(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value >= 1, value <= 500 else {
+            message = "注意の距離は 1m から 500m です。"
+            return
+        }
+        cautionMeters = MachineReach.roundTenths(value)
+        storeCab()
+        message = "注意の距離を \(String(format: "%.1f", cautionMeters))m にしました。"
+    }
+
+    func setProximityMargin(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value >= 0, value <= 50 else {
+            message = "半径の余裕は 0m から 50m です。"
+            return
+        }
+        proximityMarginMeters = MachineReach.roundTenths(value)
+        storeCab()
+        message = "半径の余裕を \(String(format: "%.1f", proximityMarginMeters))m にしました。"
     }
 
     private func operatorPlaneLine() -> [PlanarPoint]? {

@@ -42,6 +42,7 @@ struct SurveyMapView: UIViewRepresentable {
             revision: field.drawing.mapRevision
         )
         context.coordinator.syncReach(on: map, field: field)
+        context.coordinator.syncCrew(on: map, field: field)
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
         }
@@ -68,6 +69,9 @@ struct SurveyMapView: UIViewRepresentable {
         private var drawingRevision = -1
         private var reachOverlays: [MKOverlay] = []
         private var reachKey = ""
+        private var crewOverlays: [MKOverlay] = []
+        private var crewAnnotations: [CrewAnnotation] = []
+        private var crewKey = ""
         private var mapPick = false
         private var onMapTap: (Double, Double) -> Void = { _, _ in }
 
@@ -170,6 +174,43 @@ struct SurveyMapView: UIViewRepresentable {
                 }
             }
             map.addOverlays(reachOverlays, level: .aboveLabels)
+        }
+
+        func syncCrew(on map: MKMapView, field: FieldModel) {
+            let key = field.crew.peers.map { peer in
+                let level = field.crew.marks.first { $0.id == peer.id }?.level.rawValue ?? "clear"
+                return "\(peer.id):\(peer.latitudeDegrees):\(peer.longitudeDegrees):\(peer.workRadiusMeters ?? 0):\(peer.role.rawValue):\(level)"
+            }.joined(separator: "|")
+            if key == crewKey { return }
+            crewKey = key
+            if !crewOverlays.isEmpty {
+                map.removeOverlays(crewOverlays)
+                crewOverlays = []
+            }
+            if !crewAnnotations.isEmpty {
+                map.removeAnnotations(crewAnnotations)
+                crewAnnotations = []
+            }
+            for peer in field.crew.peers {
+                let level = field.crew.marks.first { $0.id == peer.id }?.level ?? .clear
+                let coordinate = CLLocationCoordinate2D(latitude: peer.latitudeDegrees, longitude: peer.longitudeDegrees)
+                let mark = CrewAnnotation(peerID: peer.id, role: peer.role, level: level, coordinate: coordinate, name: peer.name)
+                crewAnnotations.append(mark)
+                if peer.role == .machine, let radius = peer.workRadiusMeters, radius > 0 {
+                    let disk = ReachCircleOverlay(center: coordinate, radius: radius)
+                    let color = level == .alarm ? SurveyUIColor.red : (level == .caution ? SurveyUIColor.yellow : SurveyUIColor.amber)
+                    disk.stroke = color
+                    disk.fill = color.withAlphaComponent(0.1)
+                    disk.lineWidth = 3
+                    crewOverlays.append(disk)
+                }
+            }
+            if !crewAnnotations.isEmpty {
+                map.addAnnotations(crewAnnotations)
+            }
+            if !crewOverlays.isEmpty {
+                map.addOverlays(crewOverlays, level: .aboveLabels)
+            }
         }
 
         private static func reachColor(_ coverage: ReachCoverage?) -> UIColor {
@@ -302,6 +343,15 @@ struct SurveyMapView: UIViewRepresentable {
                 marker.configure(title: point.title ?? point.pointID, selected: point.pointID == selectedControlID)
                 return marker
             }
+            if let crew = annotation as? CrewAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "crew-dot")
+                    ?? MKAnnotationView(annotation: crew, reuseIdentifier: "crew-dot")
+                view.annotation = crew
+                view.image = crew.role == .machine ? Self.machineDot : Self.workerDot
+                view.bounds = CGRect(x: 0, y: 0, width: 28, height: 28)
+                view.canShowCallout = true
+                return view
+            }
             guard annotation is UserDotAnnotation else { return nil }
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: "user-dot")
                 ?? MKAnnotationView(annotation: annotation, reuseIdentifier: "user-dot")
@@ -331,6 +381,10 @@ struct SurveyMapView: UIViewRepresentable {
             if !reachOverlays.isEmpty {
                 map.removeOverlays(reachOverlays)
                 map.addOverlays(reachOverlays, level: .aboveLabels)
+            }
+            if !crewOverlays.isEmpty {
+                map.removeOverlays(crewOverlays)
+                map.addOverlays(crewOverlays, level: .aboveLabels)
             }
         }
 
@@ -439,6 +493,20 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }
 
+        private static let workerDot = dot(SurveyUIColor.blue)
+        private static let machineDot = dot(SurveyUIColor.amber)
+
+        private static func dot(_ color: UIColor) -> UIImage {
+            let size = CGSize(width: 28, height: 28)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                UIColor.white.setFill()
+                context.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+                color.setFill()
+                context.cgContext.fillEllipse(in: CGRect(x: 4, y: 4, width: 20, height: 20))
+            }
+        }
+
         private static let userDotImage: UIImage = {
             let size = CGSize(width: 28, height: 28)
             let renderer = UIGraphicsImageRenderer(size: size)
@@ -536,6 +604,24 @@ final class ReachAreaOverlay: MKPolygon {
 
 final class ReachLineOverlay: MKPolyline {
     var stroke: UIColor = SurveyUIColor.red
+}
+
+final class CrewAnnotation: NSObject, MKAnnotation {
+    let peerID: String
+    let role: CrewRole
+    let level: ProximityLevel
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    let title: String?
+    var subtitle: String? { role.label }
+
+    init(peerID: String, role: CrewRole, level: ProximityLevel, coordinate: CLLocationCoordinate2D, name: String) {
+        self.peerID = peerID
+        self.role = role
+        self.level = level
+        self.coordinate = coordinate
+        self.title = name
+        super.init()
+    }
 }
 
 final class UserDotAnnotation: NSObject, MKAnnotation {

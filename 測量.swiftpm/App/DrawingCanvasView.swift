@@ -11,6 +11,7 @@ struct DrawingCanvasView: View {
     let reachCenter: PlanarPoint?
     let reachRadius: Double?
     let reachRanges: [ReachRange]
+    var crew: [CrewGlyph] = []
     var onTap: (PlanarPoint, Double) -> Void
     var onFit: (CGSize) -> Void
 
@@ -155,6 +156,21 @@ struct DrawingCanvasView: View {
                 anchor: .topLeading
             )
         }
+        for glyph in crew {
+            let center = screen(glyph.point, size: size)
+            if glyph.role == .machine, let radius = glyph.radius, radius > 0 {
+                let pixels = CGFloat(radius * camera.pointsPerUnit)
+                let circle = Path(ellipseIn: CGRect(x: center.x - pixels, y: center.y - pixels, width: pixels * 2, height: pixels * 2))
+                context.stroke(circle, with: .color(crewColor(glyph.level)), lineWidth: 2.5)
+            }
+            let dot = Path(ellipseIn: CGRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12))
+            context.fill(dot, with: .color(crewColor(glyph.level)))
+            context.draw(
+                Text(glyph.name).font(.system(size: 11, weight: .heavy)).foregroundStyle(crewColor(glyph.level)),
+                at: CGPoint(x: center.x + 10, y: center.y - 12),
+                anchor: .bottomLeading
+            )
+        }
         if let highlight {
             let center = screen(highlight, size: size)
             let mark = Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16))
@@ -165,6 +181,14 @@ struct DrawingCanvasView: View {
     private func coverageOfHighlight(_ point: PlanarPoint) -> ReachCoverage? {
         guard let reachCenter, let reachRadius, reachRadius > 0 else { return nil }
         return MachineReach.call(distanceMeters: point.distance(to: reachCenter), radiusMeters: reachRadius)?.coverage
+    }
+
+    private func crewColor(_ level: ProximityLevel) -> Color {
+        switch level {
+        case .alarm: return SurveyColor.red
+        case .caution: return SurveyColor.yellow
+        case .clear: return SurveyColor.blue
+        }
     }
 
     private func reachColor(_ coverage: ReachCoverage?) -> Color {

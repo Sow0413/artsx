@@ -72,7 +72,9 @@ final class FieldModel: ObservableObject {
     let packDirectory: URL
     let siteDirectory: URL
     let drawing: DrawingSession
+    let nearby: NearbyLink
     let radio: RadioController
+    let crew: CrewController
     let controlPoints: [ControlPoint]
     private var prefixStore: PointPrefixStore
     private let source: any PositionSource
@@ -107,7 +109,10 @@ final class FieldModel: ObservableObject {
         self.prefixStore = prefixes
         self.pointPrefix = prefixes.prefix(for: prefixes.activeKey)
         self.drawing = DrawingSession(projectsRoot: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true))
-        self.radio = RadioController()
+        let nearby = NearbyLink()
+        self.nearby = nearby
+        self.radio = RadioController(nearby: nearby)
+        self.crew = CrewController(nearby: nearby)
         self.reading = .waiting
         self.camera = MapCameraFollow()
         self.viewport = MapViewportPolicy.japanOverview
@@ -117,6 +122,9 @@ final class FieldModel: ObservableObject {
             self?.objectWillChange.send()
         }.store(in: &cancellables)
         radio.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+        crew.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
     }
@@ -343,6 +351,7 @@ final class FieldModel: ObservableObject {
 
     func start() {
         radio.arm()
+        crew.arm()
         source.start()
         if readTask == nil {
             let readings = source.readings
@@ -794,6 +803,12 @@ final class FieldModel: ObservableObject {
                 name: "現在地"
             )
         }
+        crew.note(
+            position: workingReading.position,
+            project: drawing.project,
+            radius: drawing.machineRadiusMeters,
+            root: drawing.projectsRoot
+        )
         refreshVisibleControlPoints()
         guard followUser, let position = workingReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)

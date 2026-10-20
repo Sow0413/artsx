@@ -370,6 +370,24 @@ public final class RadioDesk {
     }
 }
 
+/// 近距離の一本のセッションで、無線と位置の両方を運ぶ。
+public struct LinkFrame: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        case radio
+        case crew
+    }
+
+    public var kind: Kind
+    public var radio: RadioPacket?
+    public var crew: CrewPacket?
+
+    public init(kind: Kind, radio: RadioPacket? = nil, crew: CrewPacket? = nil) {
+        self.kind = kind
+        self.radio = radio
+        self.crew = crew
+    }
+}
+
 public enum RadioLog {
     public static func append(_ utterance: RadioUtterance, projectName: String, at root: URL) throws {
         let directory = try ProjectStore.projectDirectory(projectName, at: root)

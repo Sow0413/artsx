@@ -29,6 +29,7 @@ struct OperatorView: View {
             let landscape = geo.size.width > geo.size.height
             ZStack {
                 SurveyColor.background
+                SafetyWash(level: field.crew.worst)
                 if landscape {
                     VStack(spacing: 4) {
                         HStack(spacing: 8) {
@@ -41,7 +42,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 28)
-                    .padding(.bottom, 108)
+                    .padding(.bottom, 220)
                 } else {
                     VStack(spacing: 6) {
                         stationLabel(station)
@@ -51,7 +52,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 28)
-                    .padding(.bottom, 108)
+                    .padding(.bottom, 240)
                 }
                 VStack {
                     HStack {
@@ -67,6 +68,13 @@ struct OperatorView: View {
                         .foregroundStyle(SurveyColor.muted)
                     }
                     Spacer()
+                    SafetyBanner(crew: field.crew)
+                    CrewRadar(
+                        marks: field.crew.marks,
+                        selfRole: field.crew.role,
+                        selfRadius: drawing.machineRadiusMeters,
+                        cautionMeters: drawing.cautionMeters
+                    )
                     talkButton
                 }
                 .padding(.horizontal, 16)
@@ -199,11 +207,18 @@ struct OperatorView: View {
                                 field.endRadio()
                             }
                     )
-                Button(field.radio.attachStation ? "測点を添える" : "測点なし") {
-                    field.radio.attachStation.toggle()
+                VStack(spacing: 8) {
+                    Button(field.crew.role.label) {
+                        field.crew.setRole(field.crew.role == .machine ? .worker : .machine)
+                    }
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(SurveyColor.muted)
+                    Button(field.radio.attachStation ? "測点を添える" : "測点なし") {
+                        field.radio.attachStation.toggle()
+                    }
+                    .font(.system(size: 13, weight: .heavy))
+                    .foregroundStyle(SurveyColor.muted)
                 }
-                .font(.system(size: 13, weight: .heavy))
-                .foregroundStyle(SurveyColor.muted)
             }
         }
     }

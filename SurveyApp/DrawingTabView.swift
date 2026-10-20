@@ -12,6 +12,8 @@ struct DrawingTabView: View {
     @State private var eyeDraft = ""
     @State private var stationIntervalDraft = ""
     @State private var stationOriginDraft = ""
+    @State private var cautionDraft = ""
+    @State private var marginDraft = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -28,6 +30,9 @@ struct DrawingTabView: View {
             }
         }
         .background(SurveyColor.background)
+        .overlay {
+            SafetyWash(level: field.crew.worst)
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: drawingTypes) { result in
             switch result {
             case let .success(url):
@@ -60,11 +65,16 @@ struct DrawingTabView: View {
                 reachCenter: reachGraphics?.center,
                 reachRadius: reachGraphics?.radius,
                 reachRanges: reachGraphics?.ranges ?? [],
+                crew: crewGlyphs,
                 onTap: { point, tolerance in
                     drawing.takeDrawingTap(point, tolerance: tolerance)
                 },
                 onFit: { drawing.fit(in: $0) }
             )
+            VStack {
+                SafetyBanner(crew: field.crew)
+                Spacer()
+            }
             if drawing.document == nil {
                 Text(drawing.project == nil ? "プロジェクトを作って、DXF か SFC を読み込みます。" : "DXF か SFC を読み込むと、ここに図面が出ます。")
                     .font(.system(size: 16, weight: .semibold))
@@ -203,6 +213,46 @@ struct DrawingTabView: View {
         eyeDraft = String(format: "%g", drawing.eyeHeightMeters)
         stationIntervalDraft = String(format: "%g", drawing.stationIntervalMeters)
         stationOriginDraft = String(drawing.stationOrigin)
+        cautionDraft = String(format: "%g", drawing.cautionMeters)
+        marginDraft = String(format: "%g", drawing.proximityMarginMeters)
+    }
+
+    private var proximitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("接近")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            Picker("この端末", selection: roleBinding) {
+                ForEach(CrewRole.allCases, id: \.self) { role in
+                    Text(role.label).tag(role)
+                }
+            }
+            .pickerStyle(.segmented)
+            HStack {
+                TextField("注意 m", text: $cautionDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                Button("保存") { drawing.setCautionMeters(cautionDraft) }
+                    .buttonStyle(SurveyPlainButton())
+            }
+            HStack {
+                TextField("半径の余裕 m", text: $marginDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                Button("保存") { drawing.setProximityMargin(marginDraft) }
+                    .buttonStyle(SurveyPlainButton())
+            }
+            Text("人が重機の作業半径＋余裕に入ると赤。注意の距離以内は黄。\(SafetyNotice.text)")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(SurveyColor.muted)
+        }
+    }
+
+    private var roleBinding: Binding<CrewRole> {
+        Binding(
+            get: { field.crew.role },
+            set: { field.crew.setRole($0) }
+        )
     }
 
     private var projectSection: some View {
@@ -283,6 +333,7 @@ struct DrawingTabView: View {
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.numbersAndPunctuation)
             machineSection
+            proximitySection
             eyeSection
             Picker("都道府県", selection: prefectureBinding) {
                 Text("未選択").tag(Optional<String>.none)
@@ -636,6 +687,31 @@ struct DrawingTabView: View {
 
     private var phoneAtEyesBinding: Binding<Bool> {
         Binding(get: { drawing.phoneAtEyes }, set: { drawing.setPhoneAtEyes($0) })
+    }
+
+    private var crewGlyphs: [CrewGlyph] {
+        guard drawing.document != nil else { return [] }
+        let scale = abs(drawing.activeTransform?.scale ?? 1)
+        return field.crew.peers.compactMap { peer in
+            guard let placed = DrawingPlacement.user(
+                latitudeDegrees: peer.latitudeDegrees,
+                longitudeDegrees: peer.longitudeDegrees,
+                horizontalAccuracyMeters: peer.horizontalAccuracyMeters,
+                zone: drawing.zone,
+                axis: drawing.axis,
+                transform: drawing.activeTransform,
+                composesAxis: drawing.activeComposesAxis
+            ) else { return nil }
+            let level = field.crew.marks.first { $0.id == peer.id }?.level ?? .clear
+            return CrewGlyph(
+                id: peer.id,
+                name: peer.name,
+                role: peer.role,
+                point: placed.point,
+                radius: peer.workRadiusMeters.map { $0 / max(scale, 1e-9) },
+                level: level
+            )
+        }
     }
 
     private var userOnDrawing: UserOnDrawing? {
