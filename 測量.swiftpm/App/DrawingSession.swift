@@ -67,6 +67,8 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var stationOrigin = 0
     /// 追加距離付きの中心線。無いときは測点を出さない。
     @Published private(set) var stationLine: StationLine?
+    /// 集計に書く天候。測っていないときは空。
+    @Published private(set) var weatherLabel = ""
 
     let projectsRoot: URL
     private var reference: (latitude: Double, longitude: Double, name: String)?
@@ -432,6 +434,19 @@ final class DrawingSession: ObservableObject {
         }
         stationOrigin = project.stationOrigin ?? 0
         stationLine = project.stationLine
+        weatherLabel = project.weather ?? ""
+    }
+
+    func setWeather(_ label: String) {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        weatherLabel = trimmed
+        guard var current = project else {
+            message = "先にプロジェクトを作ってください。"
+            return
+        }
+        current.weather = trimmed.isEmpty ? nil : trimmed
+        project = current
+        persistProject()
     }
 
     private func storeCab() {

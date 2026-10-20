@@ -25,6 +25,15 @@ struct MapTabView: View {
                 }
                 IncidentTray(field: field)
                 HStack {
+                    Button("統計") {
+                        field.showsIncidentStats = true
+                    }
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(SurveyColor.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(field.showIncidentHeat ? SurveyColor.red : SurveyColor.card.opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     Spacer()
                     Text(reachCaption)
                         .font(.system(size: 13, weight: .heavy))
@@ -48,6 +57,9 @@ struct MapTabView: View {
         .background(SurveyColor.mapBackdrop)
         .overlay {
             SafetyWash(level: field.crew.worst)
+        }
+        .sheet(isPresented: $field.showsIncidentStats) {
+            IncidentStatsSheet(field: field)
         }
     }
 

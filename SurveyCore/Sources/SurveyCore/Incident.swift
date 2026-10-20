@@ -165,6 +165,8 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
     public var radio: [IncidentRadioClip]
     public var strokes: [IncidentStroke]
     public var notice: String
+    /// そのときの天候。無い記録は nil。
+    public var weather: String?
 
     public init(
         id: UUID = UUID(),
@@ -181,7 +183,8 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
         speeches: [IncidentSpeech],
         radio: [IncidentRadioClip],
         strokes: [IncidentStroke] = [],
-        notice: String = SafetyNotice.text
+        notice: String = SafetyNotice.text,
+        weather: String? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -198,6 +201,7 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
         self.radio = radio
         self.strokes = strokes
         self.notice = notice
+        self.weather = weather
     }
 }
 
@@ -222,6 +226,7 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
     public var photoFile: String?
     public var voiceMemoFile: String?
     public var notice: String
+    public var weather: String?
 
     public init(
         id: UUID,
@@ -243,7 +248,8 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
         mapFile: String,
         photoFile: String?,
         voiceMemoFile: String?,
-        notice: String
+        notice: String,
+        weather: String? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -265,6 +271,7 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
         self.photoFile = photoFile
         self.voiceMemoFile = voiceMemoFile
         self.notice = notice
+        self.weather = weather
     }
 }
 
@@ -577,7 +584,8 @@ public enum IncidentBook {
             mapFile: mapName,
             photoFile: photo,
             voiceMemoFile: voice,
-            notice: opening.notice
+            notice: opening.notice,
+            weather: opening.weather
         )
         try encode(record, to: recordURL)
         try IncidentReport.pdf(record).write(to: directory.appendingPathComponent(pdfName))
@@ -595,6 +603,17 @@ public enum IncidentBook {
         guard let data = try? Data(contentsOf: url) else { throw IncidentError.missingOpening }
         let decoder = decoder()
         return try decoder.decode(IncidentRecord.self, from: data)
+    }
+
+    public static func sealed(projectName: String, at root: URL) -> [IncidentRecord] {
+        guard let parent = try? parentDirectory(projectName: projectName, at: root, create: false) else { return [] }
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: parent, includingPropertiesForKeys: nil) else { return [] }
+        let decoder = decoder()
+        return urls.compactMap { url in
+            let recordURL = url.appendingPathComponent(recordName)
+            guard let data = try? Data(contentsOf: recordURL) else { return nil }
+            return try? decoder.decode(IncidentRecord.self, from: data)
+        }
     }
 
     public static func unsealed(projectName: String, at root: URL) -> [IncidentOpening] {

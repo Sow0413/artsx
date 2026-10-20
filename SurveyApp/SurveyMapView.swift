@@ -43,6 +43,7 @@ struct SurveyMapView: UIViewRepresentable {
         )
         context.coordinator.syncReach(on: map, field: field)
         context.coordinator.syncCrew(on: map, field: field)
+        context.coordinator.syncHeat(on: map, field: field)
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
         }
@@ -72,6 +73,8 @@ struct SurveyMapView: UIViewRepresentable {
         private var crewOverlays: [MKOverlay] = []
         private var crewAnnotations: [CrewAnnotation] = []
         private var crewKey = ""
+        private var heatOverlays: [MKOverlay] = []
+        private var heatKey = ""
         private var mapPick = false
         private var onMapTap: (Double, Double) -> Void = { _, _ in }
 
@@ -292,6 +295,13 @@ struct SurveyMapView: UIViewRepresentable {
             if let tiles = overlay as? MKTileOverlay {
                 return MKTileOverlayRenderer(tileOverlay: tiles)
             }
+            if let heat = overlay as? IncidentHeatOverlay {
+                let renderer = MKCircleRenderer(circle: heat)
+                renderer.fillColor = heat.fill
+                renderer.strokeColor = heat.fill
+                renderer.lineWidth = 0
+                return renderer
+            }
             if let disk = overlay as? ReachCircleOverlay {
                 let renderer = MKCircleRenderer(circle: disk)
                 renderer.fillColor = disk.fill
@@ -386,6 +396,38 @@ struct SurveyMapView: UIViewRepresentable {
                 map.removeOverlays(crewOverlays)
                 map.addOverlays(crewOverlays, level: .aboveLabels)
             }
+            if !heatOverlays.isEmpty {
+                map.removeOverlays(heatOverlays)
+                map.addOverlays(heatOverlays, level: .aboveLabels)
+            }
+        }
+
+        func syncHeat(on map: MKMapView, field: FieldModel) {
+            guard field.showIncidentHeat else {
+                if !heatOverlays.isEmpty {
+                    map.removeOverlays(heatOverlays)
+                    heatOverlays = []
+                    heatKey = ""
+                }
+                return
+            }
+            let key = field.incidentHeat.map { "\($0.latitudeDegrees),\($0.longitudeDegrees),\($0.count)" }.joined(separator: "|")
+            if key == heatKey { return }
+            if !heatOverlays.isEmpty {
+                map.removeOverlays(heatOverlays)
+            }
+            let maxCount = field.incidentHeat.map(\.count).max() ?? 1
+            heatOverlays = field.incidentHeat.map { cell in
+                let overlay = IncidentHeatOverlay(
+                    center: CLLocationCoordinate2D(latitude: cell.latitudeDegrees, longitude: cell.longitudeDegrees),
+                    radius: cell.radiusMeters
+                )
+                let heat = Double(cell.count) / Double(maxCount)
+                overlay.fill = UIColor(red: 0.94, green: 0.35 + 0.4 * (1 - heat), blue: 0.15, alpha: 0.28 + 0.4 * heat)
+                return overlay
+            }
+            heatKey = key
+            map.addOverlays(heatOverlays, level: .aboveLabels)
         }
 
         private func syncAnnotation(on map: MKMapView, reading: PositionReading) {
@@ -595,6 +637,10 @@ final class ReachCircleOverlay: MKCircle {
     var stroke: UIColor = SurveyUIColor.amber
     var fill: UIColor = SurveyUIColor.amber.withAlphaComponent(0.08)
     var lineWidth: CGFloat = 3
+}
+
+final class IncidentHeatOverlay: MKCircle {
+    var fill: UIColor = SurveyUIColor.red.withAlphaComponent(0.4)
 }
 
 final class ReachAreaOverlay: MKPolygon {

@@ -79,6 +79,13 @@ final class FieldModel: ObservableObject {
     @Published private(set) var incidentOpen = false
     @Published private(set) var incidentNote: String?
     @Published private(set) var incidentRecordingMemo = false
+    @Published var showsIncidentStats = false
+    @Published var showIncidentHeat = false
+    @Published var anonymizeStats = true
+    @Published private(set) var incidentStatRows: [IncidentStatRow] = []
+    @Published private(set) var incidentHeat: [IncidentHeatCell] = []
+    @Published private(set) var statMessage: String?
+    private let statsRelay = IncidentStatsRelayStub(reachable: false)
     private var incidentTimer: Timer?
     private var restoredIncidentProject: String?
     let controlPoints: [ControlPoint]
@@ -215,7 +222,8 @@ final class FieldModel: ObservableObject {
             solutionLabel: position.solutionLabel,
             speeches: crew.recentSpeeches().filter { abs($0.at.timeIntervalSince(now)) <= IncidentBook.beforeSeconds },
             radio: radioClips(around: now),
-            strokes: incidentStrokes(around: position)
+            strokes: incidentStrokes(around: position),
+            weather: drawing.weatherLabel.isEmpty ? nil : drawing.weatherLabel
         )
         do {
             let id = try incidents.open(opening, projectName: project.name, at: drawing.projectsRoot)
@@ -991,6 +999,38 @@ final class FieldModel: ObservableObject {
         }
         incidents.flush(projectName: project.name, at: drawing.projectsRoot, now: now)
         incidentOpen = incidents.latestID != nil
+        if !results.isEmpty {
+            reloadIncidentStats()
+        }
+    }
+
+    func reloadIncidentStats() {
+        guard let project = drawing.project else {
+            incidentStatRows = []
+            incidentHeat = []
+            return
+        }
+        incidentStatRows = IncidentStats.load(project: project, at: drawing.projectsRoot, anonymize: anonymizeStats)
+        incidentHeat = IncidentStats.heat(incidentStatRows)
+    }
+
+    func exportIncidentStats() {
+        guard let project = drawing.project else {
+            statMessage = "先にプロジェクトを作ってください。"
+            return
+        }
+        reloadIncidentStats()
+        do {
+            _ = try IncidentStats.writeCSV(incidentStatRows, projectName: project.name, at: drawing.projectsRoot)
+            statsRelay.isReachable = radio.relayReachable
+            let csv = IncidentStats.csv(incidentStatRows)
+            let delivery = statsRelay.submit(csv: csv)
+            statMessage = delivery == .sent
+                ? "集計CSVを書き、P510へ渡しました"
+                : "集計CSVを記録簿に書きました。P510にはまだ渡していません"
+        } catch {
+            statMessage = "集計CSVを書けませんでした。"
+        }
     }
 
     private func radioClips(around now: Date) -> [IncidentRadioClip] {

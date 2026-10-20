@@ -163,6 +163,10 @@ public struct ProximityEvent: Codable, Equatable, Sendable, Identifiable {
     public var closestMeters: Double
     public var alarmRadiusMeters: Double?
     public var rangeKind: CrewRangeKind
+    /// 警報が鳴った側の緯度。古い記録には無い。
+    public var latitudeDegrees: Double?
+    /// 警報が鳴った側の経度。古い記録には無い。
+    public var longitudeDegrees: Double?
 
     public init(
         id: UUID = UUID(),
@@ -178,7 +182,9 @@ public struct ProximityEvent: Codable, Equatable, Sendable, Identifiable {
         enteredMeters: Double,
         closestMeters: Double,
         alarmRadiusMeters: Double?,
-        rangeKind: CrewRangeKind
+        rangeKind: CrewRangeKind,
+        latitudeDegrees: Double? = nil,
+        longitudeDegrees: Double? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -194,6 +200,8 @@ public struct ProximityEvent: Codable, Equatable, Sendable, Identifiable {
         self.closestMeters = closestMeters
         self.alarmRadiusMeters = alarmRadiusMeters
         self.rangeKind = rangeKind
+        self.latitudeDegrees = latitudeDegrees
+        self.longitudeDegrees = longitudeDegrees
     }
 }
 
@@ -787,6 +795,8 @@ public final class CrewDesk {
             event.closestMeters = min(event.closestMeters, hit.distanceMeters)
             event.otherName = hit.other.name
             event.rangeKind = hit.rangeKind
+            event.latitudeDegrees = selfFix.latitudeDegrees
+            event.longitudeDegrees = selfFix.longitudeDegrees
             open[hit.other.id] = event
             upsert(event)
             return
@@ -807,7 +817,9 @@ public final class CrewDesk {
             enteredMeters: hit.distanceMeters,
             closestMeters: hit.distanceMeters,
             alarmRadiusMeters: hit.alarmRadiusMeters,
-            rangeKind: hit.rangeKind
+            rangeKind: hit.rangeKind,
+            latitudeDegrees: selfFix.latitudeDegrees,
+            longitudeDegrees: selfFix.longitudeDegrees
         )
         open[hit.other.id] = event
         upsert(event)

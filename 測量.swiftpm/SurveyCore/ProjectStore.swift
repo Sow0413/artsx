@@ -46,6 +46,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var approachLeadMeters: Double?
     /// 同じ相手への読み上げを繰り返すまでの秒。無いときは 30秒。
     public var approachRepeatSeconds: Double?
+    /// 現場の天候。集計の列に使う。測っていないときは nil。
+    public var weather: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -66,7 +68,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         cautionMeters: Double? = nil,
         proximityMarginMeters: Double? = nil,
         approachLeadMeters: Double? = nil,
-        approachRepeatSeconds: Double? = nil
+        approachRepeatSeconds: Double? = nil,
+        weather: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -87,13 +90,14 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.proximityMarginMeters = proximityMarginMeters
         self.approachLeadMeters = approachLeadMeters
         self.approachRepeatSeconds = approachRepeatSeconds
+        self.weather = weather
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, zone, axis, drawings, prefecture
         case machinePreset, machineRadiusMeters, eyeHeightMeters, sightDatum, phoneAtEyes
         case stationIntervalMeters, stationOrigin, stationLine
-        case cautionMeters, proximityMarginMeters, approachLeadMeters, approachRepeatSeconds
+        case cautionMeters, proximityMarginMeters, approachLeadMeters, approachRepeatSeconds, weather
     }
 
     public init(from decoder: Decoder) throws {
@@ -117,6 +121,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         proximityMarginMeters = try container.decodeIfPresent(Double.self, forKey: .proximityMarginMeters)
         approachLeadMeters = try container.decodeIfPresent(Double.self, forKey: .approachLeadMeters)
         approachRepeatSeconds = try container.decodeIfPresent(Double.self, forKey: .approachRepeatSeconds)
+        weather = try container.decodeIfPresent(String.self, forKey: .weather)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -140,6 +145,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(proximityMarginMeters, forKey: .proximityMarginMeters)
         try container.encodeIfPresent(approachLeadMeters, forKey: .approachLeadMeters)
         try container.encodeIfPresent(approachRepeatSeconds, forKey: .approachRepeatSeconds)
+        try container.encodeIfPresent(weather, forKey: .weather)
     }
 }
 
