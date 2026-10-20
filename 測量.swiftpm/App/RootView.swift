@@ -126,6 +126,9 @@ struct RootView: View {
         .sheet(isPresented: $field.showsToolOrder) {
             ToolOrderSheet(field: field)
         }
+        .sheet(isPresented: $field.showsStature) {
+            StatureSheet(field: field)
+        }
     }
 
     private func syncVolume() {

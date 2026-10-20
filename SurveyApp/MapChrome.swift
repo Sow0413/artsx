@@ -115,6 +115,8 @@ struct PlaceholderTabView: View {
 struct LocationPanel: View {
     let reading: PositionReading
     var note: String? = nil
+    var statureNotice: String? = nil
+    var onStature: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -135,6 +137,15 @@ struct LocationPanel: View {
                     Text(accuracyText(position))
                 }
                 .font(SurveyType(18, .bold))
+                if let statureNotice {
+                    Button(action: { onStature?() }) {
+                        Text(statureNotice)
+                            .font(SurveyType(22, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onStature == nil)
+                }
                 if let note {
                     Text(note)
                         .font(SurveyType(15, .heavy))

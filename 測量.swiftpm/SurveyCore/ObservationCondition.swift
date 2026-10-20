@@ -16,6 +16,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     public var epochCount: Int?
     public var receiver: ReceiverKind
     public var stage: PositionStage
+    /// 段階0の iPhone だけで付く。ポール高ではない。
+    public var stature: StatureRecord?
 
     public init(
         solution: FixQuality,
@@ -31,7 +33,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         durationSeconds: TimeInterval?,
         epochCount: Int?,
         receiver: ReceiverKind,
-        stage: PositionStage
+        stage: PositionStage,
+        stature: StatureRecord? = nil
     ) {
         self.solution = solution
         self.solutionLabel = solutionLabel
@@ -47,15 +50,63 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         self.epochCount = epochCount
         self.receiver = receiver
         self.stage = stage
+        self.stature = stature
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        solution = try container.decode(FixQuality.self, forKey: .solution)
+        solutionLabel = try container.decode(String.self, forKey: .solutionLabel)
+        satellites = try container.decodeIfPresent([SatelliteCount].self, forKey: .satellites) ?? []
+        satelliteCount = try container.decodeIfPresent(Int.self, forKey: .satelliteCount)
+        pdop = try container.decodeIfPresent(Double.self, forKey: .pdop)
+        horizontalAccuracyMeters = try container.decode(Double.self, forKey: .horizontalAccuracyMeters)
+        verticalAccuracyMeters = try container.decodeIfPresent(Double.self, forKey: .verticalAccuracyMeters)
+        correctionAgeSeconds = try container.decodeIfPresent(Double.self, forKey: .correctionAgeSeconds)
+        correctionSource = try container.decodeIfPresent(String.self, forKey: .correctionSource)
+        observedAt = try container.decode(Date.self, forKey: .observedAt)
+        durationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
+        epochCount = try container.decodeIfPresent(Int.self, forKey: .epochCount)
+        receiver = try container.decode(ReceiverKind.self, forKey: .receiver)
+        stage = try container.decode(PositionStage.self, forKey: .stage)
+        stature = try container.decodeIfPresent(StatureRecord.self, forKey: .stature)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(solution, forKey: .solution)
+        try container.encode(solutionLabel, forKey: .solutionLabel)
+        try container.encode(satellites, forKey: .satellites)
+        try container.encodeIfPresent(satelliteCount, forKey: .satelliteCount)
+        try container.encodeIfPresent(pdop, forKey: .pdop)
+        try container.encode(horizontalAccuracyMeters, forKey: .horizontalAccuracyMeters)
+        try container.encodeIfPresent(verticalAccuracyMeters, forKey: .verticalAccuracyMeters)
+        try container.encodeIfPresent(correctionAgeSeconds, forKey: .correctionAgeSeconds)
+        try container.encodeIfPresent(correctionSource, forKey: .correctionSource)
+        try container.encode(observedAt, forKey: .observedAt)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
+        try container.encodeIfPresent(epochCount, forKey: .epochCount)
+        try container.encode(receiver, forKey: .receiver)
+        try container.encode(stage, forKey: .stage)
+        try container.encodeIfPresent(stature, forKey: .stature)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case solution, solutionLabel, satellites, satelliteCount, pdop
+        case horizontalAccuracyMeters, verticalAccuracyMeters, correctionAgeSeconds, correctionSource
+        case observedAt, durationSeconds, epochCount, receiver, stage, stature
     }
 
     public static func snapshot(
         position: GeodeticPosition,
         stage: PositionStage,
         durationSeconds: TimeInterval?,
-        epochCount: Int?
+        epochCount: Int?,
+        stature profile: StatureProfile? = nil
     ) -> ObservationCondition {
-        ObservationCondition(
+        let record = profile.flatMap { StatureMath.record(profile: $0, deviceHeight: position.ellipsoidalHeightMeters) }
+            .flatMap { StatureMath.applies(stage: stage, receiver: position.receiver) ? $0 : nil }
+        return ObservationCondition(
             solution: position.fixQuality,
             solutionLabel: position.solutionLabel,
             satellites: position.satellites ?? [],
@@ -69,7 +120,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
             durationSeconds: durationSeconds,
             epochCount: epochCount,
             receiver: position.receiver,
-            stage: stage
+            stage: stage,
+            stature: record
         )
     }
 
@@ -89,7 +141,7 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         let seconds = durationSeconds.map { "\(Int($0.rounded()))秒" } ?? "—"
         let epochs = epochCount.map { "\($0)エポック" } ?? "—"
         let pdopText = pdop.map { String(format: "%.1f", $0) } ?? "—"
-        return [
+        var lines = [
             "解 \(solutionLabel)",
             "衛星 \(satelliteNote)",
             "PDOP \(pdopText)",
@@ -98,6 +150,13 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
             "観測 \(Self.stamp.string(from: observedAt))、\(seconds)、\(epochs)",
             "機器 \(receiver.label)、段階\(stage.rawValue)"
         ]
+        if let stature {
+            lines.append("\(stature.screenLabel)（\(stature.style.title)）")
+            if let ground = stature.groundHeightMeters {
+                lines.append("地盤高 \(String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), ground))m")
+            }
+        }
+        return lines
     }
 
     static let stamp: DateFormatter = {

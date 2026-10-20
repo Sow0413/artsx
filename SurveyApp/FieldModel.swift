@@ -74,6 +74,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var exportURL: URL?
     @Published var operation = OperationDesk.load()
     @Published var showsToolOrder = false
+    @Published var stature = StatureProfile.load()
+    @Published var showsStature = false
     private var epochWatch = EpochWatch()
 
     let tiles: TileStore
@@ -967,7 +969,8 @@ final class FieldModel: ObservableObject {
             position: position,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
-            epochCount: epochWatch.count
+            epochCount: epochWatch.count,
+            stature: stature
         )
         let observation = FieldObservation(
             name: name,
@@ -1024,6 +1027,35 @@ final class FieldModel: ObservableObject {
         let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
         captureMessage = "\(name)を基準点にしました。\(condition.solutionLabel) \(Int(fix.fixDurationSeconds.rounded()))秒、水平 \(CoordinateText.accuracyMeters(fix.horizontalAccuracyMeters))、高さ \(vertical)、衛星 \(satellites)。"
         return true
+    }
+
+    var statureNotice: String? {
+        guard let position = reading.position else { return nil }
+        return StatureMath.notice(profile: stature, stage: stageTransition.stage, receiver: position.receiver)
+    }
+
+    func saveStature(_ profile: StatureProfile) {
+        stature = profile
+        profile.save()
+    }
+
+    func reapplyStature() {
+        let profile = stature
+        let catalog = workCatalog
+        let journal = journal
+        DispatchQueue.global(qos: .userInitiated).async {
+            let updated = journal.allObservations().map { $0.applying(profile) }
+            DispatchQueue.main.async {
+                for item in updated where StatureMath.applies(stage: item.captured.stage, receiver: item.captured.receiver) || item.condition?.stature != nil {
+                    try? self.journal.commit(item)
+                    let kind = item.workID == "boundary" ? "基準点" : (catalog.works.first { $0.id == item.workID }?.shortTitle ?? item.workID)
+                    self.remember(CoordinateBookIndex.entry(from: item, kind: kind))
+                }
+                self.observations = FieldObservationLog(observations: self.journal.recent())
+                self.observationCount = self.journal.count()
+                self.captureMessage = "段階0の点へ、今の身長補正を掛け直しました。"
+            }
+        }
     }
 
     func setSkill(_ level: SkillLevel) {

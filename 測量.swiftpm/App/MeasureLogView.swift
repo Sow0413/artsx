@@ -10,6 +10,20 @@ struct MeasureLogView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("測る")
                     .font(SurveyType(28, .heavy))
+                Button {
+                    field.showsStature = true
+                } label: {
+                    Text(field.statureNotice ?? "身長")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                        .background(SurveyColor.card)
+                        .foregroundStyle(SurveyColor.text)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                        )
+                }
+                .buttonStyle(.plain)
                 OperationBar(field: field, showsSkill: true)
                 if field.operation.showsAdvanced {
                     Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")

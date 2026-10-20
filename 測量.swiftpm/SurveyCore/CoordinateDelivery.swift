@@ -103,7 +103,7 @@ public enum CoordinateBookIndex {
             name: observation.name,
             latitudeDegrees: observation.captured.latitudeDegrees,
             longitudeDegrees: observation.captured.longitudeDegrees,
-            ellipsoidalHeightMeters: observation.captured.ellipsoidalHeightMeters,
+            ellipsoidalHeightMeters: observation.condition?.stature?.groundHeightMeters ?? observation.captured.ellipsoidalHeightMeters,
             horizontalAccuracyMeters: observation.horizontalAccuracyAtCapture,
             verticalAccuracyMeters: observation.verticalAccuracyAtCapture,
             satelliteCount: condition?.satelliteCount ?? observation.captured.satelliteCount,

@@ -176,7 +176,9 @@ struct MapTabView: View {
                     )
                     LocationPanel(
                         reading: field.workingReading,
-                        note: field.showsCorrectedPosition ? "三角点補正を引いた位置" : nil
+                        note: field.showsCorrectedPosition ? "三角点補正を引いた位置" : nil,
+                        statureNotice: field.statureNotice,
+                        onStature: { field.showsStature = true }
                     )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)
