@@ -229,10 +229,13 @@ final class SystemMotion {
     var onSample: ((FallSample) -> Void)?
     var onPitchRadians: ((Double) -> Void)?
     var onCrosshairPitch: ((Double) -> Void)?
+    /// ユーザー加速度と重力。どちらも端末座標、単位は g。丁張の相対高だけが読む。
+    var onRelativeSample: ((Double, Double, Double, Double, Double, Double) -> Void)?
     private let manager = CMMotionManager()
     private var fallOn = false
     private var staturePitch = false
     private var crosshairPitch = false
+    private var relativeMotion = false
     private var running = false
 
     private init() {}
@@ -252,8 +255,14 @@ final class SystemMotion {
         sync()
     }
 
+    func setRelativeMotion(_ on: Bool) {
+        relativeMotion = on
+        if !on { onRelativeSample = nil }
+        sync()
+    }
+
     private func sync() {
-        if fallOn || staturePitch || crosshairPitch {
+        if fallOn || staturePitch || crosshairPitch || relativeMotion {
             start()
         } else {
             stop()
@@ -278,6 +287,11 @@ final class SystemMotion {
             }
             if self.crosshairPitch {
                 self.onCrosshairPitch?(motion.attitude.pitch)
+            }
+            if self.relativeMotion {
+                let user = motion.userAcceleration
+                let gravity = motion.gravity
+                self.onRelativeSample?(user.x, user.y, user.z, gravity.x, gravity.y, gravity.z)
             }
         }
         if CMMotionManager.availableAttitudeReferenceFrames().contains(.xArbitraryZVertical) {

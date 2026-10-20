@@ -1092,7 +1092,7 @@ final class FieldModel: ObservableObject {
 
     /// 決めた高さを種別「丁張」で残す。身長補正は掛けない。iPhone なら段階0。
     @discardableResult
-    func registerBatter(measuredHeight: Double) -> Bool {
+    func registerBatter(measuredHeight: Double, note: String? = nil) -> Bool {
         guard var position = workingReading.position, position.isPlottable else {
             captureMessage = "位置が無いので、残せません。"
             return false
@@ -1121,8 +1121,16 @@ final class FieldModel: ObservableObject {
         store(observation)
         remember(CoordinateBookIndex.entry(from: observation, kind: record.kind))
         let guide = record.guide ? "\(BatterMath.guideWord)。" : ""
-        captureMessage = "\(name)を丁張にしました。段階\(record.stage.rawValue)。\(guide)"
+        if let note {
+            captureMessage = "\(name)を丁張にしました。\(note)"
+        } else {
+            captureMessage = "\(name)を丁張にしました。段階\(record.stage.rawValue)。\(guide)"
+        }
         return true
+    }
+
+    func knownBookHeights(matching text: String) -> [KnownHeight] {
+        journal.bookEntries(matching: text, limit: 20).compactMap(KnownHeightPick.book)
     }
 
     var crosshairElevation: Double? {

@@ -4,11 +4,13 @@ import Foundation
 public enum BatterSource: String, Codable, Sendable, Equatable {
     case poleTip
     case crosshair
+    case relative
 
     public var label: String {
         switch self {
         case .poleTip: return "ポール先端"
         case .crosshair: return "十字線"
+        case .relative: return "相対"
         }
     }
 }

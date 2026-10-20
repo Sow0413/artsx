@@ -207,6 +207,25 @@ public final class FieldJournal {
         return payloads("SELECT payload FROM book ORDER BY name").compactMap(decodeBook)
     }
 
+    /// 点名の一部だけ読む。座標簿を全件展開しない。
+    public func bookEntries(matching raw: String, limit: Int) -> [CoordinateBookEntry] {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, limit > 0 else { return [] }
+        let escaped = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        lock.lock()
+        defer { lock.unlock() }
+        let sql = "SELECT payload FROM book WHERE name LIKE ? ESCAPE '\\' ORDER BY name LIMIT ?"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, 1, "%\(escaped)%")
+        sqlite3_bind_int(statement, 2, Int32(min(limit, 100)))
+        return rows(statement).compactMap(decodeBook)
+    }
+
     /// 古い JSON が残っていて SQLite が空のときだけ、一度取り込む。
     public func importLegacyIfNeeded() {
         if count() == 0 {

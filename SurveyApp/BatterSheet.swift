@@ -11,12 +11,16 @@ struct BatterSheet: View {
     @ObservedObject var drawing: DrawingSession
     @Environment(\.dismiss) private var dismiss
     @StateObject private var cadence = BatterCadence()
+    @StateObject private var relative = RelativeFollower()
     @State private var designText = ""
     @State private var offsetText = ""
     @State private var slopeText = ""
     @State private var azimuthText = ""
     @State private var toleranceText = ""
     @State private var poleText = ""
+    @State private var knownName = ""
+    @State private var knownPick: KnownHeight?
+    @State private var bookHits: [KnownHeight] = []
 
     var body: some View {
         NavigationStack {
@@ -44,28 +48,40 @@ struct BatterSheet: View {
         .onAppear {
             field.setCrosshairSession(true)
             loadFields()
+            syncRelative()
             cadence.update(phrase: spoken, interval: speechInterval)
         }
         .onDisappear {
             field.setCrosshairSession(false)
+            relative.stop()
             cadence.stop()
         }
         .onChange(of: voiceKey) { _, _ in
             cadence.update(phrase: spoken, interval: speechInterval)
         }
+        .onChange(of: field.batter.source) { _, _ in
+            syncRelative()
+        }
+        .onChange(of: surveyKey) { _, _ in
+            pushSurvey()
+        }
     }
 
     private var badgeRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
-            if guide {
-                Text(BatterMath.guideWord)
-                    .font(SurveyType(22, .heavy))
-                    .foregroundStyle(SurveyColor.color(OutdoorContrast.black))
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 44)
-                    .background(SurveyColor.color(OutdoorContrast.yellow), in: Capsule())
-                    .accessibilityLabel("目安。iPhone単体の高さです。")
+            if showsRelativeBadge {
+                RelativeStageBadge(badge: relativeBadge)
+            } else {
+                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                if guide {
+                    Text(BatterMath.guideWord)
+                        .font(SurveyType(22, .heavy))
+                        .foregroundStyle(SurveyColor.color(OutdoorContrast.black))
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(SurveyColor.color(OutdoorContrast.yellow), in: Capsule())
+                        .accessibilityLabel("目安。iPhone単体の高さです。")
+                }
             }
         }
     }
@@ -101,6 +117,25 @@ struct BatterSheet: View {
                 Text("測定 \(meter(measured))m　\(field.batter.source.label)")
                     .font(SurveyType(16, .heavy, mono: true))
             }
+            if field.batter.source == .relative, let fix = relative.fix {
+                Text(RelativeHeight.statusText(fix))
+                    .font(SurveyType(16, .heavy))
+                    .fixedSize(horizontal: false, vertical: true)
+                if fix.needsRealign {
+                    Text(RelativeHeight.realignWord)
+                        .font(SurveyType(28, .heavy))
+                        .foregroundStyle(SurveyColor.color(OutdoorContrast.black))
+                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                        .background(SurveyColor.color(OutdoorContrast.yellow))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            }
+            if let notice = relative.notice, field.batter.source == .relative {
+                Text(notice)
+                    .font(SurveyType(14, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(planLine)
                 .font(SurveyType(20, .heavy))
                 .fixedSize(horizontal: false, vertical: true)
@@ -122,15 +157,19 @@ struct BatterSheet: View {
                 Picker("測る高さ", selection: sourceBinding) {
                     Text(BatterSource.poleTip.label).tag(BatterSource.poleTip)
                     Text(BatterSource.crosshair.label).tag(BatterSource.crosshair)
+                    Text(BatterSource.relative.label).tag(BatterSource.relative)
                 }
                 .pickerStyle(.segmented)
-                if field.batter.source == .poleTip {
+                switch field.batter.source {
+                case .poleTip:
                     fieldRow("ポール高 m", text: $poleText, commit: commitPole)
-                } else {
+                case .crosshair:
                     Text(crosshairLevel == true ? "十字線は水平です。器械高は地盤高に目の高さを足した値です。" : "十字線は、水平（±0.1°）のときだけ高さに使います。")
                         .font(SurveyType(14, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
+                case .relative:
+                    relativeSettings
                 }
                 fieldRow("計画高 m", text: $designText, commit: commitDesign)
                 fieldRow("オフセット m（+0.50 で貫は 50cm 上）", text: $offsetText, commit: commitOffset)
@@ -143,13 +182,60 @@ struct BatterSheet: View {
                 fieldRow("許容 ±mm（既定 5）", text: $toleranceText, commit: commitTolerance)
             }
         }
-        .frame(maxHeight: 220)
+        .frame(maxHeight: field.batter.source == .relative ? 300 : 220)
+    }
+
+    private var relativeSettings: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("楕円体高のある基準点か、座標簿の点でゼロを合わせます。標高だけしか無い点は使いません。")
+                .font(SurveyType(14, .semibold))
+                .foregroundStyle(SurveyColor.muted)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(controlHeights.prefix(8)) { item in
+                knownButton(item)
+            }
+            if controlHeights.isEmpty {
+                Text("楕円体高のある基準点は、まだありません。")
+                    .font(SurveyType(14, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+            }
+            TextField("座標簿の点名", text: $knownName)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .onChange(of: knownName) { _, text in
+                    bookHits = field.knownBookHeights(matching: text)
+                }
+            ForEach(bookHits) { item in
+                knownButton(item)
+            }
+            Button(zeroTitle) {
+                guard let knownPick else { return }
+                relative.align(name: knownPick.name, knownHeight: knownPick.heightMeters)
+            }
+            .buttonStyle(SurveyPlainButton())
+            .disabled(knownPick == nil || !relative.readyToAlign)
+        }
+    }
+
+    private func knownButton(_ item: KnownHeight) -> some View {
+        Button {
+            knownPick = item
+        } label: {
+            Text("\(item.name)　\(meter(item.heightMeters))m　\(item.source.label)\(knownPick?.id == item.id ? "　選択" : "")")
+                .font(SurveyType(16, .heavy))
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .buttonStyle(SurveyPlainButton())
     }
 
     private var recordButton: some View {
         Button {
             guard let measured else { return }
-            field.registerBatter(measuredHeight: measured)
+            if field.batter.source == .relative, let fix = relative.fix, !RelativeHeight.usesReceiverStage(fix.channel) {
+                field.registerBatter(measuredHeight: measured, note: "相対。\(RelativeHeight.estimateText(fix.sigmaMeters))。")
+            } else {
+                field.registerBatter(measuredHeight: measured)
+            }
         } label: {
             Text(recordTitle)
                 .font(SurveyType(20, .heavy))
@@ -238,6 +324,8 @@ struct BatterSheet: View {
                   let ground = field.crosshairGroundHeight(),
                   let eye = StatureMath.eyeHeight(field.stature) else { return nil }
             return BatterMath.crosshairLine(ground: ground, eye: eye)
+        case .relative:
+            return relative.fix?.heightMeters
         }
     }
 
@@ -286,6 +374,58 @@ struct BatterSheet: View {
         return field.stageTransition.stage == .iphone
     }
 
+    private var showsRelativeBadge: Bool {
+        guard field.batter.source == .relative else { return false }
+        if let fix = relative.fix, RelativeHeight.usesReceiverStage(fix.channel) { return false }
+        return true
+    }
+
+    private var relativeBadge: RelativeBadge {
+        if let fix = relative.fix, !RelativeHeight.usesReceiverStage(fix.channel) {
+            return RelativeHeight.badge(for: fix)
+        }
+        return RelativeHeight.waitingBadge()
+    }
+
+    private var controlHeights: [KnownHeight] {
+        field.controlPoints.compactMap(KnownHeightPick.control)
+    }
+
+    private var zeroTitle: String {
+        if let knownPick {
+            return "\(knownPick.name)でゼロを合わせる"
+        }
+        return "点を選んでゼロを合わせる"
+    }
+
+    private var surveyKey: String {
+        let here = field.workingReading.position
+        let height = here?.ellipsoidalHeightMeters ?? .nan
+        let trusted = here?.isTrustedRTKFix == true
+        let pole = field.poleHeight.meters ?? .nan
+        return "\(height)|\(trusted)|\(pole)"
+    }
+
+    private func syncRelative() {
+        if field.batter.source == .relative {
+            relative.start()
+            pushSurvey()
+        } else {
+            relative.stop()
+        }
+    }
+
+    private func pushSurvey() {
+        guard field.batter.source == .relative else { return }
+        let here = field.workingReading.position
+        relative.setSurvey(
+            ellipsoidal: here?.ellipsoidalHeightMeters,
+            trusted: here?.isTrustedRTKFix == true,
+            vertical: here?.verticalAccuracyMeters,
+            pole: field.poleHeight.meters
+        )
+    }
+
     private var blocker: String? {
         if design == nil { return "計画高が無いので、比べられません。" }
         switch field.batter.source {
@@ -298,6 +438,9 @@ struct BatterSheet: View {
             if crosshairLevel == false { return "水平ではないので、十字線は高さになりません。" }
             if field.crosshairGroundHeight() == nil { return "地盤高が無いので、十字線の高さは出せません。" }
             if StatureMath.eyeHeight(field.stature) == nil { return "目の高さが無いので、十字線の高さは出せません。" }
+        case .relative:
+            if relative.fix == nil { return "既知の高さでゼロを合わせてください。" }
+            return nil
         }
         return "目標の高さが出せません。"
     }
@@ -336,7 +479,14 @@ struct BatterSheet: View {
         )?.azimuthDegrees
     }
 
-    private var canRecord: Bool { measured != nil && target != nil }
+    private var canRecord: Bool {
+        guard measured != nil, target != nil else { return false }
+        if field.batter.source == .relative {
+            guard let fix = relative.fix else { return false }
+            return RelativeHeight.canRecord(fix)
+        }
+        return true
+    }
 
     private var recordTitle: String {
         if let name = field.nextPointName, canRecord {
@@ -347,8 +497,12 @@ struct BatterSheet: View {
 
     private var accessibilityLine: String {
         var parts = [spoken ?? blocker ?? "丁張"]
-        if guide { parts.append(BatterMath.guideWord) }
-        parts.append("段階\(field.stageTransition.stage.rawValue)")
+        if showsRelativeBadge {
+            parts.append(relativeBadge.accessibilityText)
+        } else {
+            if guide { parts.append(BatterMath.guideWord) }
+            parts.append("段階\(field.stageTransition.stage.rawValue)")
+        }
         parts.append(planLine)
         return parts.joined(separator: "。")
     }
