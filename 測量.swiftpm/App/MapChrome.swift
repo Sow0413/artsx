@@ -8,33 +8,34 @@ struct AccuracyBadgeView: View {
     var body: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(badge.tone.tint)
+                .fill(badge.tone.mark)
                 .frame(width: 16, height: 16)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(badge.solutionLabel)
-                        .font(.system(size: 15, weight: .heavy))
+                        .font(SurveyType(15, .heavy))
+                        .foregroundStyle(chipInk)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
-                        .background(badge.tone.tint.opacity(0.22), in: Capsule())
+                        .background(badge.tone.mark, in: Capsule())
                     if let stage {
                         Text("段階\(stage.rawValue)")
-                            .font(.system(size: 13, weight: .heavy))
+                            .font(SurveyType(13, .heavy))
                             .foregroundStyle(SurveyColor.muted)
                     }
                 }
                 Text(badge.text)
-                    .font(.system(size: 20, weight: .heavy))
+                    .font(SurveyType(20, .heavy))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 if !badge.caution.isEmpty {
                     Text(badge.caution)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(SurveyType(13, .semibold))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if !badge.guidance.isEmpty {
                     Text(badge.guidance)
-                        .font(.system(size: 14, weight: .heavy))
+                        .font(SurveyType(14, .heavy))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -42,15 +43,23 @@ struct AccuracyBadgeView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
         .foregroundStyle(badge.tone.tint)
         .background(badge.tone.badgeBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(badge.tone.tint, lineWidth: 3)
+                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(badge.accessibilityText)
+    }
+
+    /// 黄地は黒文字。赤と緑の原色地は白文字。
+    private var chipInk: Color {
+        switch badge.tone {
+        case .amber, .yellow: return SurveyColor.color(OutdoorContrast.black)
+        case .red, .green, .grey: return SurveyColor.onAccent
+        }
     }
 }
 
@@ -65,9 +74,9 @@ struct SurveyTabBar: View {
                 } label: {
                     VStack(spacing: 4) {
                         Image(systemName: tab.symbol)
-                            .font(.system(size: 24, weight: .semibold))
+                            .font(SurveyType(24, .semibold))
                         Text(tab.title)
-                            .font(.system(size: 14, weight: .bold))
+                            .font(SurveyType(14, .bold))
                     }
                     .frame(maxWidth: .infinity, minHeight: 68)
                     .foregroundStyle(selection == tab ? SurveyColor.text : SurveyColor.muted)
@@ -78,7 +87,7 @@ struct SurveyTabBar: View {
         }
         .background(SurveyColor.bar)
         .overlay(alignment: .top) {
-            Rectangle().fill(SurveyColor.line).frame(height: 1)
+            Rectangle().fill(SurveyColor.line).frame(height: SurveyColor.stroke)
         }
     }
 }
@@ -90,9 +99,9 @@ struct PlaceholderTabView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title)
-                .font(.system(size: 28, weight: .heavy))
+                .font(SurveyType(28, .heavy))
             Text(message)
-                .font(.system(size: 18, weight: .semibold))
+                .font(SurveyType(18, .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -110,43 +119,43 @@ struct LocationPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("現在地")
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             if let position = reading.position, position.isPlottable {
                 Text(CoordinateText.latitude(position.latitudeDegrees))
-                    .font(.system(size: 32, weight: .heavy, design: .monospaced))
+                    .font(SurveyType(32, .heavy, mono: true))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 Text(CoordinateText.longitude(position.longitudeDegrees))
-                    .font(.system(size: 32, weight: .heavy, design: .monospaced))
+                    .font(SurveyType(32, .heavy, mono: true))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
                     Text(accuracyText(position))
                 }
-                .font(.system(size: 18, weight: .bold))
+                .font(SurveyType(18, .bold))
                 if let note {
                     Text(note)
-                        .font(.system(size: 15, weight: .heavy))
+                        .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.blue)
                 }
                 Text(CoordinateText.previewNote)
-                    .font(.system(size: 14, weight: .bold))
+                    .font(SurveyType(14, .bold))
                     .foregroundStyle(SurveyColor.muted)
                 Text(CoordinateText.storageNote)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(SurveyType(13, .medium))
                     .foregroundStyle(SurveyColor.muted)
                 if let warning = warningText {
                     Text(warning)
-                        .font(.system(size: 15, weight: .bold))
+                        .font(SurveyType(15, .bold))
                         .foregroundStyle(SurveyColor.amber)
                 }
             } else {
                 Text(emptyTitle)
-                    .font(.system(size: 22, weight: .heavy))
+                    .font(SurveyType(22, .heavy))
                 Text(emptyDetail)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -154,10 +163,10 @@ struct LocationPanel: View {
         .foregroundStyle(SurveyColor.text)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SurveyColor.card.opacity(0.96), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(SurveyColor.line, lineWidth: 1)
+                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
         .accessibilityElement(children: .combine)
     }
@@ -214,7 +223,7 @@ struct DownloadBar: View {
             HStack(spacing: 8) {
                 Button(action: onSave) {
                     Text(isDownloading ? message : "この範囲を保存")
-                        .font(.system(size: 18, weight: .heavy))
+                        .font(SurveyType(18, .heavy))
                         .minimumScaleFactor(0.7)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, minHeight: 64)
@@ -229,7 +238,7 @@ struct DownloadBar: View {
                 if isDownloading {
                     Button(action: onCancel) {
                         Text("中止")
-                            .font(.system(size: 18, weight: .heavy))
+                            .font(SurveyType(18, .heavy))
                             .frame(minWidth: 88, minHeight: 64)
                             .background(SurveyColor.card)
                             .foregroundStyle(SurveyColor.text)
@@ -244,7 +253,7 @@ struct DownloadBar: View {
             }
             if !isDownloading {
                 Text(message)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(SurveyType(14, .semibold))
                     .foregroundStyle(message.contains("広すぎ") || message.contains("できません") ? SurveyColor.amber : SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -256,14 +265,18 @@ struct AttributionLabel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(GSITileCatalog.attribution)
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
             Text(GSITileCatalog.sourceCredit)
-                .font(.system(size: 11, weight: .semibold))
+                .font(SurveyType(11, .semibold))
         }
         .foregroundStyle(Color.black)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.black, lineWidth: SurveyColor.stroke)
+        )
         .accessibilityLabel("\(GSITileCatalog.attribution)。\(GSITileCatalog.sourceCredit)")
     }
 }
@@ -275,7 +288,7 @@ struct RecenterButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: following ? "location.fill" : "location")
-                .font(.system(size: 22, weight: .bold))
+                .font(SurveyType(22, .bold))
                 .frame(width: 60, height: 60)
                 .background(Color.white, in: Circle())
                 .foregroundStyle(Color.black)

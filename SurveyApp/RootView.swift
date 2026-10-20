@@ -5,6 +5,7 @@ import SurveyCore
 struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var field: FieldModel
+    @StateObject private var appearance = SurveyAppearance()
 
     init(
         source: any PositionSource,
@@ -25,6 +26,7 @@ struct RootView: View {
     }
 
     var body: some View {
+        let _ = SurveyColor.install(appearance.outdoor)
         VStack(spacing: 0) {
             if field.extras.mesh {
                 MeshRelayStatus(field: field)
@@ -34,7 +36,7 @@ struct RootView: View {
             }
             if field.gnssState == .connecting || field.gnssState == .reconnecting {
                 Text(field.gnssState.label)
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(SurveyType(14, .heavy))
                     .foregroundStyle(SurveyColor.amber)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
@@ -51,7 +53,7 @@ struct RootView: View {
             }
             if field.tab != .seat, let progress = field.benchmarkProgressLabel {
                 Text(progress)
-                    .font(.system(size: 16, weight: .heavy))
+                    .font(SurveyType(16, .heavy))
                     .foregroundStyle(SurveyColor.amber)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
@@ -73,13 +75,15 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            themeButton
             if field.tab != .seat {
                 SurveyTabBar(selection: $field.tab)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SurveyColor.background.ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        .environment(\.surveyOutdoor, appearance.outdoor)
+        .preferredColorScheme(appearance.outdoor ? .light : .dark)
         .onAppear { field.start() }
         .onDisappear { field.stop() }
         .onChange(of: scenePhase) { _, phase in
@@ -96,6 +100,24 @@ struct RootView: View {
         .sheet(isPresented: $field.showsExtras) {
             ExtraSettingsSheet(field: field)
         }
+    }
+
+    private var themeButton: some View {
+        Button(action: appearance.cycle) {
+            Text(appearance.label)
+                .font(SurveyType(18, .heavy))
+                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                .background(appearance.outdoor ? SurveyColor.color(OutdoorContrast.yellow) : SurveyColor.card)
+                .foregroundStyle(appearance.outdoor ? SurveyColor.color(OutdoorContrast.black) : SurveyColor.text)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+        .accessibilityLabel(appearance.label)
     }
 }
 

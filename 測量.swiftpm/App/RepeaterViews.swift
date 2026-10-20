@@ -15,10 +15,10 @@ struct MeshRelayStatus: View {
     private func status(_ title: String, _ detail: String, _ titleColor: Color, _ fill: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.system(size: 18, weight: .black))
+                .font(SurveyType(18, .black))
                 .foregroundStyle(titleColor)
             Text(detail)
-                .font(.system(size: 13, weight: .medium))
+                .font(SurveyType(13, .medium))
                 .foregroundStyle(SurveyColor.text)
                 .fixedSize(horizontal: false, vertical: true)
         }

@@ -18,16 +18,22 @@ struct DrawingCanvasView: View {
     @State private var magnifyBase: Double?
     @State private var rotationBase: Double?
     @State private var dragCenter: (x: Double, y: Double)?
+    @Environment(\.surveyOutdoor) private var outdoor
 
     var body: some View {
+        let outdoor = outdoor
         GeometryReader { geo in
             let size = geo.size
             Canvas { context, canvasSize in
-                draw(in: &context, size: canvasSize)
+                draw(in: &context, size: canvasSize, outdoor: outdoor)
             }
             .gesture(drag)
             .simultaneousGesture(magnify)
             .simultaneousGesture(rotate)
+            .contextMenu {
+                Button("全体を表示") { camera.fittedID = nil }
+                Button("回転を戻す") { camera.rotationDegrees = 0 }
+            }
             .onTapGesture { location in
                 let tolerance = 22 / max(camera.pointsPerUnit, 1e-9)
                 onTap(drawingPoint(from: location, size: size), tolerance)
@@ -87,16 +93,20 @@ struct DrawingCanvasView: View {
     private func canvasButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 16, weight: .heavy))
-                .frame(width: 44, height: 36)
-                .background(SurveyColor.card.opacity(0.92))
+                .font(SurveyType(20, .heavy))
+                .frame(width: OutdoorContrast.primaryPoints, height: OutdoorContrast.primaryPoints)
+                .background(SurveyColor.card)
                 .foregroundStyle(SurveyColor.text)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                )
         }
         .buttonStyle(.plain)
     }
 
-    private func draw(in context: inout GraphicsContext, size: CGSize) {
+    private func draw(in context: inout GraphicsContext, size: CGSize, outdoor: Bool) {
         guard let document else { return }
         let query = visibleBounds(size: size, document: document)
         let batch = DrawingLOD.batch(document: document, view: query, pointsPerUnit: camera.pointsPerUnit)
@@ -107,18 +117,27 @@ struct DrawingCanvasView: View {
             for point in stroke.points.dropFirst() {
                 path.addLine(to: screen(point, size: size))
             }
-            let color = Color(red: stroke.red, green: stroke.green, blue: stroke.blue)
-            context.stroke(path, with: .color(color), lineWidth: 1.4)
+            let ink = outdoor
+                ? OutdoorContrast.ink(red: stroke.red, green: stroke.green, blue: stroke.blue)
+                : ContrastColor(red: stroke.red, green: stroke.green, blue: stroke.blue)
+            let color = Color(red: ink.red, green: ink.green, blue: ink.blue)
+            context.stroke(path, with: .color(color), lineWidth: SurveyColor.stroke)
         }
         for mark in batch.points {
             let origin = screen(mark.point, size: size)
             let rect = CGRect(x: origin.x - 3, y: origin.y - 3, width: 6, height: 6)
-            context.fill(Path(rect), with: .color(Color(red: mark.red, green: mark.green, blue: mark.blue)))
+            let ink = outdoor
+                ? OutdoorContrast.ink(red: mark.red, green: mark.green, blue: mark.blue)
+                : ContrastColor(red: mark.red, green: mark.green, blue: mark.blue)
+            context.fill(Path(rect), with: .color(Color(red: ink.red, green: ink.green, blue: ink.blue)))
         }
         for label in batch.labels where label.height * camera.pointsPerUnit >= 8 {
-            let color = Color(red: label.red, green: label.green, blue: label.blue)
+            let ink = outdoor
+                ? OutdoorContrast.ink(red: label.red, green: label.green, blue: label.blue)
+                : ContrastColor(red: label.red, green: label.green, blue: label.blue)
+            let color = Color(red: ink.red, green: ink.green, blue: ink.blue)
             context.draw(
-                Text(label.text).font(.system(size: 12, weight: .semibold)).foregroundStyle(color),
+                Text(label.text).font(SurveyType(12, .semibold)).foregroundStyle(color),
                 at: screen(label.origin, size: size),
                 anchor: .bottomLeading
             )
@@ -136,18 +155,18 @@ struct DrawingCanvasView: View {
             let pixels = CGFloat(reachRadius * camera.pointsPerUnit)
             let circle = Path(ellipseIn: CGRect(x: center.x - pixels, y: center.y - pixels, width: pixels * 2, height: pixels * 2))
             let coverage = MachineReach.worst(reachRanges.map(\.coverage))
-            context.stroke(circle, with: .color(reachColor(coverage).opacity(0.95)), lineWidth: 2.5)
+            context.stroke(circle, with: .color(reachColor(coverage)), lineWidth: SurveyColor.stroke)
         }
         if let user {
             let center = screen(user.point, size: size)
             let radius = max(8, CGFloat(user.accuracyRadius * camera.pointsPerUnit))
             let circle = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-            context.stroke(circle, with: .color(tone.tint.opacity(0.9)), lineWidth: 2)
+            context.stroke(circle, with: .color(tone.mark), lineWidth: SurveyColor.stroke)
             let dot = Path(ellipseIn: CGRect(x: center.x - 7, y: center.y - 7, width: 14, height: 14))
             context.fill(Path(ellipseIn: CGRect(x: center.x - 9, y: center.y - 9, width: 18, height: 18)), with: .color(.white))
-            context.fill(dot, with: .color(tone.tint))
+            context.fill(dot, with: .color(tone.mark))
             context.draw(
-                Text(accuracyText).font(.system(size: 12, weight: .heavy)).foregroundStyle(tone.tint),
+                Text(accuracyText).font(SurveyType(12, .heavy)).foregroundStyle(tone.tint),
                 at: CGPoint(x: center.x + 14, y: center.y - 16),
                 anchor: .topLeading
             )
@@ -162,7 +181,7 @@ struct DrawingCanvasView: View {
             let dot = Path(ellipseIn: CGRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12))
             context.fill(dot, with: .color(crewColor(glyph.level)))
             context.draw(
-                Text(glyph.name).font(.system(size: 11, weight: .heavy)).foregroundStyle(crewColor(glyph.level)),
+                Text(glyph.name).font(SurveyType(11, .heavy)).foregroundStyle(crewColor(glyph.level)),
                 at: CGPoint(x: center.x + 10, y: center.y - 12),
                 anchor: .bottomLeading
             )

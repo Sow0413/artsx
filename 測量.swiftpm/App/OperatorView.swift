@@ -77,8 +77,15 @@ struct OperatorView: View {
                         Button("戻る") {
                             field.tab = .map
                         }
-                        .font(.system(size: 14, weight: .heavy))
-                        .foregroundStyle(SurveyColor.muted)
+                        .font(SurveyType(18, .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .padding(.horizontal, 16)
+                        .frame(minWidth: OutdoorContrast.primaryPoints, minHeight: OutdoorContrast.primaryPoints)
+                        .background(SurveyColor.card)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                        )
                     }
                     Spacer()
                     if field.extras.proximity {
@@ -132,7 +139,7 @@ struct OperatorView: View {
             Button(talking ? "話しています" : callout.buttonTitle) {
                 field.toggleHail()
             }
-            .font(.system(size: 28, weight: .black))
+            .font(SurveyType(28, .black))
             .foregroundStyle(Color.white)
             .frame(maxWidth: .infinity)
             .frame(height: 84)
@@ -146,13 +153,13 @@ struct OperatorView: View {
         let fallLine = field.crew.fallSpeech
         VStack(spacing: 0) {
             Text(fallLine ?? field.crew.threats.headline)
-                .font(.system(size: 40, weight: .black))
+                .font(SurveyType(40, .black))
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
                 .foregroundStyle(fallLine == nil ? (field.crew.threats.cues.isEmpty ? SurveyColor.muted : SurveyColor.text) : SurveyColor.red)
             if !field.crew.threats.facingSource.isEmpty {
                 Text(field.crew.threats.facingSource)
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.muted)
             }
         }
@@ -186,7 +193,7 @@ struct OperatorView: View {
 
     private func stationLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 56, weight: .heavy))
+            .font(SurveyType(56, .heavy))
             .minimumScaleFactor(0.3)
             .lineLimit(1)
             .foregroundStyle(SurveyColor.text)
@@ -196,13 +203,13 @@ struct OperatorView: View {
     private func heightLabel(_ height: OperatorHeight) -> some View {
         VStack(spacing: 2) {
             Text(height.text)
-                .font(.system(size: 64, weight: .heavy))
+                .font(SurveyType(64, .heavy))
                 .minimumScaleFactor(0.3)
                 .lineLimit(1)
                 .foregroundStyle(SurveyColor.text)
             if !height.note.isEmpty {
                 Text(height.note)
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(SurveyType(14, .heavy))
                     .foregroundStyle(SurveyColor.amber)
             }
         }
@@ -212,7 +219,7 @@ struct OperatorView: View {
 
     private func reachLabel(_ text: String, coverage: ReachCoverage?) -> some View {
         Text(text)
-            .font(.system(size: 44, weight: .heavy))
+            .font(SurveyType(44, .heavy))
             .minimumScaleFactor(0.35)
             .lineLimit(2)
             .multilineTextAlignment(.center)
@@ -232,17 +239,17 @@ struct OperatorView: View {
         VStack(spacing: 4) {
             if let arrow {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: size, weight: .black))
+                    .font(SurveyType(size, .black))
                     .rotationEffect(.degrees(arrow.relativeDegrees))
                     .foregroundStyle(SurveyColor.text)
                     .frame(width: size, height: size)
                     .accessibilityLabel("\(arrow.source)、中心線から\(Int(arrow.relativeDegrees.rounded()))度")
                 Text(arrow.source)
-                    .font(.system(size: 18, weight: .heavy))
+                    .font(SurveyType(18, .heavy))
                     .foregroundStyle(SurveyColor.muted)
             } else {
                 Text("向き —")
-                    .font(.system(size: 40, weight: .heavy))
+                    .font(SurveyType(40, .heavy))
                     .minimumScaleFactor(0.4)
                     .lineLimit(1)
                     .foregroundStyle(SurveyColor.muted)
@@ -255,7 +262,7 @@ struct OperatorView: View {
         Button("ヒヤリ") {
             field.recordIncident(trigger: .manual)
         }
-        .font(.system(size: 28, weight: .black))
+        .font(SurveyType(28, .black))
         .foregroundStyle(Color.white)
         .frame(maxWidth: .infinity)
         .frame(height: 72)
@@ -268,13 +275,13 @@ struct OperatorView: View {
         let talking = field.radio.phase == .transmitting
         return VStack(spacing: 6) {
             Text(field.radio.status)
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
             HStack(spacing: 16) {
                 Text(talking ? "話しています" : "押して話す")
-                    .font(.system(size: 28, weight: .black))
+                    .font(SurveyType(28, .black))
                     .foregroundStyle(Color.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 84)
@@ -297,22 +304,22 @@ struct OperatorView: View {
                     Button(field.crew.speakDirections ? "読み上げオン" : "読み上げ") {
                         field.crew.setSpeakDirections(!field.crew.speakDirections)
                     }
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(field.crew.speakDirections ? SurveyColor.amber : SurveyColor.muted)
                     Button(field.crew.role.label) {
                         field.crew.setRole(field.crew.role == .machine ? .worker : .machine)
                     }
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.muted)
                     Button(field.radio.attachStation ? "測点を添える" : "測点なし") {
                         field.radio.attachStation.toggle()
                     }
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.muted)
                     Button(field.radio.spaceAudio ? "定位オン" : "定位") {
                         field.radio.setSpaceAudio(!field.radio.spaceAudio)
                     }
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.muted)
                     .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
                 }

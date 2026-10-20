@@ -11,11 +11,11 @@ struct ExtraSettingsSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("測量の画面が先です。座標簿、図面、測設、基準点、出力、オペ画面は、ここのスイッチに関係なく動きます。")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("下はおまけです。既定ではオフで、測量の画面には出ません。オンにした機能だけが、その画面に足されます。")
-                        .font(.system(size: 16, weight: .heavy))
+                        .font(SurveyType(16, .heavy))
                         .foregroundStyle(SurveyColor.text)
                         .fixedSize(horizontal: false, vertical: true)
                     row("押して話す", "オペ画面の無線ボタンと、話しているあいだの矢印。", \.pushToTalk)
@@ -36,20 +36,20 @@ struct ExtraSettingsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("閉じる") { dismiss() }
-                        .font(.system(size: 17, weight: .heavy))
+                        .font(SurveyType(17, .heavy))
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .modifier(SurveyScheme())
     }
 
     private func row(_ title: String, _ note: String, _ key: WritableKeyPath<ExtraSwitches, Bool>) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Toggle(title, isOn: binding(key))
-                .font(.system(size: 18, weight: .heavy))
+                .font(SurveyType(18, .heavy))
                 .tint(SurveyColor.amber)
             Text(note)
-                .font(.system(size: 14, weight: .semibold))
+                .font(SurveyType(14, .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -68,11 +68,15 @@ struct ExtraEntryButton: View {
 
     var body: some View {
         Button("おまけ", action: action)
-            .font(.system(size: 14, weight: .heavy))
+            .font(SurveyType(14, .heavy))
             .foregroundStyle(SurveyColor.muted)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(SurveyColor.card.opacity(0.92))
+            .background(SurveyColor.card)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityLabel("おまけの設定")
     }

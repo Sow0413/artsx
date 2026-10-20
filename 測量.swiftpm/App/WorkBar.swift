@@ -12,10 +12,10 @@ struct WorkBar: View {
                         field.selectWork(work.id)
                     } label: {
                         Text(work.shortTitle)
-                            .font(.system(size: 16, weight: .heavy))
+                            .font(SurveyType(16, .heavy))
                             .padding(.horizontal, 14)
-                            .frame(minHeight: 44)
-                            .foregroundStyle(field.workCatalog.selectedID == work.id ? SurveyColor.text : SurveyColor.muted)
+                            .frame(minHeight: OutdoorContrast.primaryPoints)
+                            .foregroundStyle(field.workCatalog.selectedID == work.id ? SurveyColor.onAccent : SurveyColor.muted)
                             .background(
                                 field.workCatalog.selectedID == work.id ? SurveyColor.blue : SurveyColor.card,
                                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -29,9 +29,9 @@ struct WorkBar: View {
                     field.showsWorkSettings = true
                 } label: {
                     Text("数値")
-                        .font(.system(size: 16, weight: .heavy))
+                        .font(SurveyType(16, .heavy))
                         .padding(.horizontal, 14)
-                        .frame(minHeight: 44)
+                        .frame(minHeight: OutdoorContrast.primaryPoints)
                         .foregroundStyle(SurveyColor.text)
                         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
@@ -41,7 +41,10 @@ struct WorkBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .background(SurveyColor.background.opacity(0.92))
+        .background(SurveyColor.background)
+            .overlay(alignment: .top) {
+                Rectangle().fill(SurveyColor.line).frame(height: SurveyColor.stroke)
+            }
         .sheet(isPresented: $field.showsWorkSettings) {
             WorkSettingsSheet(field: field)
         }
@@ -60,13 +63,13 @@ struct WorkSettingsSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("仮の既定値です。現場に合わせて直すと、SitePack の work-requirements.json に残ります。")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(SurveyType(15, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach($rows) { $row in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(row.title)
-                                .font(.system(size: 18, weight: .heavy))
+                                .font(SurveyType(18, .heavy))
                             HStack(spacing: 8) {
                                 labeledField("水平 m", text: $row.horizontal)
                                 labeledField("高さ m", text: $row.vertical)
@@ -77,9 +80,9 @@ struct WorkSettingsSheet: View {
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("楽観的なときの係数")
-                            .font(.system(size: 18, weight: .heavy))
+                            .font(SurveyType(18, .heavy))
                         Text("三角点で報告が楽観的だった機器は、この倍率をかけてから要求と比べます。")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(SurveyType(14, .semibold))
                             .foregroundStyle(SurveyColor.muted)
                             .fixedSize(horizontal: false, vertical: true)
                         labeledField("倍", text: $factor)
@@ -88,7 +91,7 @@ struct WorkSettingsSheet: View {
                     .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     if !problem.isEmpty {
                         Text(problem)
-                            .font(.system(size: 15, weight: .heavy))
+                            .font(SurveyType(15, .heavy))
                             .foregroundStyle(SurveyColor.amber)
                     }
                 }
@@ -106,18 +109,18 @@ struct WorkSettingsSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .modifier(SurveyScheme())
         .onAppear(perform: load)
     }
 
     private func labeledField(_ title: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 13, weight: .bold))
+                .font(SurveyType(13, .bold))
                 .foregroundStyle(SurveyColor.muted)
             TextField(title, text: text)
                 .keyboardType(.decimalPad)
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .font(SurveyType(18, .bold, mono: true))
                 .padding(10)
                 .background(SurveyColor.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }

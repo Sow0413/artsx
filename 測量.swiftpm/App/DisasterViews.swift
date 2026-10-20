@@ -52,12 +52,12 @@ struct DisasterSheet: View {
                 set: { field.setDisasterMode($0) }
             )) {
                 Text("災害派遣")
-                    .font(.system(size: 18, weight: .heavy))
+                    .font(SurveyType(18, .heavy))
                     .foregroundStyle(SurveyColor.text)
             }
             .tint(SurveyColor.red)
             Text("圏外を前提にします。位置、SOS、文字、被災箇所、通行は、近くの端末を経由して渡します。期限が切れた情報は中継しません。")
-                .font(.system(size: 14, weight: .medium))
+                .font(SurveyType(14, .medium))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Toggle(isOn: Binding(
@@ -65,12 +65,12 @@ struct DisasterSheet: View {
                 set: { field.setBatterySaver($0) }
             )) {
                 Text("電池節約")
-                    .font(.system(size: 16, weight: .heavy))
+                    .font(SurveyType(16, .heavy))
                     .foregroundStyle(SurveyColor.text)
             }
             .tint(SurveyColor.amber)
             Text(BatterySaver.note)
-                .font(.system(size: 14, weight: .medium))
+                .font(SurveyType(14, .medium))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -82,12 +82,12 @@ struct DisasterSheet: View {
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("中継の控え \(field.bucketDesk.heldCount)件。P510への同期待ち \(field.disasterPending)件。")
-                .font(.system(size: 14, weight: .heavy))
+                .font(SurveyType(14, .heavy))
                 .foregroundStyle(SurveyColor.text)
                 .fixedSize(horizontal: false, vertical: true)
             if let message = field.disasterMessage {
                 Text(message)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(SurveyType(14, .medium))
                     .foregroundStyle(SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -96,7 +96,7 @@ struct DisasterSheet: View {
             }
             .buttonStyle(DisasterButtonStyle(fill: SurveyColor.blue))
             Text("Starlink など衛星回線は、P510 まで届く経路の一つです。届いたときだけ送ります。")
-                .font(.system(size: 13, weight: .medium))
+                .font(SurveyType(13, .medium))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -108,7 +108,7 @@ struct DisasterSheet: View {
     private var siteSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("被災箇所")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.text)
             Picker("種類", selection: $kind) {
                 ForEach(DisasterKind.allCases, id: \.self) { item in
@@ -145,23 +145,23 @@ struct DisasterSheet: View {
             }
             if let formNote {
                 Text(formNote)
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .buttonStyle(DisasterButtonStyle(fill: SurveyColor.red))
             if field.disasterSites.isEmpty {
                 Text("被災箇所はまだありません。")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(SurveyType(14, .medium))
                     .foregroundStyle(SurveyColor.muted)
             } else {
                 ForEach(field.disasterSites) { site in
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(site.kind.label) \(site.author)")
-                            .font(.system(size: 15, weight: .heavy))
+                            .font(SurveyType(15, .heavy))
                             .foregroundStyle(SurveyColor.text)
                         Text(siteLine(site))
-                            .font(.system(size: 13, weight: .medium))
+                            .font(SurveyType(13, .medium))
                             .foregroundStyle(SurveyColor.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -177,10 +177,10 @@ struct DisasterSheet: View {
     private var passageSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("通行")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.text)
             Text("動いた跡は通れるとして地図に出します。進めない地点はここで止めます。")
-                .font(.system(size: 14, weight: .medium))
+                .font(SurveyType(14, .medium))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Button("ここで止まった") {
@@ -196,7 +196,7 @@ struct DisasterSheet: View {
     private var textSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("文字")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.text)
             TextField("短く伝える", text: $text)
                 .textFieldStyle(.roundedBorder)
@@ -207,12 +207,12 @@ struct DisasterSheet: View {
             .buttonStyle(DisasterButtonStyle(fill: SurveyColor.card))
             if field.disasterTexts.isEmpty {
                 Text("届いた文字はまだありません。")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(SurveyType(14, .medium))
                     .foregroundStyle(SurveyColor.muted)
             } else {
                 ForEach(field.disasterTexts.prefix(8)) { item in
                     Text("\(item.author) \(item.body)")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(SurveyType(14, .medium))
                         .foregroundStyle(SurveyColor.text)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -226,10 +226,10 @@ struct DisasterSheet: View {
     private var exportSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("書き出し")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.text)
             Text("被災状況の PDF と CSV、災害査定へ転記する写真帳簿です。様式そのものは作らず、提出もしません。")
-                .font(.system(size: 14, weight: .medium))
+                .font(SurveyType(14, .medium))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Button("PDF、CSV、写真帳簿を書く") {
@@ -245,10 +245,10 @@ struct DisasterSheet: View {
     private var tileSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("地図")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.text)
             Text(field.downloadMessage)
-                .font(.system(size: 14, weight: .medium))
+                .font(SurveyType(14, .medium))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Button(field.isDownloading ? "保存中" : "この範囲を端末に保存") {
@@ -265,7 +265,7 @@ struct DisasterSheet: View {
     private func measureField(_ title: String, text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 12, weight: .heavy))
+                .font(SurveyType(12, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             TextField("m", text: text)
                 .textFieldStyle(.roundedBorder)
@@ -280,7 +280,7 @@ struct DisasterSheet: View {
         #if canImport(PhotosUI)
         PhotosPicker(selection: $photo, matching: .images) {
             Text(photoData == nil ? "写真を選ぶ" : "写真を選び直す")
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.text)
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .background(SurveyColor.background)
@@ -330,7 +330,7 @@ struct DisasterButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 16, weight: .heavy))
+            .font(SurveyType(16, .heavy))
             .foregroundStyle(SurveyColor.text)
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(fill.opacity(configuration.isPressed ? 0.7 : 1))

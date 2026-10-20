@@ -10,17 +10,17 @@ struct FirstResponseCard: View {
         if let episode = field.firstEpisode, episode.active, let view = field.firstView {
             VStack(alignment: .leading, spacing: 8) {
                 Text(view.headline)
-                    .font(.system(size: 28, weight: .black))
+                    .font(SurveyType(28, .black))
                     .minimumScaleFactor(0.4)
                     .foregroundStyle(Color.white)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(view.headline)
                 Text(view.progress)
-                    .font(.system(size: 16, weight: .heavy))
+                    .font(SurveyType(16, .heavy))
                     .foregroundStyle(Color.white.opacity(0.92))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(FirstCall.cardNote)
-                    .font(.system(size: 12, weight: .heavy))
+                    .font(SurveyType(12, .heavy))
                     .foregroundStyle(Color.white)
                 if view.nearestOpen {
                     dutyButton("担当になる") { field.acceptNearestDuty() }
@@ -36,7 +36,7 @@ struct FirstResponseCard: View {
                     }
                 }
                 Text(AidChecklist.note)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(SurveyType(12, .semibold))
                     .foregroundStyle(Color.white.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
                 ForEach(AidCheck.allCases, id: \.self) { item in
@@ -44,18 +44,18 @@ struct FirstResponseCard: View {
                 }
                 if field.aidArrows.isEmpty {
                     Text("AED・担架・救急箱は未登録")
-                        .font(.system(size: 14, weight: .heavy))
+                        .font(SurveyType(14, .heavy))
                         .foregroundStyle(Color.white)
                 } else {
                     ForEach(field.aidArrows) { arrow in
                         Text(arrow.text)
-                            .font(.system(size: 18, weight: .black))
+                            .font(SurveyType(18, .black))
                             .foregroundStyle(Color.white)
                     }
                 }
                 dutyButton("119の読み上げ") { field.openReadout119() }
                 Button("初動を閉じる") { field.endFirst() }
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(Color.white.opacity(0.9))
             }
             .padding(12)
@@ -69,7 +69,7 @@ struct FirstResponseCard: View {
 
     private func dutyButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .font(.system(size: 18, weight: .black))
+            .font(SurveyType(18, .black))
             .foregroundStyle(Color.white)
             .frame(maxWidth: .infinity)
             .frame(height: 48)
@@ -80,7 +80,7 @@ struct FirstResponseCard: View {
     private func checkRow(_ item: AidCheck, answer: Bool?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(item.prompt)
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(Color.white)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -92,7 +92,7 @@ struct FirstResponseCard: View {
 
     private func checkButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .font(.system(size: 16, weight: .black))
+            .font(SurveyType(16, .black))
             .foregroundStyle(selected ? SurveyColor.red : Color.white)
             .frame(maxWidth: .infinity)
             .frame(height: 40)
@@ -118,15 +118,15 @@ struct Readout119Sheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(SOSCall.disclaimer)
-                        .font(.system(size: 20, weight: .black))
+                        .font(SurveyType(20, .black))
                         .fixedSize(horizontal: false, vertical: true)
                     Text(Readout119.idleNote)
-                        .font(.system(size: 16, weight: .heavy))
+                        .font(SurveyType(16, .heavy))
                         .foregroundStyle(SurveyColor.amber)
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                         Text(line)
-                            .font(.system(size: 22, weight: .heavy))
+                            .font(SurveyType(22, .heavy))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Button("119に電話する") {
@@ -134,7 +134,7 @@ struct Readout119Sheet: View {
                         guard let url = URL(string: "tel:119") else { return }
                         UIApplication.shared.open(url)
                     }
-                    .font(.system(size: 20, weight: .black))
+                    .font(SurveyType(20, .black))
                     .foregroundStyle(Color.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
@@ -154,7 +154,7 @@ struct Readout119Sheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .modifier(SurveyScheme())
     }
 }
 
@@ -171,10 +171,10 @@ struct SiteAidEditor: View {
         let aid = field.drawing.project?.siteAid ?? .empty
         VStack(alignment: .leading, spacing: 6) {
             Text("初動")
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             Text(FirstCall.cardNote)
-                .font(.system(size: 12, weight: .semibold))
+                .font(SurveyType(12, .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("現場の住所", text: $address)
@@ -188,7 +188,7 @@ struct SiteAidEditor: View {
             Button("住所を保存") { saveText(existing: aid) }
                 .buttonStyle(SurveyPlainButton())
             Text("今の位置に置く")
-                .font(.system(size: 12, weight: .heavy))
+                .font(SurveyType(12, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             HStack {
                 ForEach([AidPointKind.aed, .stretcher, .kit], id: \.self) { kind in
@@ -205,7 +205,7 @@ struct SiteAidEditor: View {
             ForEach(aid.points) { point in
                 HStack {
                     Text(point.kind.label)
-                        .font(.system(size: 14, weight: .heavy))
+                        .font(SurveyType(14, .heavy))
                     Spacer()
                     Button("外す") { field.removeAidPoint(point.id) }
                         .buttonStyle(SurveyPlainButton())
@@ -225,14 +225,14 @@ struct SiteAidEditor: View {
             ForEach(aid.contacts) { contact in
                 HStack {
                     Text("\(contact.name) \(contact.phone)")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(SurveyType(14, .semibold))
                     Spacer()
                     Button("外す") { field.removeAidContact(contact.id) }
                         .buttonStyle(SurveyPlainButton())
                 }
             }
             Text("地図に名前と矢印を出します。119への電話は読み上げ画面で、押したときだけ発信します。")
-                .font(.system(size: 12, weight: .semibold))
+                .font(SurveyType(12, .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }

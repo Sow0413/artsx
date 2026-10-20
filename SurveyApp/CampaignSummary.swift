@@ -7,9 +7,9 @@ struct CampaignSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(field.benchmark?.point.name ?? "三角点")
-                .font(.system(size: 22, weight: .heavy))
+                .font(SurveyType(22, .heavy))
             Text("\(field.rounds.count) / \(field.plannedRounds) 回")
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             if let comparison = field.comparison {
                 ForEach(comparison.rounds) { round in
@@ -17,32 +17,32 @@ struct CampaignSummary: View {
                 }
                 ForEach(Array(comparison.gaps.enumerated()), id: \.offset) { _, gap in
                     Text(CampaignText.gapLine(gap))
-                        .font(.system(size: 15, weight: .bold))
+                        .font(SurveyType(15, .bold))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Text(CampaignText.overallLine(comparison.overall))
-                    .font(.system(size: 18, weight: .heavy))
+                    .font(SurveyType(18, .heavy))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(CampaignText.scatterLine(horizontal: comparison.horizontalScatterMeters, aligned: comparison.aligned))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(SurveyType(15, .semibold))
                     .foregroundStyle(comparison.aligned ? SurveyColor.text : SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let statistics = field.benchmarkStatistics {
                 Text(BenchmarkText.spread(std: statistics.horizontalStdMeters, percentile95: statistics.horizontal95Meters))
-                    .font(.system(size: 14, weight: .bold))
+                    .font(SurveyType(14, .bold))
                 Text(BenchmarkText.verticalNote(statistics))
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(BenchmarkText.horizontalOptimism(statistics))
-                    .font(.system(size: 15, weight: .heavy))
+                    .font(SurveyType(15, .heavy))
                     .foregroundStyle(statistics.horizontalOptimistic == true ? SurveyColor.amber : SurveyColor.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let check = field.returnCheck {
                 Text(CampaignText.returnLine(check))
-                    .font(.system(size: 16, weight: .heavy))
+                    .font(SurveyType(16, .heavy))
                     .foregroundStyle(check.valid ? SurveyColor.green : SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
                 if !check.valid {
@@ -52,7 +52,7 @@ struct CampaignSummary: View {
             }
             if let message = field.benchmarkMessage {
                 Text(message)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -66,10 +66,10 @@ struct CampaignSummary: View {
                 if let url = field.benchmarkExportURL {
                     ShareLink(item: url) {
                         Text("CSV")
-                            .font(.system(size: 18, weight: .heavy))
-                            .frame(maxWidth: .infinity, minHeight: 56)
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                             .background(SurveyColor.blue)
-                            .foregroundStyle(SurveyColor.text)
+                            .foregroundStyle(SurveyColor.onAccent)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -82,10 +82,10 @@ struct CampaignSummary: View {
     private func roundBlock(_ round: RoundSummary) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(CampaignText.roundLine(index: round.index, offset: round.offset))
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .fixedSize(horizontal: false, vertical: true)
             Text(CampaignText.settledLine(round.settledElapsedSeconds))
-                .font(.system(size: 14, weight: .bold))
+                .font(SurveyType(14, .bold))
                 .foregroundStyle(SurveyColor.muted)
             ConvergenceChart(curve: round.curve)
         }
@@ -94,10 +94,10 @@ struct CampaignSummary: View {
     private func wideButton(_ title: String, filled: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 18, weight: .heavy))
-                .frame(maxWidth: .infinity, minHeight: 56)
+                .font(SurveyType(18, .heavy))
+                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                 .background(filled ? SurveyColor.blue : SurveyColor.background)
-                .foregroundStyle(SurveyColor.text)
+                .foregroundStyle(filled ? SurveyColor.onAccent : SurveyColor.text)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -148,7 +148,7 @@ struct ConvergenceChart: View {
                 Text("青が水平")
                 Text("黄が高さ")
             }
-            .font(.system(size: 12, weight: .bold))
+            .font(SurveyType(12, .bold))
             .foregroundStyle(SurveyColor.muted)
         }
         .accessibilityLabel("置いてからの累積平均のずれ")
@@ -170,7 +170,7 @@ struct CorrectionStatusBar: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let age = correction.age(at: context.date)
             Text(line(age))
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(age.stale ? SurveyColor.yellow : SurveyColor.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)

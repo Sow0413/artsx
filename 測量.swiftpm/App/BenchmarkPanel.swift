@@ -8,12 +8,12 @@ struct BenchmarkHint: View {
 
     var body: some View {
         Text(message)
-            .font(.system(size: 14, weight: .semibold))
+            .font(SurveyType(14, .semibold))
             .foregroundStyle(notice == nil ? SurveyColor.muted : SurveyColor.amber)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(SurveyColor.card.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var message: String {
@@ -37,7 +37,7 @@ struct BenchmarkCard: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("三角点で検証")
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             if field.isBenchmarkRunning, let recorder = field.benchmark {
                 running(recorder)
@@ -50,7 +50,7 @@ struct BenchmarkCard: View {
         .foregroundStyle(SurveyColor.text)
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SurveyColor.card.opacity(0.96), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(SurveyColor.line, lineWidth: 1)
@@ -60,19 +60,19 @@ struct BenchmarkCard: View {
     private func ready(_ point: ControlPoint) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(pointTitle(point))
-                .font(.system(size: 22, weight: .heavy))
+                .font(SurveyType(22, .heavy))
             Text(CoordinateText.latitude(point.latitudeDegrees) + "  " + CoordinateText.longitude(point.longitudeDegrees))
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                .font(SurveyType(16, .bold, mono: true))
             Text(heightLine(point))
-                .font(.system(size: 16, weight: .semibold))
+                .font(SurveyType(16, .semibold))
             if !point.sourceNote.isEmpty {
                 Text(point.sourceNote)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(SurveyType(13, .medium))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text("毎回、置き直して向きを変えます。")
-                .font(.system(size: 14, weight: .semibold))
+                .font(SurveyType(14, .semibold))
                 .foregroundStyle(SurveyColor.muted)
             HStack(spacing: 8) {
                 ForEach([1, 3, 5], id: \.self) { count in
@@ -80,10 +80,10 @@ struct BenchmarkCard: View {
                         field.plannedRounds = count
                     } label: {
                         Text("\(count)回")
-                            .font(.system(size: 16, weight: .heavy))
-                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .font(SurveyType(16, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                             .background(field.plannedRounds == count ? SurveyColor.blue : SurveyColor.background)
-                            .foregroundStyle(SurveyColor.text)
+                            .foregroundStyle(field.plannedRounds == count ? SurveyColor.onAccent : SurveyColor.text)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -95,10 +95,10 @@ struct BenchmarkCard: View {
                         field.benchmarkDurationSeconds = seconds
                     } label: {
                         Text(BenchmarkPlan.durationTitle(seconds))
-                            .font(.system(size: 16, weight: .heavy))
-                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .font(SurveyType(16, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                             .background(field.benchmarkDurationSeconds == seconds ? SurveyColor.blue : SurveyColor.background)
-                            .foregroundStyle(SurveyColor.text)
+                            .foregroundStyle(field.benchmarkDurationSeconds == seconds ? SurveyColor.onAccent : SurveyColor.text)
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                     .buttonStyle(.plain)
@@ -107,17 +107,17 @@ struct BenchmarkCard: View {
             HStack(spacing: 8) {
                 Button(action: field.startBenchmark) {
                     Text("記録を始める")
-                        .font(.system(size: 18, weight: .heavy))
-                        .frame(maxWidth: .infinity, minHeight: 56)
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                         .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.text)
+                        .foregroundStyle(SurveyColor.onAccent)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 Button(action: field.dismissBenchmark) {
                     Text("閉じる")
-                        .font(.system(size: 18, weight: .heavy))
-                        .frame(minWidth: 88, minHeight: 56)
+                        .font(SurveyType(18, .heavy))
+                        .frame(minWidth: 88, minHeight: OutdoorContrast.primaryPoints)
                         .background(SurveyColor.background)
                         .foregroundStyle(SurveyColor.text)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -130,18 +130,18 @@ struct BenchmarkCard: View {
     private func running(_ recorder: BenchmarkRecorder) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(recorder.point.name)
-                .font(.system(size: 22, weight: .heavy))
+                .font(SurveyType(22, .heavy))
             Text("\(field.rounds.count + 1) / \(field.plannedRounds) 回")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             Text("\(recorder.samples.count) / \(recorder.plan.expectedCount) 点")
-                .font(.system(size: 28, weight: .heavy, design: .monospaced))
+                .font(SurveyType(28, .heavy, mono: true))
             Text("1秒に1点。\(BenchmarkPlan.durationTitle(recorder.plan.durationSeconds))で止まります。")
-                .font(.system(size: 15, weight: .semibold))
+                .font(SurveyType(15, .semibold))
                 .foregroundStyle(SurveyColor.muted)
             Button(action: field.cancelBenchmark) {
                 Text("中止")
-                    .font(.system(size: 18, weight: .heavy))
+                    .font(SurveyType(18, .heavy))
                     .frame(maxWidth: .infinity, minHeight: 56)
                     .background(SurveyColor.background)
                     .foregroundStyle(SurveyColor.text)

@@ -179,17 +179,17 @@ struct FallBanner: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(fall.disclaimer)
-                .font(.system(size: 12, weight: .heavy))
+                .font(SurveyType(12, .heavy))
                 .foregroundStyle(fall.phase == .awaitingCancel ? Color.white : SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel(fall.disclaimer)
             if fall.phase == .awaitingCancel {
                 HStack(spacing: 12) {
                     Text("\(fall.kind?.label ?? "転倒")？ \(fall.countdown)秒")
-                        .font(.system(size: 22, weight: .black))
+                        .font(SurveyType(22, .black))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button("大丈夫", action: onCancel)
-                        .font(.system(size: 20, weight: .black))
+                        .font(SurveyType(20, .black))
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -199,14 +199,14 @@ struct FallBanner: View {
                 }
             } else if let incoming {
                 Text(incoming)
-                    .font(.system(size: 28, weight: .black))
+                    .font(SurveyType(28, .black))
                     .minimumScaleFactor(0.5)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel(incoming)
             } else if !fall.enabled {
                 Text("転倒検知はオフ")
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.muted)
             }
         }

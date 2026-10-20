@@ -118,19 +118,19 @@ struct DrawingTabView: View {
             if let progress = drawing.importProgress {
                 VStack(spacing: 10) {
                     Text(progress.label)
-                        .font(.system(size: 16, weight: .heavy))
+                        .font(SurveyType(16, .heavy))
                         .foregroundStyle(SurveyColor.text)
                     ProgressView(value: progress.fraction)
                         .tint(SurveyColor.blue)
                         .frame(maxWidth: 280)
                     Text("解析が終わる前から、プロジェクトは使えます。")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
                 .padding(24)
             } else if drawing.document == nil {
                 Text(drawing.project == nil ? "プロジェクトを作って、DXF か SFC を読み込みます。" : "DXF か SFC を読み込むと、ここに図面が出ます。")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .multilineTextAlignment(.center)
                     .padding(24)
@@ -144,13 +144,13 @@ struct DrawingTabView: View {
                 projectSection
                 if let message = drawing.message {
                     Text(message)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(SurveyType(14, .semibold))
                         .foregroundStyle(SurveyColor.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if let warning = drawing.warning?.message {
                     Text(warning)
-                        .font(.system(size: 14, weight: .heavy))
+                        .font(SurveyType(14, .heavy))
                         .foregroundStyle(SurveyColor.amber)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -174,7 +174,7 @@ struct DrawingTabView: View {
     private var stationSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("測点")
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             HStack {
                 TextField("間隔 m", text: $stationIntervalDraft)
@@ -195,11 +195,11 @@ struct DrawingTabView: View {
             .buttonStyle(SurveyPlainButton())
             if let line = drawing.stationLine {
                 Text("\(line.name)　\(line.zone)系　\(String(format: "%.0f", abs(line.lengthMeters)))m　間隔 \(String(format: "%g", line.intervalMeters))m　起点 No.\(line.originStation)")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(SurveyType(12, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             } else {
                 Text("図面の線をタップして中心線にするか、座標簿の No. から点列を作ります。")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(SurveyType(12, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
         }
@@ -208,7 +208,7 @@ struct DrawingTabView: View {
     private var machineSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("作業半径（腕の長さの目安）")
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             Picker("機種", selection: presetBinding) {
                 Text("手入力").tag(Optional<String>.none)
@@ -226,7 +226,7 @@ struct DrawingTabView: View {
                     .buttonStyle(SurveyPlainButton())
             }
             Text("地図と図面に、現在地を中心にした円を描きます。")
-                .font(.system(size: 12, weight: .semibold))
+                .font(SurveyType(12, .semibold))
                 .foregroundStyle(SurveyColor.muted)
         }
     }
@@ -234,7 +234,7 @@ struct DrawingTabView: View {
     private var eyeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("視線高")
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             HStack {
                 TextField("視線高 m", text: $eyeDraft)
@@ -251,12 +251,12 @@ struct DrawingTabView: View {
             .pickerStyle(.menu)
             .tint(SurveyColor.text)
             Toggle("端末を目の高さで持つ", isOn: phoneAtEyesBinding)
-                .font(.system(size: 15, weight: .semibold))
+                .font(SurveyType(15, .semibold))
                 .tint(SurveyColor.amber)
             Text(drawing.phoneAtEyes
                 ? "下がりは、今の高さから計画高を引いた値です。0.1m。"
                 : "端末を\(drawing.sightDatum.label)に置いた高さへ、視線高を足してから計画高を引きます。")
-                .font(.system(size: 12, weight: .semibold))
+                .font(SurveyType(12, .semibold))
                 .foregroundStyle(SurveyColor.muted)
         }
     }
@@ -277,7 +277,7 @@ struct DrawingTabView: View {
     private var proximitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("接近")
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             Picker("この端末", selection: roleBinding) {
                 ForEach(CrewRole.allCases, id: \.self) { role in
@@ -314,7 +314,7 @@ struct DrawingTabView: View {
                     .buttonStyle(SurveyPlainButton())
             }
             Text("半径＋この距離の手前で、先に声をかけます。人が半径＋余裕に入ると赤。注意の距離以内は黄。\(SafetyNotice.text)")
-                .font(.system(size: 12, weight: .semibold))
+                .font(SurveyType(12, .semibold))
                 .foregroundStyle(SurveyColor.muted)
         }
     }
@@ -322,10 +322,10 @@ struct DrawingTabView: View {
     private var fallSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("転倒・衝撃")
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             Toggle("加速度で検知する", isOn: fallEnabled)
-                .font(.system(size: 15, weight: .semibold))
+                .font(SurveyType(15, .semibold))
                 .tint(SurveyColor.amber)
             HStack {
                 TextField("衝撃の閾値 g", text: $impactDraft)
@@ -349,11 +349,11 @@ struct DrawingTabView: View {
             }
             if !fallNote.isEmpty {
                 Text(fallNote)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(SurveyType(12, .semibold))
                     .foregroundStyle(SurveyColor.amber)
             }
             Text("強い加速度のあと、動きが止まっていれば10秒だけ取り消せます。取り消さなければ近くへ方向つきで知らせ、記録の種類は転倒か衝撃になります。\(FallCall.disclaimer)")
-                .font(.system(size: 12, weight: .semibold))
+                .font(SurveyType(12, .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -376,11 +376,11 @@ struct DrawingTabView: View {
     private var projectSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("プロジェクト")
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             if drawing.projects.isEmpty {
                 Text("まだありません。")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(SurveyType(15, .semibold))
                     .foregroundStyle(SurveyColor.text)
             } else {
                 Picker("プロジェクト", selection: projectBinding) {
@@ -418,7 +418,7 @@ struct DrawingTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(drawing.fileName ?? "図面なし")
-                    .font(.system(size: 16, weight: .heavy))
+                    .font(SurveyType(16, .heavy))
                     .foregroundStyle(SurveyColor.text)
                     .lineLimit(1)
                 Spacer()
@@ -427,27 +427,27 @@ struct DrawingTabView: View {
             }
             if let progress = drawing.importProgress {
                 Text(progress.label)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
             if let document = drawing.document, !document.unsupportedSummary.isEmpty {
                 Text("読めない要素: \(document.unsupportedSummary)")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.yellow)
             }
             if let unit = drawing.document?.unitWarning {
                 Text(unit)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.yellow)
             }
             if drawing.overlayCapped {
                 Text("線が多すぎるので、地図への重ねは途中までです。図面の画面は、見えている範囲だけ描きます。")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
             if let note = drawing.placementNote {
                 Text(note)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.yellow)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -490,11 +490,11 @@ struct DrawingTabView: View {
             .tint(SurveyColor.text)
             if let document = drawing.document, document.has(.background) {
                 Toggle("背景を表示", isOn: roleBinding(.background))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(SurveyType(15, .semibold))
                     .tint(SurveyColor.amber)
                 if document.has(.design) {
                     Toggle("設計を表示", isOn: roleBinding(.design))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(SurveyType(15, .semibold))
                         .tint(SurveyColor.amber)
                 }
             }
@@ -502,11 +502,11 @@ struct DrawingTabView: View {
                 DisclosureGroup("レイヤ \(layers.filter(\.isVisible).count)/\(layers.count)") {
                     ForEach(layers) { layer in
                         Toggle(layerTitle(layer), isOn: layerBinding(layer))
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(SurveyType(15, .semibold))
                             .tint(SurveyColor.amber)
                     }
                 }
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.text)
             }
             if drawing.document?.has(.background) == true {
@@ -527,10 +527,10 @@ struct DrawingTabView: View {
     private var backgroundSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("背景と地理院ベクトル")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.text)
             Text("背景の線を基盤地図の道路縁・建物と比べます。合えばそのまま使えます。ずれていれば、向きと距離を出して合わせます。合わない図面もあります。")
-                .font(.system(size: 13, weight: .semibold))
+                .font(SurveyType(13, .semibold))
                 .foregroundStyle(SurveyColor.muted)
             Button(drawing.backgroundBusy ? "照合しています" : "背景を照合") {
                 drawing.checkBackground()
@@ -539,13 +539,13 @@ struct DrawingTabView: View {
             .disabled(drawing.backgroundBusy)
             if let verdict = drawing.backgroundVerdict {
                 Text(verdict.message)
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(SurveyType(14, .heavy))
                     .foregroundStyle(verdict.suggestsShift ? SurveyColor.amber : SurveyColor.text)
                 if verdict.suggestsShift {
                     Button("このずれで合わせる") { drawing.applyBackgroundAlignment() }
                         .buttonStyle(SurveyPlainButton())
                     Text(AlignmentAccuracy.stakeoutNotice)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
             }
@@ -555,22 +555,22 @@ struct DrawingTabView: View {
     private var alignmentSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("地図に合わせる")
-                .font(.system(size: 16, weight: .heavy))
+                .font(SurveyType(16, .heavy))
                 .foregroundStyle(SurveyColor.text)
             Text("図面の点と、地図・現在地・座標簿の点を2組以上対応づけます。3組以上は点ごとの残差を出します。")
-                .font(.system(size: 13, weight: .semibold))
+                .font(SurveyType(13, .semibold))
                 .foregroundStyle(SurveyColor.muted)
             Toggle("縮尺を 1 に固定（図面の 1 が 1 m のとき）", isOn: lockBinding)
-                .font(.system(size: 14, weight: .semibold))
+                .font(SurveyType(14, .semibold))
                 .tint(SurveyColor.amber)
             if drawing.pick == .drawingVertex {
                 Text("図面の点をタップしてください。")
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(SurveyType(14, .heavy))
                     .foregroundStyle(SurveyColor.amber)
             }
             if drawing.pending != nil {
                 Text("対応する場所を選んでください。")
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(SurveyType(14, .heavy))
                     .foregroundStyle(SurveyColor.amber)
             }
             HStack {
@@ -589,7 +589,7 @@ struct DrawingTabView: View {
             }
             if !field.controlPoints.isEmpty, drawing.pending != nil {
                 Text("座標簿")
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.muted)
                 ForEach(nearestControls) { point in
                     Button(point.name) {
@@ -607,33 +607,33 @@ struct DrawingTabView: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(index + 1). \(pair.label)（\(kindLabel(pair.kind))）")
-                            .font(.system(size: 14, weight: .heavy))
+                            .font(SurveyType(14, .heavy))
                         Text(String(format: "図面 X %.3f  Y %.3f", pair.drawingX, pair.drawingY))
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(SurveyType(12, .semibold))
                             .foregroundStyle(SurveyColor.muted)
                         if drawing.pairs.count >= 3, let residual = drawing.fit?.residualsMeters[safe: index] {
                             Text("残差 \(formatMeters(residual))")
-                                .font(.system(size: 13, weight: .heavy))
+                                .font(SurveyType(13, .heavy))
                                 .foregroundStyle(residual > 1 ? SurveyColor.yellow : SurveyColor.text)
                         }
                     }
                     Spacer()
                     Button("外す") { drawing.removePair(pair.id) }
-                        .font(.system(size: 13, weight: .heavy))
+                        .font(SurveyType(13, .heavy))
                         .foregroundStyle(SurveyColor.red)
                 }
             }
             if let fit = drawing.fit, drawing.pairs.count >= 2 {
                 Text("残差の二乗平均 \(formatMeters(fit.rmsMeters))　縮尺 \(String(format: "%.5f", fit.transform.scale))　回転 \(String(format: "%.2f°", fit.transform.rotationDegrees))")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.text)
             }
             if drawing.pairs.count >= 2, drawing.accuracy == .mapGrade {
                 Text(AlignmentAccuracy.stakeoutNotice)
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(SurveyType(14, .heavy))
                     .foregroundStyle(SurveyColor.amber)
                 Text("この合わせの札は \(AlignmentAccuracy.mapGrade.rawValue) です。")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
             HStack {
@@ -644,7 +644,7 @@ struct DrawingTabView: View {
             }
             if !drawing.alignments.isEmpty {
                 Text("保存した合わせ")
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.muted)
                 ForEach(drawing.alignments) { record in
                     Button("\(record.name) 版\(record.version)　\(record.accuracyTag.rawValue)") {
@@ -660,21 +660,21 @@ struct DrawingTabView: View {
         VStack(alignment: .leading, spacing: 4) {
             if let inspection = drawing.inspection {
                 Text(inspection.snapLabel.map { "タップした\($0)" } ?? "タップした点")
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.muted)
                 Text(String(format: "図面 X %.3f　Y %.3f", inspection.drawingX, inspection.drawingY))
-                    .font(.system(size: 15, weight: .heavy))
+                    .font(SurveyType(15, .heavy))
                 if let east = inspection.eastingMeters, let north = inspection.northingMeters {
                     Text("\(drawing.zone)系　東 \(StakeoutText.meters(east, precision: stakeoutPrecision))　北 \(StakeoutText.meters(north, precision: stakeoutPrecision))")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(SurveyType(14, .semibold))
                 }
                 if let latitude = inspection.latitudeDegrees, let longitude = inspection.longitudeDegrees {
                     Text("\(CoordinateText.latitude(latitude)), \(CoordinateText.longitude(longitude))")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(SurveyType(14, .semibold))
                 }
                 if stakeoutPrecision == .centimeters {
                     Text("座標簿で合わせてあるので、cm で出します。")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
                 Button("この線を中心線にする") {
@@ -682,17 +682,17 @@ struct DrawingTabView: View {
                 }
                 .buttonStyle(SurveyPlainButton())
                 Text("追加距離を張り、現在地を No.23+5.0m 左 3.2m のように出します。iPhone の精度で足ります。")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                 Text("この点がオペの目標です。作業半径の内と外を色で出します。")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                 if let distance = inspection.distanceMeters, let azimuth = inspection.azimuthDegrees {
                     Text("現在地から \(StakeoutText.meters(distance, precision: stakeoutPrecision))、北から時計回り \(String(format: "%.1f°", azimuth))")
-                        .font(.system(size: 15, weight: .heavy))
+                        .font(SurveyType(15, .heavy))
                 } else {
                     Text("現在地が無いので、距離と方向は出せません。")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(SurveyType(14, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
             }
@@ -704,12 +704,12 @@ struct DrawingTabView: View {
         VStack(alignment: .leading, spacing: 6) {
             if suggestion.matchesDrawingNumbers, let best = suggestion.fromDrawingNumbers.first {
                 Text("対応点の数値は \(best.zone)系（\(best.axis.label)）に載っています。ずれ \(formatMeters(best.rmsMeters))。")
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(SurveyType(14, .heavy))
                     .foregroundStyle(SurveyColor.text)
                 candidateButtons(suggestion.fromDrawingNumbers, title: "数値の合う系", applyAxis: true)
             } else {
                 Text("図面の数値だけでは系が決まりません。対応点の場所から合いそうな系を出します。")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.text)
                 candidateButtons(suggestion.forThisPlace, title: "この場所の系", applyAxis: false)
             }
@@ -719,7 +719,7 @@ struct DrawingTabView: View {
     private func candidateButtons(_ candidates: [ZoneCandidate], title: String, applyAxis: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 12, weight: .heavy))
+                .font(SurveyType(12, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             ForEach(Array(candidates.prefix(3))) { candidate in
                 Button(applyAxis
@@ -931,13 +931,16 @@ struct DrawingTabView: View {
 struct SurveyPlainButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 15, weight: .heavy))
+            .font(SurveyType(17, .heavy))
             .padding(.horizontal, 12)
-            .frame(minHeight: 40)
-            .background(SurveyColor.card)
+            .frame(minHeight: OutdoorContrast.primaryPoints)
+            .background(configuration.isPressed ? SurveyColor.pressed : SurveyColor.card)
             .foregroundStyle(SurveyColor.text)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .opacity(configuration.isPressed ? 0.7 : 1)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+            )
     }
 }
 

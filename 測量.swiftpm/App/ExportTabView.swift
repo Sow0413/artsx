@@ -10,48 +10,59 @@ struct ExportTabView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("出す")
-                    .font(.system(size: 28, weight: .heavy))
+                    .font(SurveyType(28, .heavy))
                 ExtraEntryButton {
                     field.showsExtras = true
                 }
                 Text("無線、接近、転倒、SOS、災害、中継、統計はおまけです。既定ではオフで、測量の画面には出ません。")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("受取手が今受け取れる形だけ出します。点群と3Dは点群フォルダに保存するだけで、ここには出しません。")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(CoordinateDelivery.pointCloudNote)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 filters
                 let preview = field.bookPreview()
                 Text("\(preview.count) 点")
-                    .font(.system(size: 18, weight: .heavy))
+                    .font(SurveyType(18, .heavy))
                 names(preview.sample)
                 ForEach(DeliveryFormat.allCases) { format in
                     Button {
                         field.exportDelivery(format)
                     } label: {
                         Text(format.label)
-                            .font(.system(size: 18, weight: .heavy))
-                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                             .background(SurveyColor.blue)
-                            .foregroundStyle(SurveyColor.text)
+                            .foregroundStyle(SurveyColor.onAccent)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
                 if let message = field.exportMessage {
                     Text(message)
-                        .font(.system(size: 15, weight: .heavy))
+                        .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.amber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let url = field.exportURL {
+                    ShareLink(item: url) {
+                        Text("共有シートで渡す")
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                            .background(SurveyColor.blue)
+                            .foregroundStyle(SurveyColor.onAccent)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
                 Text("系\(field.drawing.zone)の平面直角座標で書きます。JGD2024 の元期補正は、まだ掛けていません。")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -65,9 +76,9 @@ struct ExportTabView: View {
     private var filters: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("座標簿の絞り込み")
-                .font(.system(size: 18, weight: .heavy))
+                .font(SurveyType(18, .heavy))
             Text("条件はすべて同時に効きます。空欄は無視します。")
-                .font(.system(size: 13, weight: .semibold))
+                .font(SurveyType(13, .semibold))
                 .foregroundStyle(SurveyColor.muted)
             fieldRow("点名の頭") {
                 TextField("T", text: prefixBinding)
@@ -112,20 +123,20 @@ struct ExportTabView: View {
             }
             if let bounds = field.bookQuery.bounds {
                 Text(boundsLabel(bounds))
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(SurveyType(13, .semibold, mono: true))
                     .fixedSize(horizontal: false, vertical: true)
                 Button("範囲を外す") {
                     field.bookQuery.bounds = nil
                 }
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.amber)
             }
             HStack(spacing: 10) {
                 Button("地図で範囲を囲む") {
                     field.beginBookEnclosure()
                 }
-                .font(.system(size: 15, weight: .heavy))
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .font(SurveyType(15, .heavy))
+                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                 .background(SurveyColor.card)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 Button("条件を消す") {
@@ -133,8 +144,8 @@ struct ExportTabView: View {
                     importedDay = ""
                     field.clearBookFilters()
                 }
-                .font(.system(size: 15, weight: .heavy))
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .font(SurveyType(15, .heavy))
+                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                 .background(SurveyColor.card)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
@@ -149,12 +160,12 @@ struct ExportTabView: View {
         VStack(alignment: .leading, spacing: 4) {
             if shown.isEmpty {
                 Text("合う点がありません。")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(SurveyType(15, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             } else {
                 ForEach(Array(shown), id: \.name) { entry in
                     Text(entryLine(entry))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(SurveyType(14, .semibold))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -164,7 +175,7 @@ struct ExportTabView: View {
     private func fieldRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 13, weight: .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             content()
                 .textFieldStyle(.roundedBorder)

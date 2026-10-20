@@ -11,22 +11,22 @@ struct IncidentStatsSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("この現場のヒヤリと接近です。全プロジェクトを足すのは P510 です。")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(SurveyType(15, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(SafetyNotice.text)
-                        .font(.system(size: 13, weight: .heavy))
+                        .font(SurveyType(13, .heavy))
                         .foregroundStyle(SurveyColor.amber)
                     if field.extras.stats {
                     Toggle("地図にヒートマップ", isOn: $field.showIncidentHeat)
-                        .font(.system(size: 16, weight: .heavy))
+                        .font(SurveyType(16, .heavy))
                     Toggle("個人名を役割にする（既定）", isOn: $field.anonymizeStats)
-                        .font(.system(size: 16, weight: .heavy))
+                        .font(SurveyType(16, .heavy))
                         .onChange(of: field.anonymizeStats) { _, _ in
                             field.reloadIncidentStats()
                         }
                     Text("ヒヤリの件数は、既定で役割ごとにまとめます。個人名は出しません。")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(SurveyType(15, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     weatherPicker
@@ -34,14 +34,14 @@ struct IncidentStatsSheet: View {
                     countBlock("時間帯別", IncidentStats.countsByTime(field.incidentStatRows))
                     if field.incidentStatRows.isEmpty {
                         Text("確定した記録はまだありません。")
-                            .font(.system(size: 15, weight: .heavy))
+                            .font(SurveyType(15, .heavy))
                             .foregroundStyle(SurveyColor.muted)
                     } else {
                         Text("直近")
-                            .font(.system(size: 18, weight: .heavy))
+                            .font(SurveyType(18, .heavy))
                         ForEach(Array(field.incidentStatRows.suffix(6).reversed()), id: \.recordID) { row in
                             Text("\(row.timeBand)　\(row.workKind)　\(row.level)　\(row.party)")
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(SurveyType(15, .semibold))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.7)
                         }
@@ -49,7 +49,7 @@ struct IncidentStatsSheet: View {
                     Button("集計CSVを書く") {
                         field.exportIncidentStats()
                     }
-                    .font(.system(size: 18, weight: .black))
+                    .font(SurveyType(18, .black))
                     .foregroundStyle(Color.white)
                     .frame(maxWidth: .infinity, minHeight: 52)
                     .background(SurveyColor.blue)
@@ -57,20 +57,20 @@ struct IncidentStatsSheet: View {
                     }
                     if field.extras.accidentReport {
                     Text("対外説明")
-                        .font(.system(size: 18, weight: .heavy))
+                        .font(SurveyType(18, .heavy))
                     Text("確定した記録から、労基署や警察に見せるPDFを作ります。労働者死傷病報告の様式は作らず、提出もしません。氏名を出すか、関係者番号にするかを選べます。")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(SurveyType(15, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     if field.sealedIncidents.isEmpty {
                         Text("確定した記録はまだありません。")
-                            .font(.system(size: 15, weight: .heavy))
+                            .font(SurveyType(15, .heavy))
                             .foregroundStyle(SurveyColor.muted)
                     } else {
                         ForEach(field.sealedIncidents) { item in
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(item.title)
-                                    .font(.system(size: 16, weight: .heavy))
+                                    .font(SurveyType(16, .heavy))
                                 HStack(spacing: 8) {
                                     reportButton("氏名を出してPDF") {
                                         field.exportAccidentReport(item.id, names: .shown)
@@ -88,7 +88,7 @@ struct IncidentStatsSheet: View {
                     }
                     if let message = field.statMessage {
                         Text(message)
-                            .font(.system(size: 14, weight: .heavy))
+                            .font(SurveyType(14, .heavy))
                             .foregroundStyle(SurveyColor.amber)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -111,7 +111,7 @@ struct IncidentStatsSheet: View {
     private var weatherPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("天候")
-                .font(.system(size: 18, weight: .heavy))
+                .font(SurveyType(18, .heavy))
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 8)], alignment: .leading, spacing: 8) {
                 weatherChip("", "未設定")
                 ForEach(IncidentWeather.allCases, id: \.rawValue) { item in
@@ -127,7 +127,7 @@ struct IncidentStatsSheet: View {
             field.drawing.setWeather(value)
             field.reloadIncidentStats()
         }
-        .font(.system(size: 15, weight: .heavy))
+        .font(SurveyType(15, .heavy))
         .foregroundStyle(selected ? Color.white : SurveyColor.text)
         .frame(maxWidth: .infinity, minHeight: 36)
         .background(selected ? SurveyColor.blue : SurveyColor.card)
@@ -136,7 +136,7 @@ struct IncidentStatsSheet: View {
 
     private func reportButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(title, action: action)
-            .font(.system(size: 15, weight: .black))
+            .font(SurveyType(15, .black))
             .foregroundStyle(Color.white)
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(SurveyColor.red)
@@ -146,10 +146,10 @@ struct IncidentStatsSheet: View {
     private func countBlock(_ title: String, _ rows: [IncidentStatCount]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 18, weight: .heavy))
+                .font(SurveyType(18, .heavy))
             if rows.isEmpty {
                 Text("0件")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(SurveyType(15, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             } else {
                 ForEach(rows, id: \.key) { row in
@@ -158,7 +158,7 @@ struct IncidentStatsSheet: View {
                         Spacer()
                         Text("\(row.count)")
                     }
-                    .font(.system(size: 17, weight: .heavy))
+                    .font(SurveyType(17, .heavy))
                 }
             }
         }

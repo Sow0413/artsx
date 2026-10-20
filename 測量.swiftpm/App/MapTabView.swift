@@ -11,14 +11,17 @@ struct MapTabView: View {
                 if let station = field.drawing.operatorGuide(at: field.workingReading.position)?.line,
                    field.drawing.stationLine != nil {
                     Text(station)
-                        .font(.system(size: 34, weight: .heavy))
+                        .font(SurveyType(34, .heavy))
                         .minimumScaleFactor(0.4)
                         .lineLimit(1)
                         .foregroundStyle(SurveyColor.text)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .padding(.horizontal, 12)
-                        .background(SurveyColor.card.opacity(0.94))
+                        .background(SurveyColor.card)
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(SurveyColor.line).frame(height: SurveyColor.stroke)
+                        }
                 }
                 if field.extras.proximity {
                     SafetyBanner(crew: field.crew) {
@@ -51,11 +54,11 @@ struct MapTabView: View {
                         Button(field.radio.spaceAudio ? "定位オン" : "定位") {
                             field.radio.setSpaceAudio(!field.radio.spaceAudio)
                         }
-                        .font(.system(size: 14, weight: .heavy))
+                        .font(SurveyType(14, .heavy))
                         .foregroundStyle(field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.text)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(SurveyColor.card.opacity(0.92))
+                        .background(SurveyColor.card)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
                     }
@@ -63,43 +66,43 @@ struct MapTabView: View {
                         Button("災害") {
                             field.showsDisaster = true
                         }
-                        .font(.system(size: 14, weight: .heavy))
+                        .font(SurveyType(14, .heavy))
                         .foregroundStyle(field.disasterMode ? Color.white : SurveyColor.text)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(field.disasterMode ? SurveyColor.red : SurveyColor.card.opacity(0.92))
+                        .background(field.disasterMode ? SurveyColor.red : SurveyColor.card)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     if field.extras.stats || field.extras.accidentReport {
                         Button(field.extras.stats ? "統計" : "事故報告") {
                             field.showsIncidentStats = true
                         }
-                        .font(.system(size: 14, weight: .heavy))
+                        .font(SurveyType(14, .heavy))
                         .foregroundStyle(SurveyColor.text)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(field.showIncidentHeat ? SurveyColor.red : SurveyColor.card.opacity(0.92))
+                        .background(field.showIncidentHeat ? SurveyColor.red : SurveyColor.card)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     Spacer()
                     Text(reachCaption)
-                        .font(.system(size: 13, weight: .heavy))
+                        .font(SurveyType(13, .heavy))
                         .foregroundStyle(SurveyColor.text)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(SurveyColor.card.opacity(0.92))
+                        .background(SurveyColor.card)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
                 .padding(.trailing, 12)
                 .padding(.top, 6)
                 if field.extras.disaster, field.disasterMode {
                     Text("災害派遣。圏外のまま、近くの端末へ中継します。")
-                        .font(.system(size: 13, weight: .heavy))
-                        .foregroundStyle(SurveyColor.text)
+                        .font(SurveyType(13, .heavy))
+                        .foregroundStyle(SurveyColor.onAccent)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(SurveyColor.redBackground.opacity(0.94))
+                        .background(SurveyColor.redBackground)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .padding(.horizontal, 12)
                         .padding(.top, 6)
@@ -188,22 +191,24 @@ struct MapTabView: View {
     private var enclosureBanner: some View {
         HStack(spacing: 12) {
             Text("見えている範囲で座標簿を絞る")
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button("この範囲") {
                 field.confirmBookEnclosure()
             }
-            .font(.system(size: 15, weight: .heavy))
+            .font(SurveyType(15, .heavy))
             .foregroundStyle(SurveyColor.green)
+            .frame(minHeight: OutdoorContrast.primaryPoints)
             Button("やめる") {
                 field.cancelBookEnclosure()
             }
-            .font(.system(size: 15, weight: .heavy))
-            .foregroundStyle(SurveyColor.amber)
+            .font(SurveyType(15, .heavy))
+            .foregroundStyle(SurveyColor.text)
+            .frame(minHeight: OutdoorContrast.primaryPoints)
         }
         .padding(12)
-        .background(SurveyColor.card.opacity(0.95))
+        .background(SurveyColor.card)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.top, 8)
@@ -212,17 +217,18 @@ struct MapTabView: View {
     private var mapPickBanner: some View {
         HStack(spacing: 12) {
             Text("図面の点に対応する場所をタップ")
-                .font(.system(size: 15, weight: .heavy))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button("戻る") {
                 field.cancelDrawingMapPick()
             }
-            .font(.system(size: 15, weight: .heavy))
-            .foregroundStyle(SurveyColor.amber)
+            .font(SurveyType(18, .heavy))
+            .foregroundStyle(SurveyColor.text)
+            .frame(minHeight: OutdoorContrast.primaryPoints)
         }
         .padding(12)
-        .background(SurveyColor.amberBackground.opacity(0.95))
+        .background(SurveyColor.amberBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.top, 8)
@@ -231,8 +237,12 @@ struct MapTabView: View {
     private var captureButton: some View {
         Button(action: field.captureObservation) {
             Text("この作業で点を残す")
-                .font(.system(size: 16, weight: .heavy))
-                .frame(maxWidth: .infinity, minHeight: 48)
+                .font(SurveyType(16, .heavy))
+                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                )
                 .background(SurveyColor.card)
                 .foregroundStyle(SurveyColor.text)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

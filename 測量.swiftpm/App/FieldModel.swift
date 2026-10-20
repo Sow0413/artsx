@@ -71,6 +71,7 @@ final class FieldModel: ObservableObject {
     @Published var bookQuery = CoordinateBookQuery()
     @Published var enclosingBook = false
     @Published private(set) var exportMessage: String?
+    @Published private(set) var exportURL: URL?
     private var epochWatch = EpochWatch()
 
     let tiles: TileStore
@@ -1532,6 +1533,7 @@ final class FieldModel: ObservableObject {
         let known = controlPoints
         let journal = journal
         exportMessage = "書き出しています。"
+        exportURL = nil
         DispatchQueue.global(qos: .userInitiated).async {
             let observations = journal.allObservations()
             let siteBook = journal.bookEntries()
@@ -1552,7 +1554,10 @@ final class FieldModel: ObservableObject {
                 )
             }
             guard !entries.isEmpty else {
-                DispatchQueue.main.async { self.exportMessage = "絞り込みに合う点がありません。" }
+                DispatchQueue.main.async {
+                    self.exportMessage = "絞り込みに合う点がありません。"
+                    self.exportURL = nil
+                }
                 return
             }
             let bytes = CoordinateDelivery.data(entries, format: format, zone: zone)
@@ -1561,10 +1566,14 @@ final class FieldModel: ObservableObject {
                 let url = folder.appendingPathComponent(format.filename)
                 try bytes.write(to: url, options: .atomic)
                 DispatchQueue.main.async {
+                    self.exportURL = url
                     self.exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
                 }
             } catch {
-                DispatchQueue.main.async { self.exportMessage = "書き出せませんでした。" }
+                DispatchQueue.main.async {
+                    self.exportURL = nil
+                    self.exportMessage = "書き出せませんでした。"
+                }
             }
         }
     }

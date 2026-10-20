@@ -42,13 +42,13 @@ struct SOSControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(SOSCall.disclaimer)
-                .font(.system(size: 12, weight: .heavy))
+                .font(SurveyType(12, .heavy))
                 .foregroundStyle(Color.white)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel(SOSCall.disclaimer)
             if let pointer = field.sosPointer {
                 Text(pointer.text)
-                    .font(.system(size: 30, weight: .black))
+                    .font(SurveyType(30, .black))
                     .minimumScaleFactor(0.45)
                     .lineLimit(2)
                     .foregroundStyle(Color.white)
@@ -56,7 +56,7 @@ struct SOSControl: View {
                 Button("向かう") {
                     field.respondSOS()
                 }
-                .font(.system(size: 20, weight: .black))
+                .font(SurveyType(20, .black))
                 .foregroundStyle(Color.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
@@ -66,7 +66,7 @@ struct SOSControl: View {
             }
             if field.sosActive, !field.sosHelpers.isEmpty {
                 Text(field.sosHelpers)
-                    .font(.system(size: 18, weight: .black))
+                    .font(SurveyType(18, .black))
                     .foregroundStyle(Color.white)
             }
             SOSSlide(active: field.sosActive) {
@@ -75,7 +75,7 @@ struct SOSControl: View {
             Button("iPhoneの緊急SOS") {
                 field.showsEmergencySOS = true
             }
-            .font(.system(size: 13, weight: .heavy))
+            .font(SurveyType(13, .heavy))
             .foregroundStyle(Color.white.opacity(0.9))
             .accessibilityLabel("iPhoneの緊急SOSを開く")
         }
@@ -100,13 +100,13 @@ struct SOSSlide: View {
             let travel = max(geo.size.width - 76, 1)
             ZStack(alignment: .leading) {
                 Text(active ? "スライドか長押しで止める" : "スライドか長押しで SOS")
-                    .font(.system(size: 16, weight: .black))
+                    .font(SurveyType(16, .black))
                     .foregroundStyle(Color.white.opacity(0.85))
                     .frame(maxWidth: .infinity)
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.white)
                     .frame(width: 68, height: 52)
-                    .overlay(Text("SOS").font(.system(size: 16, weight: .black)).foregroundStyle(SurveyColor.red))
+                    .overlay(Text("SOS").font(SurveyType(16, .black)).foregroundStyle(SurveyColor.red))
                     .offset(x: offset)
                     .gesture(
                         DragGesture(minimumDistance: 8)
@@ -148,20 +148,20 @@ struct EmergencySOSSheet: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
                 Text(SOSCall.disclaimer)
-                    .font(.system(size: 22, weight: .black))
+                    .font(SurveyType(22, .black))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(SOSCall.emergencyHint)
-                    .font(.system(size: 18, weight: .heavy))
+                    .font(SurveyType(18, .heavy))
                     .fixedSize(horizontal: false, vertical: true)
                 Text(SOSCall.criticalAlertNote)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(SurveyType(15, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("119に電話する") {
                     guard let url = URL(string: "tel:119") else { return }
                     UIApplication.shared.open(url)
                 }
-                .font(.system(size: 20, weight: .black))
+                .font(SurveyType(20, .black))
                 .foregroundStyle(Color.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 56)
@@ -180,7 +180,7 @@ struct EmergencySOSSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
+        .modifier(SurveyScheme())
     }
 }
 
@@ -193,10 +193,10 @@ struct SOSRim: View {
                 let point = rim(degrees, in: geo.size)
                 VStack(spacing: 4) {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 72, weight: .black))
+                        .font(SurveyType(72, .black))
                         .rotationEffect(.degrees(degrees))
                     Text(pointer.text)
-                        .font(.system(size: 26, weight: .black))
+                        .font(SurveyType(26, .black))
                         .minimumScaleFactor(0.45)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)

@@ -21,16 +21,16 @@ struct SafetyBanner: View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(crew.notice)
-                    .font(.system(size: 13, weight: .heavy))
+                    .font(SurveyType(13, .heavy))
                 Text(crew.statusLine)
-                    .font(.system(size: crew.worst == .clear ? 15 : 22, weight: .black))
+                    .font(crew.worst == .clear ? SurveyType(15, .black) : SurveyType(22, .black))
                     .minimumScaleFactor(0.6)
                     .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if let onHiyari {
                 Button("ヒヤリ", action: onHiyari)
-                    .font(.system(size: 16, weight: .black))
+                    .font(SurveyType(16, .black))
                     .foregroundStyle(Color.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -84,10 +84,10 @@ struct TalkRim: View {
                     let point = rim(degrees, in: geo.size)
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 64, weight: .black))
+                            .font(SurveyType(64, .black))
                             .rotationEffect(.degrees(degrees))
                         Text(pointer.text)
-                            .font(.system(size: 28, weight: .black))
+                            .font(SurveyType(28, .black))
                             .minimumScaleFactor(0.5)
                             .lineLimit(2)
                             .multilineTextAlignment(.center)
@@ -101,7 +101,7 @@ struct TalkRim: View {
                     .accessibilityLabel(pointer.reference.isEmpty ? pointer.text : "\(pointer.reference)、\(pointer.text)")
                 } else {
                     Text(pointer.text)
-                        .font(.system(size: 34, weight: .black))
+                        .font(SurveyType(34, .black))
                         .minimumScaleFactor(0.5)
                         .lineLimit(1)
                         .foregroundStyle(Color.white)
@@ -265,7 +265,7 @@ struct IncidentTray: View {
             VStack(alignment: .leading, spacing: 6) {
                 if let note = field.incidentNote {
                     Text(note)
-                        .font(.system(size: 13, weight: .heavy))
+                        .font(SurveyType(13, .heavy))
                         .foregroundStyle(SurveyColor.amber)
                         .lineLimit(2)
                         .minimumScaleFactor(0.7)
@@ -278,7 +278,7 @@ struct IncidentTray: View {
                                 field.noteAmbulance(id)
                             }
                         }
-                        .font(.system(size: 15, weight: .black))
+                        .font(SurveyType(15, .black))
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -287,7 +287,7 @@ struct IncidentTray: View {
                         Button(field.incidentRecordingMemo ? "録音中" : "音声メモ") {
                             field.toggleIncidentMemo()
                         }
-                        .font(.system(size: 15, weight: .black))
+                        .font(SurveyType(15, .black))
                         .foregroundStyle(Color.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -305,7 +305,7 @@ struct IncidentTray: View {
         #if canImport(PhotosUI)
         PhotosPicker(selection: $photo, matching: .images) {
             Text("写真")
-                .font(.system(size: 15, weight: .black))
+                .font(SurveyType(15, .black))
                 .foregroundStyle(Color.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)

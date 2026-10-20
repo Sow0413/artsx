@@ -15,6 +15,9 @@ struct SurveyMapView: UIViewRepresentable {
         map.showsUserLocation = false
         map.pointOfInterestFilter = .excludingAll
         map.isPitchEnabled = false
+        map.isZoomEnabled = true
+        map.isScrollEnabled = true
+        map.isRotateEnabled = true
         map.showsTraffic = false
         map.backgroundColor = SurveyUIColor.mapBackdrop
         context.coordinator.attach(field: field, map: map)
@@ -22,6 +25,10 @@ struct SurveyMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
+        map.isZoomEnabled = true
+        map.isScrollEnabled = true
+        map.isRotateEnabled = true
+        map.backgroundColor = SurveyUIColor.mapBackdrop
         context.coordinator.attach(field: field, map: map)
         context.coordinator.update(
             map: map,
@@ -434,16 +441,22 @@ struct SurveyMapView: UIViewRepresentable {
             }
             if let line = overlay as? MKPolyline {
                 let renderer = MKPolylineRenderer(polyline: line)
-                renderer.strokeColor = SurveyUIColor.amber
-                renderer.lineWidth = 1.5
+                renderer.strokeColor = SurveyUIColor.ink
+                renderer.lineWidth = SurveyColor.stroke
                 return renderer
             }
             if let circle = overlay as? MKCircle {
                 let renderer = MKCircleRenderer(circle: circle)
                 let color = tone.circle
-                renderer.fillColor = color.withAlphaComponent(tone == .green ? 0.30 : 0.22)
-                renderer.strokeColor = color
-                renderer.lineWidth = 2
+                if SurveyColor.outdoor {
+                    renderer.fillColor = .clear
+                    renderer.strokeColor = color
+                    renderer.lineWidth = SurveyColor.stroke
+                } else {
+                    renderer.fillColor = color.withAlphaComponent(tone == .green ? 0.30 : 0.22)
+                    renderer.strokeColor = color
+                    renderer.lineWidth = 2
+                }
                 return renderer
             }
             return MKOverlayRenderer(overlay: overlay)
