@@ -117,6 +117,8 @@ struct LocationPanel: View {
     var note: String? = nil
     var statureNotice: String? = nil
     var onStature: (() -> Void)? = nil
+    var showsLevel = false
+    var levelTilt: Double? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -146,6 +148,9 @@ struct LocationPanel: View {
                     .buttonStyle(.plain)
                     .disabled(onStature == nil)
                 }
+                if showsLevel {
+                    LevelBubble(tiltRadians: levelTilt)
+                }
                 if let note {
                     Text(note)
                         .font(SurveyType(15, .heavy))
@@ -169,6 +174,9 @@ struct LocationPanel: View {
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
+                if showsLevel {
+                    LevelBubble(tiltRadians: levelTilt)
+                }
             }
         }
         .foregroundStyle(SurveyColor.text)

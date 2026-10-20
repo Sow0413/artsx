@@ -142,13 +142,39 @@ final class StatureTests: XCTestCase {
         XCTAssertEqual(record?.antennaAlongUpMeters ?? -1, 0.06, accuracy: 1e-12)
         XCTAssertEqual(record?.groundHeightMeters ?? 0, 12.4 - expected, accuracy: 1e-9)
         XCTAssertEqual(record?.screenLabel, "身長補正 −1.48m")
-        XCTAssertEqual(record?.sightNote, "傾き 30.0°、目までの距離 0.35m（既定）、アンテナ差 0.06m")
+        XCTAssertEqual(record?.eyeLevel, false)
+        XCTAssertEqual(record?.dropMeters ?? -1, 0.175, accuracy: 1e-12)
+        XCTAssertEqual(StatureMath.dropLabel(record?.dropMeters ?? 0), "下がり 0.18m")
+        XCTAssertEqual(record?.sightNote, "傾き 30.0°、目までの距離 0.35m（既定）、下がり 0.18m、アンテナ差 0.06m")
         print("SURVEY STATURE \(record?.screenLabel ?? "") \(record?.sightNote ?? "")")
 
         let vertical = SightSample(tiltRadians: 0, eyeDistanceMeters: 0.35, distanceMeasured: false, antennaAlongUpMeters: 0.06)
         XCTAssertEqual(StatureMath.holdMeters(eyeHeight: 1.60, sight: vertical) ?? -1, 1.66, accuracy: 1e-12)
         let flat = SightSample(tiltRadians: .pi / 2, eyeDistanceMeters: 0.35, distanceMeasured: true, antennaAlongUpMeters: 0.06)
         XCTAssertEqual(StatureMath.holdMeters(eyeHeight: 1.60, sight: flat) ?? -1, 1.25, accuracy: 1e-12)
+
+        let levelTilt = StatureMath.levelToleranceRadians
+        XCTAssertTrue(StatureMath.isEyeLevel(levelTilt))
+        XCTAssertTrue(StatureMath.isEyeLevel(-levelTilt))
+        XCTAssertFalse(StatureMath.isEyeLevel(levelTilt + 0.01 * .pi / 180))
+        XCTAssertEqual(StatureMath.dropBelowEye(tiltRadians: levelTilt, eyeDistanceMeters: 0.35), 0, accuracy: 1e-12)
+        let level = SightSample(tiltRadians: 0.5 * .pi / 180, eyeDistanceMeters: 0.35, distanceMeasured: false, antennaAlongUpMeters: 0.06)
+        let levelRecord = StatureMath.record(profile: profile, deviceHeight: 12.4, sight: level)
+        XCTAssertEqual(levelRecord?.eyeLevel, true)
+        XCTAssertEqual(levelRecord?.holdTitle, "目線水平")
+        XCTAssertEqual(levelRecord?.holdMeters ?? -1, 1.66, accuracy: 1e-12)
+        XCTAssertEqual(levelRecord?.dropMeters ?? -1, 0, accuracy: 1e-12)
+        XCTAssertEqual(StatureMath.notice(profile: profile, stage: .iphone, receiver: .iphoneGPS, sight: level), "身長補正 −1.66m　目線水平")
+        let levelLines = ObservationCondition.snapshot(
+            position: samplePosition(height: 12.4),
+            stage: .iphone,
+            durationSeconds: 1,
+            epochCount: 1,
+            stature: profile,
+            sight: level
+        ).reportLines.joined(separator: "\n")
+        XCTAssertTrue(levelLines.contains("身長補正 −1.66m（目線水平）"))
+        XCTAssertTrue(levelLines.contains("下がり 0.00m"))
 
         XCTAssertNil(StatureMath.correction(for: profile, stage: .rtk, receiver: .rtk, sight: assumed))
         XCTAssertEqual(AntennaCatalog.alongUpMeters(model: "iPhone15,4"), 0.1476 / 2 - 0.015, accuracy: 1e-12)

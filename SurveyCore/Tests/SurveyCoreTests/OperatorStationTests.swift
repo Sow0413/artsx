@@ -66,6 +66,19 @@ final class OperatorStationTests: XCTestCase {
         let level = OperatorStation.height(ellipsoidalMeters: 25, designMeters: 25)
         XCTAssertEqual(level.text, "下がり 0.0m")
 
+        let eyeLevel = OperatorStation.height(ellipsoidalMeters: 25.84, designMeters: 25, sightDropMeters: 0)
+        XCTAssertEqual(eyeLevel.text, "下がり 0.8m")
+        let tilted = OperatorStation.height(ellipsoidalMeters: 25.84, designMeters: 25, sightDropMeters: 0.175)
+        XCTAssertEqual(tilted.text, "下がり 1.0m")
+        let ignored = OperatorStation.height(
+            ellipsoidalMeters: 23.2,
+            designMeters: 25,
+            eyeHeightMeters: 2,
+            phoneAtEyes: false,
+            sightDropMeters: 0.175
+        )
+        XCTAssertEqual(ignored.text, "下がり 0.2m")
+
         let missing = OperatorStation.height(ellipsoidalMeters: nil, designMeters: 25)
         XCTAssertEqual(missing.text, "—")
         XCTAssertFalse(missing.isReference)

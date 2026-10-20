@@ -24,6 +24,15 @@ enum ConfirmCue {
     }
 }
 
+/// 鉛直から ±1° に入ったとき、一度だけ振動する。実機は未確認。
+enum LevelCue {
+    static func play() {
+        #if !SURVEY_PLAYGROUND
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        #endif
+    }
+}
+
 /// 音量ボタン。慣れたら、かつ「画面を見ずに確定」がオンのときだけ。実機は未確認。
 enum VolumeConfirmWatcher {
     static func start(_ onChange: @escaping () -> Void) {

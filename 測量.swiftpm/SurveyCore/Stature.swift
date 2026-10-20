@@ -155,6 +155,8 @@ public struct StatureRecord: Codable, Sendable, Equatable {
     public var distanceMeasured: Bool?
     /// 端末中心から GNSS アンテナへ、portrait 上方向の定数。
     public var antennaAlongUpMeters: Double?
+    /// 鉛直から ±1° 以内。視線が水平で、端末高は目の高さ。
+    public var eyeLevel: Bool?
 
     public init(
         style: HoldStyle,
@@ -169,7 +171,8 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         tiltRadians: Double? = nil,
         eyeDistanceMeters: Double? = nil,
         distanceMeasured: Bool? = nil,
-        antennaAlongUpMeters: Double? = nil
+        antennaAlongUpMeters: Double? = nil,
+        eyeLevel: Bool? = nil
     ) {
         self.style = style
         self.offsetMeters = offsetMeters
@@ -184,6 +187,7 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         self.eyeDistanceMeters = eyeDistanceMeters
         self.distanceMeasured = distanceMeasured
         self.antennaAlongUpMeters = antennaAlongUpMeters
+        self.eyeLevel = eyeLevel
     }
 
     public init(from decoder: Decoder) throws {
@@ -201,6 +205,7 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         eyeDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .eyeDistanceMeters)
         distanceMeasured = try container.decodeIfPresent(Bool.self, forKey: .distanceMeasured)
         antennaAlongUpMeters = try container.decodeIfPresent(Double.self, forKey: .antennaAlongUpMeters)
+        eyeLevel = try container.decodeIfPresent(Bool.self, forKey: .eyeLevel)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -218,12 +223,13 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         try container.encodeIfPresent(eyeDistanceMeters, forKey: .eyeDistanceMeters)
         try container.encodeIfPresent(distanceMeasured, forKey: .distanceMeasured)
         try container.encodeIfPresent(antennaAlongUpMeters, forKey: .antennaAlongUpMeters)
+        try container.encodeIfPresent(eyeLevel, forKey: .eyeLevel)
     }
 
     private enum CodingKeys: String, CodingKey {
         case style, offsetMeters, holdMeters, statureMeters
         case elbowFactor, chestFactor, eyeDropMeters, cabMeters, groundHeightMeters
-        case tiltRadians, eyeDistanceMeters, distanceMeasured, antennaAlongUpMeters
+        case tiltRadians, eyeDistanceMeters, distanceMeasured, antennaAlongUpMeters, eyeLevel
     }
 
     public var screenLabel: String { StatureMath.screenLabel(offsetMeters: offsetMeters) }
@@ -238,10 +244,31 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         )
     }
 
+    /// 画面の角度で、鉛直 ±1° の観測。古い記録は傾きから決める。
+    public var recordedEyeLevel: Bool {
+        if let eyeLevel { return eyeLevel }
+        guard style == .sight, let tiltRadians else { return false }
+        return StatureMath.isEyeLevel(tiltRadians)
+    }
+
+    public var holdTitle: String {
+        style == .sight && recordedEyeLevel ? "目線水平" : style.title
+    }
+
+    public var dropMeters: Double? {
+        guard style == .sight, let tiltRadians, let eyeDistanceMeters else { return nil }
+        return StatureMath.dropBelowEye(tiltRadians: tiltRadians, eyeDistanceMeters: eyeDistanceMeters)
+    }
+
     public var sightNote: String? {
         guard style == .sight, let tiltRadians, let eyeDistanceMeters, let antennaAlongUpMeters else { return nil }
         let source = distanceMeasured == true ? "" : "（既定）"
-        return "傾き \(StatureMath.degreeText(tiltRadians))°、目までの距離 \(StatureMath.factorText(eyeDistanceMeters))m\(source)、アンテナ差 \(StatureMath.factorText(antennaAlongUpMeters))m"
+        let drop = StatureMath.dropLabel(dropMeters ?? 0)
+        let angle = "傾き \(StatureMath.degreeText(tiltRadians))°、目までの距離 \(StatureMath.factorText(eyeDistanceMeters))m\(source)、\(drop)、アンテナ差 \(StatureMath.factorText(antennaAlongUpMeters))m"
+        if recordedEyeLevel {
+            return "目線水平、\(angle)"
+        }
+        return angle
     }
 }
 
@@ -338,10 +365,40 @@ public enum StatureMath {
         String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), radians * 180 / .pi)
     }
 
+    /// 鉛直からの許容。この中は視線が水平で、d·sinθ は掛けない。
+    public static let levelToleranceDegrees = 1.0
+
+    public static var levelToleranceRadians: Double { levelToleranceDegrees * .pi / 180 }
+
     /// CoreMotion の pitch。0 は画面を上に向けて水平、+π/2 は端末の上が真上。θ は鉛直からの後傾。
     public static func tiltFromVertical(pitchRadians: Double) -> Double? {
         guard pitchRadians.isFinite else { return nil }
         return (.pi / 2) - pitchRadians
+    }
+
+    public static func isEyeLevel(_ tiltRadians: Double) -> Bool {
+        guard tiltRadians.isFinite else { return false }
+        return abs(tiltRadians) <= levelToleranceRadians + 1e-12
+    }
+
+    /// 目の高さより端末がどれだけ下か。±1° 以内は 0。前傾で負。
+    public static func dropBelowEye(tiltRadians: Double, eyeDistanceMeters: Double) -> Double {
+        guard tiltRadians.isFinite, eyeDistanceMeters.isFinite, isEyeLevel(tiltRadians) == false else { return 0 }
+        let drop = eyeDistanceMeters * GeoMath.sine(tiltRadians)
+        return drop.isFinite ? drop : 0
+    }
+
+    public static func dropLabel(_ meters: Double) -> String {
+        guard meters.isFinite else { return "下がり 0.00m" }
+        let shown = factorText(abs(meters))
+        if shown == "0.00" { return "下がり 0.00m" }
+        if meters > 0 { return "下がり \(shown)m" }
+        return "上がり \(shown)m"
+    }
+
+    /// 目線水平のときは θ を 0 にする。端末の中心は目の高さ。
+    public static func correctionTilt(_ tiltRadians: Double) -> Double {
+        isEyeLevel(tiltRadians) ? 0 : tiltRadians
     }
 
     /// 目の高さから、距離と後傾とアンテナ差で、GNSS アンテナの地面からの高さ。
@@ -349,8 +406,9 @@ public enum StatureMath {
         guard eyeHeight.isFinite, sight.tiltRadians.isFinite, sight.eyeDistanceMeters.isFinite, sight.antennaAlongUpMeters.isFinite else {
             return nil
         }
-        let center = eyeHeight - sight.eyeDistanceMeters * GeoMath.sine(sight.tiltRadians)
-        let antenna = center + sight.antennaAlongUpMeters * GeoMath.cosine(sight.tiltRadians)
+        let theta = correctionTilt(sight.tiltRadians)
+        let center = eyeHeight - sight.eyeDistanceMeters * GeoMath.sine(theta)
+        let antenna = center + sight.antennaAlongUpMeters * GeoMath.cosine(theta)
         guard antenna.isFinite else { return nil }
         return max(0, antenna)
     }
@@ -411,7 +469,8 @@ public enum StatureMath {
             tiltRadians: automatic?.tiltRadians,
             eyeDistanceMeters: automatic?.eyeDistanceMeters,
             distanceMeasured: automatic?.distanceMeasured,
-            antennaAlongUpMeters: automatic?.antennaAlongUpMeters
+            antennaAlongUpMeters: automatic?.antennaAlongUpMeters,
+            eyeLevel: automatic.map { isEyeLevel($0.tiltRadians) }
         )
     }
 
@@ -426,6 +485,12 @@ public enum StatureMath {
             return "傾きを待っています"
         }
         if let record = correction(for: profile, stage: stage, receiver: receiver, sight: sight) {
+            if record.recordedEyeLevel {
+                return "\(record.screenLabel)　目線水平"
+            }
+            if let drop = record.dropMeters {
+                return "\(record.screenLabel)　\(dropLabel(drop))"
+            }
             return record.screenLabel
         }
         return "身長が未登録です"

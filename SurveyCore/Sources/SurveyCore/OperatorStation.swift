@@ -119,13 +119,15 @@ public enum OperatorStation {
         )
     }
 
-    /// 下がりは 0.1m。端末を目の高さで持つときは楕円体高そのもの。地盤か機体に置くときは視線高を足す。
-    /// iPhone の値をそのまま使い、RTK や既知点は前提にしない。
+    /// 下がりは 0.1m。端末を目の高さで持つときは、鉛直（目線水平）の端末高を目の高さにする。
+    /// それ以外の傾きは d·sinθ だけ端末が下がるので、その分を足してから計画高を引く。
+    /// 地盤か機体に置くときは視線高を足す。iPhone の値をそのまま使い、RTK や既知点は前提にしない。
     public static func height(
         ellipsoidalMeters: Double?,
         designMeters: Double?,
         eyeHeightMeters: Double = 2,
-        phoneAtEyes: Bool = true
+        phoneAtEyes: Bool = true,
+        sightDropMeters: Double = 0
     ) -> OperatorHeight {
         guard let ellipsoidalMeters, ellipsoidalMeters.isFinite else {
             return OperatorHeight(text: "—", note: "", isReference: false, meters: nil)
@@ -139,7 +141,8 @@ public enum OperatorStation {
                 meters: nil
             )
         }
-        let sight = phoneAtEyes ? ellipsoidalMeters : ellipsoidalMeters + eye
+        let tiltDrop = phoneAtEyes && sightDropMeters.isFinite ? sightDropMeters : 0
+        let sight = phoneAtEyes ? ellipsoidalMeters + tiltDrop : ellipsoidalMeters + eye
         let drop = MachineReach.roundTenths(sight - designMeters)
         let text: String
         if drop > 0 {

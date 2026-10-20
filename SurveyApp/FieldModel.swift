@@ -81,6 +81,7 @@ final class FieldModel: ObservableObject {
     @Published private(set) var measuredEyeDistance: Double?
     let deviceMachine = DeviceIdentity.machine
     private var sightInForeground = false
+    private var announcedEyeLevel = false
     private var epochWatch = EpochWatch()
 
     let tiles: TileStore
@@ -1243,13 +1244,25 @@ final class FieldModel: ObservableObject {
     private func syncSightSensors() {
         let on = sightInForeground && stature.style == .sight
         PhoneSight.setEnabled(on) { [weak self] tilt in
-            self?.sightTiltRadians = tilt
+            self?.noteTilt(tilt)
         } onDistance: { [weak self] meters in
             self?.measuredEyeDistance = meters
         }
         if !on {
             sightTiltRadians = nil
             measuredEyeDistance = nil
+            announcedEyeLevel = false
+        }
+    }
+
+    private func noteTilt(_ tilt: Double?) {
+        sightTiltRadians = tilt
+        let level = tilt.map(StatureMath.isEyeLevel) ?? false
+        if level && !announcedEyeLevel {
+            LevelCue.play()
+            announcedEyeLevel = true
+        } else if !level {
+            announcedEyeLevel = false
         }
     }
 

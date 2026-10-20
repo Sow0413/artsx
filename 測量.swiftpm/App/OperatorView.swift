@@ -22,7 +22,8 @@ struct OperatorView: View {
             ellipsoidalMeters: position?.ellipsoidalHeightMeters,
             designMeters: drawing.designHeightMeters,
             eyeHeightMeters: drawing.eyeHeightMeters,
-            phoneAtEyes: drawing.phoneAtEyes
+            phoneAtEyes: drawing.phoneAtEyes,
+            sightDropMeters: eyeLineDrop
         )
         let reach = reachCall(position: position)
         return GeometryReader { geo in
@@ -200,8 +201,16 @@ struct OperatorView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private var eyeLineDrop: Double {
+        guard drawing.phoneAtEyes, field.stature.style == .sight, let sight = field.liveSight else { return 0 }
+        return StatureMath.dropBelowEye(tiltRadians: sight.tiltRadians, eyeDistanceMeters: sight.eyeDistanceMeters)
+    }
+
     private func heightLabel(_ height: OperatorHeight) -> some View {
         VStack(spacing: 2) {
+            if field.stature.style == .sight, drawing.phoneAtEyes {
+                LevelBubble(tiltRadians: field.sightTiltRadians, compact: true)
+            }
             Text(height.text)
                 .font(SurveyType(64, .heavy))
                 .minimumScaleFactor(0.3)

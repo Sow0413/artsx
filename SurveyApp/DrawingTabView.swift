@@ -254,7 +254,7 @@ struct DrawingTabView: View {
                 .font(SurveyType(15, .semibold))
                 .tint(SurveyColor.amber)
             Text(drawing.phoneAtEyes
-                ? "下がりは、今の高さから計画高を引いた値です。0.1m。"
+                ? "下がりは、鉛直の端末高を目の高さとして計画高を引いた値です。±1°以内は目線水平。傾きがあるときは d·sinθ を足します。0.1m。"
                 : "端末を\(drawing.sightDatum.label)に置いた高さへ、視線高を足してから計画高を引きます。")
                 .font(SurveyType(12, .semibold))
                 .foregroundStyle(SurveyColor.muted)

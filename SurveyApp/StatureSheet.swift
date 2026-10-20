@@ -18,7 +18,7 @@ struct StatureSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("段階0の iPhone だけで、端末の高さから持ち高さを引いて地盤高にします。既定は画面の角度です。肘より上は代わりです。外部GNSSのポール高とは別にします。")
+                    Text("段階0の iPhone だけで、端末の高さから持ち高さを引いて地盤高にします。既定は画面の角度です。鉛直で視線が水平のときは、端末の高さを目の高さにします。肘より上は代わりです。外部GNSSのポール高とは別にします。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -50,6 +50,7 @@ struct StatureSheet: View {
                             )
                     }
                     if style == .sight {
+                        LevelBubble(tiltRadians: field.sightTiltRadians)
                         Text(sightLine)
                             .font(SurveyType(16, .heavy))
                             .fixedSize(horizontal: false, vertical: true)
@@ -271,7 +272,7 @@ struct StatureAskSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("身長を入れると、段階0の iPhone で地盤高を出せます。持ち方は画面の角度です。目の高さ（身長−約10cm）から、傾きと目までの距離で端末の高さを引きます。距離が測れないときは 35cm です。肘より上は、代わりの持ち方です。")
+                Text("身長を入れると、段階0の iPhone で地盤高を出せます。持ち方は画面の角度です。端末が鉛直で視線が水平のときは、端末の高さを目の高さにします。±1°以内は目線水平です。傾いていれば、目の高さから距離と傾きを引きます。肘より上は、代わりの持ち方です。")
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)

@@ -152,7 +152,7 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
             "機器 \(receiver.label)、段階\(stage.rawValue)"
         ]
         if let stature {
-            lines.append("\(stature.screenLabel)（\(stature.style.title)）")
+            lines.append("\(stature.screenLabel)（\(stature.holdTitle)）")
             if let note = stature.sightNote {
                 lines.append(note)
             }

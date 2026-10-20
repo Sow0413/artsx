@@ -24,6 +24,9 @@ struct MeasureLogView: View {
                         )
                 }
                 .buttonStyle(.plain)
+                if field.stature.style == .sight {
+                    LevelBubble(tiltRadians: field.sightTiltRadians)
+                }
                 OperationBar(field: field, showsSkill: true)
                 if field.operation.showsAdvanced {
                     Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")

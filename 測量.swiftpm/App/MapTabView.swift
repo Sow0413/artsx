@@ -178,7 +178,9 @@ struct MapTabView: View {
                         reading: field.workingReading,
                         note: field.showsCorrectedPosition ? "三角点補正を引いた位置" : nil,
                         statureNotice: field.statureNotice,
-                        onStature: { field.showsStature = true }
+                        onStature: { field.showsStature = true },
+                        showsLevel: field.stature.style == .sight,
+                        levelTilt: field.sightTiltRadians
                     )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)
