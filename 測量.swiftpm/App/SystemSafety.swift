@@ -45,6 +45,8 @@ final class SystemWatch: NSObject, WCSessionDelegate {
     var onHiyari: (() -> Void)?
     var onFall: ((FallKind, Date, Bool) -> Void)?
     var onFallCancel: (() -> Void)?
+    var onSOS: (() -> Void)?
+    var onSOSStop: (() -> Void)?
 
     func start() {
         guard WCSession.isSupported() else { return }
@@ -88,6 +90,16 @@ final class SystemWatch: NSObject, WCSessionDelegate {
         deliver(["action": "fall-sent", "text": text], session: WCSession.default)
     }
 
+    func sendSOSLive(_ live: Bool) {
+        guard WCSession.isSupported() else { return }
+        deliver(["action": live ? "sos-on" : "sos-off"], session: WCSession.default)
+    }
+
+    func sendSOSAlert(_ text: String) {
+        guard WCSession.isSupported() else { return }
+        deliver(["action": "sos-alert", "text": text], session: WCSession.default)
+    }
+
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {}
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
@@ -121,6 +133,14 @@ final class SystemWatch: NSObject, WCSessionDelegate {
         }
         if action == "fall-cancel" {
             DispatchQueue.main.async { self.onFallCancel?() }
+            return
+        }
+        if action == "sos" {
+            DispatchQueue.main.async { self.onSOS?() }
+            return
+        }
+        if action == "sos-stop" {
+            DispatchQueue.main.async { self.onSOSStop?() }
             return
         }
         guard action == "fall" else { return }

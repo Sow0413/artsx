@@ -30,7 +30,20 @@ struct SurveyWatchApp: App {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
+                    Text(model.sosLive ? "長押しで止める" : "長押しで SOS")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(Color.red.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .onLongPressGesture(minimumDuration: 1.5) {
+                            model.toggleSOS()
+                        }
+                        .accessibilityLabel(model.sosLive ? "SOSを止める。長押し" : "SOSを送る。長押し")
                 }
+                Text(SOSCall.disclaimer)
+                    .font(.caption2)
+                    .multilineTextAlignment(.center)
                 Text(FallCall.disclaimer)
                     .font(.caption2)
                     .multilineTextAlignment(.center)
@@ -46,9 +59,11 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, CMFallDet
     @Published var pending = false
     @Published var countdown = 0
     @Published var pendingLabel = "転倒"
+    @Published var sosLive = false
 
     private var detector = FallDetector()
     private var sentBegin = false
+    private var sosSent = false
     private var ticker: Timer?
     private let motion = CMMotionManager()
     private var fallManager: CMFallDetectionManager?
@@ -86,6 +101,18 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, CMFallDet
         guard signal == .cancelled else { return }
         line = "取り消ししました"
         send(["action": "fall-cancel"])
+    }
+
+    func toggleSOS() {
+        if sosLive || sosSent {
+            sosSent = false
+            send(["action": "sos-stop"])
+            line = "SOSを止めています"
+        } else {
+            sosSent = true
+            send(["action": "sos"])
+            line = "SOSを送っています"
+        }
     }
 
     func sendHiyari() {
@@ -238,6 +265,31 @@ final class WatchModel: NSObject, ObservableObject, WCSessionDelegate, CMFallDet
                 if !self.pending {
                     self.line = "\(kind.label)を知らせます"
                 }
+            }
+            return
+        }
+        if message["action"] as? String == "sos-on" {
+            DispatchQueue.main.async {
+                self.sosSent = true
+                self.sosLive = true
+                self.line = "SOSを送っています"
+                WKInterfaceDevice.current().play(.failure)
+            }
+            return
+        }
+        if message["action"] as? String == "sos-off" {
+            DispatchQueue.main.async {
+                self.sosSent = false
+                self.sosLive = false
+                if !self.pending { self.line = "待機" }
+            }
+            return
+        }
+        if message["action"] as? String == "sos-alert" {
+            let text = message["text"] as? String
+            DispatchQueue.main.async {
+                self.line = text ?? "SOS"
+                WKInterfaceDevice.current().play(.failure)
             }
             return
         }

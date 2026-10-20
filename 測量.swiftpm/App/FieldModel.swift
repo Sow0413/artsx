@@ -78,6 +78,11 @@ final class FieldModel: ObservableObject {
     let incidents = IncidentSession()
     let fall = FallMonitor()
     let fallRelay = FallRelay(reachable: false)
+    let sosRelay = SOSRelay(reachable: false)
+    @Published private(set) var sosActive = false
+    @Published private(set) var sosPointer: SOSPointer?
+    @Published private(set) var sosHelpers = ""
+    @Published var showsEmergencySOS = false
     @Published private(set) var incidentOpen = false
     @Published private(set) var incidentNote: String?
     @Published private(set) var incidentRecordingMemo = false
@@ -100,6 +105,8 @@ final class FieldModel: ObservableObject {
     private var visibleBounds: GeoBounds?
     private var visibleZoom: Int?
     private var campaignPoint: ControlPoint?
+    private var sosDesk = SOSDesk()
+    private var sosIncoming: SOSBeacon?
     private var cancellables: Set<AnyCancellable> = []
 
     init(
@@ -154,6 +161,12 @@ final class FieldModel: ObservableObject {
         crew.onWatchFallCancel = { [weak self] in
             self?.fall.cancel()
         }
+        crew.onSOS = { [weak self] in
+            self?.startSOS()
+        }
+        crew.onSOSStop = { [weak self] in
+            self?.stopSOS()
+        }
         fall.onAwaiting = { [weak self] kind, date in
             self?.crew.askWatchFall(kind: kind, at: date)
         }
@@ -175,6 +188,139 @@ final class FieldModel: ObservableObject {
     func cancelFall() {
         if fall.cancel() {
             crew.clearWatchFall()
+        }
+    }
+
+    func toggleSOS() {
+        if sosDesk.session.active {
+            stopSOS()
+        } else {
+            startSOS()
+        }
+    }
+
+    func startSOS() {
+        guard drawing.project != nil else {
+            incidentNote = "先にプロジェクトを作ってください。"
+            return
+        }
+        guard !sosDesk.session.active else { return }
+        guard sosDesk.begin(at: Date()) != nil else { return }
+        sosActive = true
+        SOSSound.arm()
+        crew.tellWatchSOS(live: true)
+        refreshSOS(now: Date())
+    }
+
+    func stopSOS() {
+        guard sosDesk.session.active, let project = drawing.project else { return }
+        let position = workingReading.position
+        let plottable = position?.isPlottable == true
+        guard let beacon = sosDesk.end(
+            deviceID: crew.deviceID,
+            name: crew.displayName,
+            channelID: project.id,
+            latitude: plottable ? position?.latitudeDegrees : nil,
+            longitude: plottable ? position?.longitudeDegrees : nil,
+            at: Date()
+        ) else { return }
+        sendSOS(SOSPacket(beacon: beacon))
+        sosActive = false
+        crew.tellWatchSOS(live: false)
+        incidentNote = "SOSを止めました"
+    }
+
+    func refreshSOS(now: Date = Date()) {
+        sosRelay.isReachable = radio.relayReachable
+        sosRelay.flush()
+        guard sosDesk.session.active, let project = drawing.project else { return }
+        let position = workingReading.position
+        let plottable = position?.isPlottable == true
+        guard let beacon = sosDesk.beacon(
+            deviceID: crew.deviceID,
+            name: crew.displayName,
+            channelID: project.id,
+            latitude: plottable ? position?.latitudeDegrees : nil,
+            longitude: plottable ? position?.longitudeDegrees : nil,
+            at: now
+        ) else { return }
+        sendSOS(SOSPacket(beacon: beacon))
+        if !sosDesk.session.incidentOpened {
+            if recordIncident(trigger: .sos, workKind: "SOS", workName: "SOS") {
+                sosDesk.markIncidentOpened()
+            }
+        }
+    }
+
+    func respondSOS() {
+        guard let beacon = sosIncoming else { return }
+        let reply = sosDesk.reply(
+            to: beacon,
+            fromDeviceID: crew.deviceID,
+            fromName: crew.displayName,
+            at: Date()
+        )
+        sendSOS(SOSPacket(reply: reply))
+        incidentNote = "向かう、と返しました"
+    }
+
+    func ingestSOS(_ packet: SOSPacket, arrived: SOSPath) {
+        if let beacon = packet.beacon {
+            guard beacon.channelID == drawing.project?.id, beacon.deviceID != crew.deviceID else { return }
+            let position = workingReading.position
+            let plottable = position?.isPlottable == true
+            let heard = sosDesk.hear(
+                beacon,
+                selfLatitude: plottable ? position?.latitudeDegrees : nil,
+                selfLongitude: plottable ? position?.longitudeDegrees : nil,
+                courseDegrees: position?.courseDegrees,
+                headingDegrees: position?.headingDegrees,
+                facing: tab == .seat ? .machine : .own,
+                now: Date()
+            )
+            if heard.beacon.active {
+                sosPointer = heard.pointer
+                sosIncoming = heard.beacon
+            } else if sosIncoming?.id == heard.beacon.id {
+                sosPointer = nil
+                sosIncoming = nil
+            }
+            if heard.speak {
+                crew.rememberFallSpeech(heard.pointer.text, at: Date())
+                CrewVoice.say(heard.pointer.text)
+                SOSSound.ring(heard.pointer.text)
+                crew.alertSOS(heard.pointer.text)
+            }
+            if sosDesk.shouldForward(beacon, arrived: arrived, relayReachable: radio.relayReachable) {
+                sosRelay.isReachable = true
+                sosRelay.submit(SOSPacket(beacon: beacon))
+            }
+        }
+        if let reply = packet.reply,
+           sosDesk.hearReply(reply, selfDeviceID: crew.deviceID, beaconID: sosDesk.session.beaconID) {
+            sosHelpers = sosDesk.helperLine
+            CrewVoice.say(sosDesk.helperLine)
+        }
+    }
+
+    private func sendSOS(_ packet: SOSPacket) {
+        switch SOSPath.choose(relayReachable: radio.relayReachable) {
+        case .relay:
+            sosRelay.isReachable = true
+            sosRelay.submit(packet)
+        case .nearby:
+            nearby.send(packet)
+        }
+    }
+
+    private func sosNotice(_ trigger: IncidentTrigger) -> String {
+        switch trigger {
+        case .fall:
+            return "\(SafetyNotice.text) \(FallCall.disclaimer)"
+        case .sos:
+            return SOSCall.disclaimer
+        case .alarm, .manual:
+            return SafetyNotice.text
         }
     }
 
@@ -250,7 +396,7 @@ final class FieldModel: ObservableObject {
             speeches: crew.recentSpeeches().filter { abs($0.at.timeIntervalSince(now)) <= IncidentBook.beforeSeconds },
             radio: radioClips(around: now),
             strokes: incidentStrokes(around: position),
-            notice: trigger == .fall ? "\(SafetyNotice.text) \(FallCall.disclaimer)" : SafetyNotice.text,
+            notice: sosNotice(trigger),
             weather: drawing.weatherLabel.isEmpty ? nil : drawing.weatherLabel
         )
         do {
@@ -264,6 +410,8 @@ final class FieldModel: ObservableObject {
                     incidentNote = "ヒヤリを記録しています"
                 case .fall:
                     incidentNote = "\(opening.work.kind)を記録しています"
+                case .sos:
+                    incidentNote = "SOSを記録しています"
                 }
             }
             return true
@@ -564,6 +712,11 @@ final class FieldModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.crew.receiveFall(notice, position: self.workingReading.position)
+            }
+        }
+        nearby.onSOS = { [weak self] packet in
+            DispatchQueue.main.async {
+                self?.ingestSOS(packet, arrived: .nearby)
             }
         }
         fall.start()
@@ -1031,6 +1184,7 @@ final class FieldModel: ObservableObject {
         )
         radio.rename(crew.displayName)
         radio.refreshSpace()
+        refreshSOS()
         trackIncidents()
         refreshVisibleControlPoints()
         guard followUser, let position = workingReading.position, position.isPlottable else { return }
@@ -1079,6 +1233,8 @@ final class FieldModel: ObservableObject {
         incidents.relay.isReachable = radio.relayReachable
         fallRelay.isReachable = radio.relayReachable
         fallRelay.flush()
+        sosRelay.isReachable = radio.relayReachable
+        sosRelay.flush()
         let results = (try? incidents.closeDue(
             projectName: project.name,
             at: drawing.projectsRoot,

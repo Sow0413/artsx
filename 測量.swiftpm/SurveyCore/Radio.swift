@@ -394,18 +394,27 @@ public struct LinkFrame: Codable, Equatable, Sendable {
         case radio
         case crew
         case fall
+        case sos
     }
 
     public var kind: Kind
     public var radio: RadioPacket?
     public var crew: CrewPacket?
     public var fall: FallNotice?
+    public var sos: SOSPacket?
 
-    public init(kind: Kind, radio: RadioPacket? = nil, crew: CrewPacket? = nil, fall: FallNotice? = nil) {
+    public init(
+        kind: Kind,
+        radio: RadioPacket? = nil,
+        crew: CrewPacket? = nil,
+        fall: FallNotice? = nil,
+        sos: SOSPacket? = nil
+    ) {
         self.kind = kind
         self.radio = radio
         self.crew = crew
         self.fall = fall
+        self.sos = sos
     }
 }
 

@@ -28,6 +28,9 @@ struct MapTabView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
+                SOSControl(field: field)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 6)
                 IncidentTray(field: field)
                 HStack {
                     Button(field.radio.spaceAudio ? "定位オン" : "定位") {
@@ -75,6 +78,7 @@ struct MapTabView: View {
                 SafetyWash(level: field.crew.worst)
                 ThreatRim(cues: [], fall: field.crew.fallCue)
                 TalkRim(pointer: field.talkPointer)
+                SOSRim(pointer: field.sosPointer)
             }
         }
         .sheet(isPresented: $field.showsIncidentStats) {

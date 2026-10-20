@@ -5,12 +5,14 @@ public enum IncidentTrigger: String, Codable, Sendable, Equatable {
     case alarm
     case manual
     case fall
+    case sos
 
     public var label: String {
         switch self {
         case .alarm: return "接近警報"
         case .manual: return "ヒヤリ"
         case .fall: return "転倒検知"
+        case .sos: return "SOS"
         }
     }
 }
@@ -899,6 +901,9 @@ enum IncidentReport {
         ]
         if record.trigger == .fall, !record.notice.contains(FallCall.disclaimer) {
             lines.append(FallCall.disclaimer)
+        }
+        if record.trigger == .sos, !record.notice.contains(SOSCall.disclaimer) {
+            lines.append(SOSCall.disclaimer)
         }
         lines.append(contentsOf: [
             "日時 \(stamp.string(from: record.occurredAt))",

@@ -32,6 +32,7 @@ struct OperatorView: View {
                 SafetyWash(level: field.crew.worst)
                 ThreatRim(cues: field.crew.threats.cues, fall: field.crew.fallCue)
                 TalkRim(pointer: field.talkPointer)
+                SOSRim(pointer: field.sosPointer)
                 if landscape {
                     VStack(spacing: 4) {
                         HStack(spacing: 8) {
@@ -74,6 +75,7 @@ struct OperatorView: View {
                     FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
                         field.cancelFall()
                     }
+                    SOSControl(field: field)
                     directionHeadline
                     hailButton
                     hiyariButton

@@ -22,6 +22,8 @@ final class CrewController: ObservableObject {
     var onHiyari: (() -> Void)?
     var onWatchFall: ((FallKind, Date, Bool) -> Void)?
     var onWatchFallCancel: (() -> Void)?
+    var onSOS: (() -> Void)?
+    var onSOSStop: (() -> Void)?
     let notice = SafetyNotice.text
     private let relay = CrewRelayStub(reachable: false)
     private let mesh = CrewMesh(reachable: false)
@@ -87,6 +89,12 @@ final class CrewController: ObservableObject {
             watch.onFallCancel = { [weak self] in
                 self?.onWatchFallCancel?()
             }
+            watch.onSOS = { [weak self] in
+                self?.onSOS?()
+            }
+            watch.onSOSStop = { [weak self] in
+                self?.onSOSStop?()
+            }
             watch.start()
         }
         #endif
@@ -117,6 +125,26 @@ final class CrewController: ObservableObject {
         #else
         _ = kind
         _ = date
+        #endif
+    }
+
+    func tellWatchSOS(live: Bool) {
+        #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
+        if RadioHardware.watch {
+            watch.sendSOSLive(live)
+        }
+        #else
+        _ = live
+        #endif
+    }
+
+    func alertSOS(_ text: String) {
+        #if !SURVEY_PLAYGROUND && canImport(WatchConnectivity)
+        if RadioHardware.watch {
+            watch.sendSOSAlert(text)
+        }
+        #else
+        _ = text
         #endif
     }
 
