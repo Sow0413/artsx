@@ -29,13 +29,14 @@ final class RadioController: ObservableObject {
         self.nearby = nearby
         self.defaults = defaults
         desk = RadioDesk(speaker: "この端末", relay: relay, nearby: mesh)
-        spaceAudio = defaults.object(forKey: "radio.spaceAudio") as? Bool ?? false
-        space.enabled = spaceAudio
+        let spaceOn = defaults.object(forKey: "radio.spaceAudio") as? Bool ?? false
+        spaceAudio = spaceOn
         if RadioHardware.pushToTalk || RadioHardware.nearbyPeers {
             status = "中継はまだありません。近くに同じ現場がいれば、そちらへ出します。"
         } else {
             status = "無線の権限は切ってあります。発話は端末に残します。"
         }
+        space.enabled = spaceOn
         desk.onAudio = { [weak self] data in
             self?.playIncoming(data)
         }
