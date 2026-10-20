@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 import SurveyCore
@@ -84,14 +85,36 @@ struct RootView: View {
         .background(SurveyColor.background.ignoresSafeArea())
         .environment(\.surveyOutdoor, appearance.outdoor)
         .preferredColorScheme(appearance.outdoor ? .light : .dark)
-        .onAppear { field.start() }
-        .onDisappear { field.stop() }
+        .background {
+            OperationKeyCommands(field: field)
+            if field.operation.level == .skilled, field.operation.eyesFree {
+                VolumeSliderHost()
+                    .frame(width: 1, height: 1)
+                    .offset(x: -2000)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .onAppear {
+            field.start()
+            syncVolume()
+        }
+        .onDisappear {
+            field.stop()
+            VolumeConfirmWatcher.stop()
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 field.resumeGNSS()
             } else {
                 field.pauseGNSS()
             }
+            syncVolume()
+        }
+        .onChange(of: field.operation.level) { _, _ in syncVolume() }
+        .onChange(of: field.operation.eyesFree) { _, _ in syncVolume() }
+        .onReceive(NotificationCenter.default.publisher(for: .surveyConfirmObservation)) { _ in
+            field.consumePendingConfirm()
         }
         .modifier(MeshPresenceWatcher(field: field))
         .sheet(isPresented: $field.showsPrivacy) {
@@ -99,6 +122,19 @@ struct RootView: View {
         }
         .sheet(isPresented: $field.showsExtras) {
             ExtraSettingsSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsToolOrder) {
+            ToolOrderSheet(field: field)
+        }
+    }
+
+    private func syncVolume() {
+        if field.operation.level == .skilled, field.operation.eyesFree, scenePhase == .active {
+            VolumeConfirmWatcher.start {
+                field.receiveOperation(.volumeUp)
+            }
+        } else {
+            VolumeConfirmWatcher.stop()
         }
     }
 

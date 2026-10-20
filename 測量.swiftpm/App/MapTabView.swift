@@ -235,18 +235,6 @@ struct MapTabView: View {
     }
 
     private var captureButton: some View {
-        Button(action: field.captureObservation) {
-            Text("この作業で点を残す")
-                .font(SurveyType(16, .heavy))
-                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
-                )
-                .background(SurveyColor.card)
-                .foregroundStyle(SurveyColor.text)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-        .buttonStyle(.plain)
+        OperationBar(field: field, showsSkill: false, compact: true)
     }
 }

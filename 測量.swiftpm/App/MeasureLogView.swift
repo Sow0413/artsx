@@ -10,38 +10,32 @@ struct MeasureLogView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("測る")
                     .font(SurveyType(28, .heavy))
-                Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
-                    .font(SurveyType(16, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                TextField("点名の頭（T）", text: prefixBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                Text(field.nextPointName.map { "次の点名は \($0)" } ?? "頭文字は半角アルファベットだけにしてください。")
-                    .font(SurveyType(16, .heavy))
-                if let folder = field.drawing.activeRecordFolder {
-                    Text("この頭文字は記録 \(folder) に残します。")
-                        .font(SurveyType(13, .semibold))
+                OperationBar(field: field, showsSkill: true)
+                if field.operation.showsAdvanced {
+                    Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
+                        .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TextField("点名の頭（T）", text: prefixBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                    if let folder = field.drawing.activeRecordFolder {
+                        Text("この頭文字は記録 \(folder) に残します。")
+                            .font(SurveyType(13, .semibold))
+                            .foregroundStyle(SurveyColor.muted)
+                    }
                 }
-                Button(action: field.captureObservation) {
-                    Text("現在地を残す")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                if field.operation.level == .skilled || field.operation.controlOpen || field.operation.showsDetail {
+                    controlSection
                 }
-                .buttonStyle(.plain)
-                controlSection
                 if let message = field.captureMessage {
                     Text(message)
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.amber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if field.gnssAvailable {
+                if field.gnssAvailable, field.operation.showsAdvanced {
                     gnssSection
                 }
                 if field.observations.observations.isEmpty {
@@ -171,7 +165,9 @@ struct MeasureLogView: View {
                     .foregroundStyle(SurveyColor.text)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button(action: field.recordControlPoint) {
+            Button {
+                field.receiveOperation(.tap(.controlPoint))
+            } label: {
                 Text("基準点を記録")
                     .font(SurveyType(18, .heavy))
                     .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
@@ -180,7 +176,6 @@ struct MeasureLogView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(!field.canRecordControlPoint)
             Text("段階2の RTK FIX のあいだだけ残せます。解が落ちて段階が下がると記録は止まり、測位は続きます。iPhone の GPS では衛星数・PDOP・補正の遅れは出ません。")
                 .font(SurveyType(13, .semibold))
                 .foregroundStyle(SurveyColor.muted)

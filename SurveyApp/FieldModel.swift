@@ -72,6 +72,8 @@ final class FieldModel: ObservableObject {
     @Published var enclosingBook = false
     @Published private(set) var exportMessage: String?
     @Published private(set) var exportURL: URL?
+    @Published var operation = OperationDesk.load()
+    @Published var showsToolOrder = false
     private var epochWatch = EpochWatch()
 
     let tiles: TileStore
@@ -944,18 +946,19 @@ final class FieldModel: ObservableObject {
         try? prefixStore.save(to: siteDirectory)
     }
 
-    func captureObservation() {
+    @discardableResult
+    func captureObservation() -> Bool {
         guard StageGate.allowsRecording(workID: workCatalog.selected.id, stage: stageTransition.stage) else {
             captureMessage = Self.stageDroppedRecording
-            return
+            return false
         }
         guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
             captureMessage = "位置が無いので残せません。"
-            return
+            return false
         }
         guard let name = nextPointName else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
-            return
+            return false
         }
         let work = workCatalog.selected
         let correction = correctionStore.active
@@ -979,26 +982,28 @@ final class FieldModel: ObservableObject {
         captureMessage = shifted == nil
             ? "\(observation.name)を残しました。下見の座標は捨てません。"
             : "\(observation.name)を残しました。補正を引いた座標も残し、取得時の位置は捨てません。"
+        return true
     }
 
-    func recordControlPoint() {
+    @discardableResult
+    func recordControlPoint() -> Bool {
         guard StageGate.allowsRecording(workID: "boundary", stage: stageTransition.stage) else {
             captureMessage = Self.stageDroppedRecording
-            return
+            return false
         }
         guard let position = reading.position else {
             captureMessage = "位置が無いので残せません。"
-            return
+            return false
         }
         guard let fix = controlFix.record(at: position.timestamp) else {
             captureMessage = controlFix.restarted
                 ? "FIX が切れたので、やり直してください。"
                 : "RTK FIX のときだけ基準点を記録できます。FLOAT と単独は残せません。"
-            return
+            return false
         }
         guard let name = nextPointName else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
-            return
+            return false
         }
         let condition = ObservationCondition.snapshot(
             position: fix.position,
@@ -1018,6 +1023,60 @@ final class FieldModel: ObservableObject {
         let satellites = condition.satelliteNote
         let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
         captureMessage = "\(name)を基準点にしました。\(condition.solutionLabel) \(Int(fix.fixDurationSeconds.rounded()))秒、水平 \(CoordinateText.accuracyMeters(fix.horizontalAccuracyMeters))、高さ \(vertical)、衛星 \(satellites)。"
+        return true
+    }
+
+    func setSkill(_ level: SkillLevel) {
+        operation.level = level
+        operation.phase = .idle
+        operation.pending = nil
+        operation.save()
+    }
+
+    func moveTools(from source: IndexSet, to destination: Int) {
+        operation.shelf.move(from: source, to: destination)
+        operation.save()
+    }
+
+    func toggleOperationDetail() {
+        operation.toggleDetail()
+        operation.save()
+    }
+
+    func toggleControlSection() {
+        operation.toggleControl()
+    }
+
+    func toggleEyesFree() {
+        operation.eyesFree.toggle()
+        operation.save()
+    }
+
+    func receiveOperation(_ input: OperationInput) {
+        let effect = operation.preview(input)
+        switch effect {
+        case .saveObservation(let feedback):
+            guard captureObservation() else { return }
+            operation.commit(effect)
+            ConfirmCue.play(feedback)
+        case .saveControl(let feedback):
+            guard recordControlPoint() else { return }
+            operation.commit(effect)
+            ConfirmCue.play(feedback)
+        case .openWork:
+            operation.commit(effect)
+            tab = .map
+        case .openExport:
+            operation.commit(effect)
+            tab = .export
+        default:
+            operation.commit(effect)
+        }
+    }
+
+    func consumePendingConfirm() {
+        guard OperationPending.consume() else { return }
+        receiveOperation(.actionButton)
     }
 
     func rebase(_ observationID: UUID, onto targetID: UUID) {
@@ -1045,6 +1104,7 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
+        consumePendingConfirm()
         radio.arm()
         radio.onRelay = { [weak self] packet in
             DispatchQueue.main.async {
