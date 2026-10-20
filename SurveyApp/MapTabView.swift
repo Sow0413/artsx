@@ -196,6 +196,18 @@ struct MapTabView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    Button {
+                        field.showsBatter = true
+                    } label: {
+                        Text("丁張")
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: 560, minHeight: OutdoorContrast.primaryPoints)
+                            .frame(maxWidth: .infinity)
+                            .background(SurveyColor.blue)
+                            .foregroundStyle(SurveyColor.onAccent)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
                     captureButton
                 }
             }

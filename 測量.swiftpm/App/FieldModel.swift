@@ -78,6 +78,9 @@ final class FieldModel: ObservableObject {
     @Published var showsStature = false
     @Published var asksStature = false
     @Published var showsCrosshair = false
+    @Published var showsBatter = false
+    @Published var batter = BatterSettings.load()
+    @Published var poleHeight = PoleHeight.load()
     @Published var tiltZero = TiltZero.load()
     @Published private(set) var crosshairTilt: Double?
     @Published private(set) var sightTiltRadians: Double?
@@ -1073,6 +1076,53 @@ final class FieldModel: ObservableObject {
     func saveTiltZero(_ bias: Double) {
         tiltZero = TiltZero(biasRadians: bias, calibrated: true)
         tiltZero.save()
+    }
+
+    func saveBatter(_ settings: BatterSettings) {
+        let clean = settings.sanitized()
+        batter = clean
+        clean.save()
+    }
+
+    func savePoleMeters(_ meters: Double?) {
+        let height = PoleHeight(meters: meters)
+        poleHeight = height
+        height.save()
+    }
+
+    /// 決めた高さを種別「丁張」で残す。身長補正は掛けない。iPhone なら段階0。
+    @discardableResult
+    func registerBatter(measuredHeight: Double) -> Bool {
+        guard var position = workingReading.position, position.isPlottable else {
+            captureMessage = "位置が無いので、残せません。"
+            return false
+        }
+        guard let record = BatterMath.record(measured: measuredHeight, stage: position.stage, receiver: position.receiver) else {
+            captureMessage = "高さが無いので、残せません。"
+            return false
+        }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return false
+        }
+        position.ellipsoidalHeightMeters = record.heightMeters
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: record.stage,
+            durationSeconds: nil,
+            epochCount: nil
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: workCatalog.selected.id,
+            captured: position,
+            condition: condition
+        )
+        store(observation)
+        remember(CoordinateBookIndex.entry(from: observation, kind: record.kind))
+        let guide = record.guide ? "\(BatterMath.guideWord)。" : ""
+        captureMessage = "\(name)を丁張にしました。段階\(record.stage.rawValue)。\(guide)"
+        return true
     }
 
     var crosshairElevation: Double? {

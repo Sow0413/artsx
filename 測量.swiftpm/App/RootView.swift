@@ -137,6 +137,9 @@ struct RootView: View {
         .sheet(isPresented: $field.showsCrosshair) {
             CrosshairSheet(field: field)
         }
+        .sheet(isPresented: $field.showsBatter) {
+            BatterSheet(field: field, drawing: field.drawing)
+        }
     }
 
     private func syncVolume() {
