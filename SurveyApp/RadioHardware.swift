@@ -2,8 +2,11 @@ import Foundation
 
 /// Playgrounds では PushToTalk と MultipeerConnectivity を切る。権限の出る API はコンパイルしない。
 enum RadioHardware {
-    #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
-    static let pushToTalk = true
+    #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
+    /// PushToTalk は Apple silicon 上の iOS アプリには無い。呼ぶ前にここで止める。
+    static var pushToTalk: Bool {
+        !ProcessInfo.processInfo.isiOSAppOnMac
+    }
     #else
     static let pushToTalk = false
     #endif

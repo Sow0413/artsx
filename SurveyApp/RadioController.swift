@@ -21,7 +21,7 @@ final class RadioController: ObservableObject {
     var onRelay: ((RadioPacket) -> Void)?
     private var heardRadio: [String] = []
 
-    #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+    #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
     private let system = SystemPushToTalk()
     #endif
 
@@ -70,7 +70,7 @@ final class RadioController: ObservableObject {
     func audioData() -> [UUID: Data] { desk.audio }
 
     func arm() {
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if RadioHardware.pushToTalk {
             system.onBegan = { [weak self] in self?.systemTalkBegan() }
             system.onEnded = { [weak self] in self?.systemTalkEnded() }
@@ -101,7 +101,7 @@ final class RadioController: ObservableObject {
     func begin(channel: RadioChannel, station: RadioStationStamp?) {
         desk.attachStation = attachStation
         desk.join(channel)
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if RadioHardware.pushToTalk {
             system.join(channel)
         }
@@ -109,7 +109,7 @@ final class RadioController: ObservableObject {
         nearby.start(channel: channel, name: desk.speaker)
         let started = desk.beginTalking(at: Date(), station: station) != nil
         systemBegan = started
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if started, RadioHardware.pushToTalk {
             system.begin()
         }
@@ -118,7 +118,7 @@ final class RadioController: ObservableObject {
     }
 
     func end(projectName: String?, root: URL?) {
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if RadioHardware.pushToTalk {
             system.end()
         }

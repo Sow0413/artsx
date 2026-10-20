@@ -27,6 +27,9 @@ targets:
     dependencies:
       - package: SurveyCore
         product: SurveyCore
+      - sdk: PushToTalk.framework
+        weak: true
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.artshome.artsx
@@ -35,6 +38,7 @@ targets:
         INFOPLIST_FILE: SurveyApp/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     scheme:

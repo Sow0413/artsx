@@ -13,6 +13,9 @@ grep -q 'PRODUCT_BUNDLE_IDENTIFIER: com.artshome.artsx$' project.yml || fail "bu
 grep -q 'DEVELOPMENT_TEAM: 9PT57JQMVT' project.yml || fail "team"
 grep -q 'MARKETING_VERSION: "1.0"' project.yml || fail "version"
 grep -q 'PRODUCT_NAME: artsx$' project.yml || fail "product name"
+grep -q 'SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO' project.yml || fail "mac availability"
+grep -q 'sdk: PushToTalk.framework' project.yml || fail "PushToTalk weak link"
+grep -q 'weak: true' project.yml || fail "PushToTalk weak link"
 if grep -q 'UIBackgroundModes' project.yml; then
   fail "background mode is set before the App ID has that capability"
 fi
