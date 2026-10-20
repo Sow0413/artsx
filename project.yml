@@ -36,5 +36,7 @@ targets:
         SUPPORTS_MACCATALYST: NO
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "押して話す無線で、同じプロジェクトの端末へ声を送ります。"
+        INFOPLIST_KEY_UIBackgroundModes: push-to-talk
     scheme:
       gatherCoverageData: false

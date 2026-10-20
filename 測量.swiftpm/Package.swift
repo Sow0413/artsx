@@ -44,6 +44,9 @@ let package = Package(
             name: "AppModule",
             dependencies: ["SurveyCore"],
             path: "App",
+            swiftSettings: [
+                .define("SURVEY_PLAYGROUND")
+            ],
             exclude: [
                 "Info.plist",
                 "PrivacyInfo.xcprivacy",

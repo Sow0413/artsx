@@ -72,6 +72,7 @@ final class FieldModel: ObservableObject {
     let packDirectory: URL
     let siteDirectory: URL
     let drawing: DrawingSession
+    let radio: RadioController
     let controlPoints: [ControlPoint]
     private var prefixStore: PointPrefixStore
     private let source: any PositionSource
@@ -106,6 +107,7 @@ final class FieldModel: ObservableObject {
         self.prefixStore = prefixes
         self.pointPrefix = prefixes.prefix(for: prefixes.activeKey)
         self.drawing = DrawingSession(projectsRoot: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true))
+        self.radio = RadioController()
         self.reading = .waiting
         self.camera = MapCameraFollow()
         self.viewport = MapViewportPolicy.japanOverview
@@ -114,6 +116,26 @@ final class FieldModel: ObservableObject {
         drawing.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }.store(in: &cancellables)
+        radio.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }.store(in: &cancellables)
+    }
+
+    func beginRadio() {
+        let project = drawing.project
+        let channel = RadioChannel.project(id: project?.id ?? "local", name: project?.name ?? "未選択")
+        let position = workingReading.position
+        let text = drawing.operatorGuide(at: position)?.line ?? ""
+        let stamp = RadioStationStamp(
+            text: text,
+            latitudeDegrees: position?.latitudeDegrees,
+            longitudeDegrees: position?.longitudeDegrees
+        )
+        radio.begin(channel: channel, station: stamp)
+    }
+
+    func endRadio() {
+        radio.end(projectName: drawing.project?.name, root: drawing.projectsRoot)
     }
 
     func beginDrawingMapPick() {
@@ -320,6 +342,7 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
+        radio.arm()
         source.start()
         if readTask == nil {
             let readings = source.readings

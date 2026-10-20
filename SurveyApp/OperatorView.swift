@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 import SurveyCore
 
-/// 運転席に置いた iPhone。測点、向き、下がり、作業半径だけを大きく出す。操作は要らない。
+/// 運転席に置いた iPhone。測点、向き、下がり、作業半径と、押して話すボタン。
 struct OperatorView: View {
     @ObservedObject var field: FieldModel
     @ObservedObject var drawing: DrawingSession
@@ -41,6 +41,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 28)
+                    .padding(.bottom, 108)
                 } else {
                     VStack(spacing: 6) {
                         stationLabel(station)
@@ -50,6 +51,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 28)
+                    .padding(.bottom, 108)
                 }
                 VStack {
                     HStack {
@@ -65,9 +67,11 @@ struct OperatorView: View {
                         .foregroundStyle(SurveyColor.muted)
                     }
                     Spacer()
+                    talkButton
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
+                .padding(.bottom, 8)
             }
         }
         .background(SurveyColor.background)
@@ -164,5 +168,43 @@ struct OperatorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var talkButton: some View {
+        let talking = field.radio.phase == .transmitting
+        return VStack(spacing: 6) {
+            Text(field.radio.status)
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            HStack(spacing: 16) {
+                Text(talking ? "話しています" : "押して話す")
+                    .font(.system(size: 28, weight: .black))
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 84)
+                    .background(talking ? SurveyColor.red : SurveyColor.amber)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(talking ? "話しています。離すと終わります" : "押して話す")
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                if field.radio.phase != .transmitting {
+                                    field.beginRadio()
+                                }
+                            }
+                            .onEnded { _ in
+                                field.endRadio()
+                            }
+                    )
+                Button(field.radio.attachStation ? "測点を添える" : "測点なし") {
+                    field.radio.attachStation.toggle()
+                }
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            }
+        }
     }
 }
