@@ -148,6 +148,9 @@ struct RootView: View {
         .sheet(isPresented: $field.showsPace) {
             PaceSheet(field: field)
         }
+        .sheet(isPresented: $field.showsARStakeout) {
+            ARStakeoutSheet(field: field)
+        }
     }
 
     private func syncVolume() {

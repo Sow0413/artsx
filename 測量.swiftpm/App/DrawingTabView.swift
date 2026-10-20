@@ -696,6 +696,8 @@ struct DrawingTabView: View {
                             .font(SurveyType(20, .heavy))
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    Button("AR位置出し") { field.showsARStakeout = true }
+                        .buttonStyle(SurveyPlainButton())
                     HStack(spacing: 8) {
                         ForEach(StakeoutUnit.allCases, id: \.self) { unit in
                             Button(unit.label) { field.setStakeoutUnit(unit) }

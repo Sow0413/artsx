@@ -232,6 +232,18 @@ struct MapTabView: View {
                     }
                     .buttonStyle(.plain)
                     Button {
+                        field.showsARStakeout = true
+                    } label: {
+                        Text("AR位置出し")
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: 560, minHeight: OutdoorContrast.primaryPoints)
+                            .frame(maxWidth: .infinity)
+                            .background(SurveyColor.blue)
+                            .foregroundStyle(SurveyColor.onAccent)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    Button {
                         field.showsPace = true
                     } label: {
                         Text("歩測")

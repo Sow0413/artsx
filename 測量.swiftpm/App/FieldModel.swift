@@ -80,6 +80,7 @@ final class FieldModel: ObservableObject {
     @Published var showsCrosshair = false
     @Published var showsBatter = false
     @Published var showsPace = false
+    @Published var showsARStakeout = false
     @Published var pace = PaceProfile.load()
     @Published var stakeoutUnit = StakeoutPacePreference.load()
     @Published private(set) var walkMode: WalkMode = .gnss
@@ -977,6 +978,27 @@ final class FieldModel: ObservableObject {
         let distance = walking ? pacePathMeters : nil
         let sigma = distance.map { PaceMath.paceSigma(distanceMeters: $0) }
         return PaceMath.badge(distanceMeters: distance, sigmaMeters: sigma)
+    }
+
+    func arTargets() -> [ARStakeoutTarget] {
+        let zone = drawing.zone
+        var targets: [ARStakeoutTarget] = []
+        if let inspection = drawing.inspection,
+           let east = inspection.eastingMeters,
+           let north = inspection.northingMeters {
+            let name = inspection.snapLabel ?? "タップした点"
+            targets.append(ARStakeoutTarget(name: name, eastingMeters: east, northingMeters: north))
+        }
+        for entry in journal.bookEntries() {
+            guard let plane = PlaneRectangular.forward(
+                latitudeDegrees: entry.latitudeDegrees,
+                longitudeDegrees: entry.longitudeDegrees,
+                zone: zone
+            ) else { continue }
+            if targets.contains(where: { $0.name == entry.name }) { continue }
+            targets.append(ARStakeoutTarget(name: entry.name, eastingMeters: plane.eastingMeters, northingMeters: plane.northingMeters))
+        }
+        return targets
     }
 
     /// タップした測設点までの案内。オペ画面の測点には使わない。
