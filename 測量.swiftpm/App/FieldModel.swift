@@ -115,6 +115,7 @@ final class FieldModel: ObservableObject {
     @Published private(set) var repeaterCharging = false
     @Published private(set) var loraStatus = "LoRaは未接続です。"
     @Published var showsRepeater = false
+    @Published private(set) var meshPresence: MeshDuty.Presence = .active
     var repeaterBoard = RepeaterBoard()
     var loraOutbox = LoRaOutbox()
     var repeaterLoadedProject: String?

@@ -536,6 +536,7 @@ public struct BucketDesk: Sendable {
 
     public mutating func originate(_ envelope: BucketEnvelope, now: Date) -> BucketEnvelope? {
         guard !selfID.isEmpty, envelope.hops == [selfID], envelope.carriesPayload else { return nil }
+        if seen.contains(envelope.id) { return nil }
         remember(envelope.id)
         hold(envelope, now: now)
         return envelope

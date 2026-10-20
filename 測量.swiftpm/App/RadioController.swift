@@ -20,6 +20,7 @@ final class RadioController: ObservableObject {
     var spacePoint: () -> TalkPoint? = { nil }
     var onRelay: ((RadioPacket) -> Void)?
     var suppressPlayback = false
+    private var heardRadio: [String] = []
 
     #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
     private let system = SystemPushToTalk()
@@ -77,9 +78,12 @@ final class RadioController: ObservableObject {
         }
         #endif
         nearby.onRadio = { [weak self] packet in
-            self?.desk.receive(packet)
-            self?.publish()
-            self?.onRelay?(packet)
+            guard let self else { return }
+            if self.claim(packet) {
+                self.desk.receive(packet)
+                self.publish()
+            }
+            self.onRelay?(packet)
         }
         nearby.observePeers { [weak self] count in
             guard RadioHardware.nearbyPeers else { return }
@@ -87,7 +91,10 @@ final class RadioController: ObservableObject {
             self?.publish()
         }
         mesh.onSent = { [weak self] packet in
-            self?.nearby.send(packet)
+            guard let self else { return }
+            self.nearby.send(packet)
+            self.claim(packet)
+            self.onRelay?(packet)
         }
     }
 
@@ -140,11 +147,22 @@ final class RadioController: ObservableObject {
     }
 
     func ingestRelayed(_ packet: RadioPacket, play: Bool) {
+        guard claim(packet) else { return }
         desk.receive(packet)
         if play, let data = packet.audio {
             playIncoming(data)
         }
         publish()
+    }
+
+    private func claim(_ packet: RadioPacket) -> Bool {
+        let key = MeshDuty.radioFingerprint(packet)
+        if heardRadio.contains(key) { return false }
+        heardRadio.append(key)
+        if heardRadio.count > 200 {
+            heardRadio.removeFirst(heardRadio.count - 200)
+        }
+        return true
     }
 
     private func playIncoming(_ data: Data) {

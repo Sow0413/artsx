@@ -212,12 +212,14 @@ extension FieldModel {
             applyBucket(next, projectName: project.name)
         case .forward(let next):
             applyBucket(next, projectName: project.name)
-            nearby.send(next)
+            if meshChoice(for: next) == .forward {
+                nearby.send(next)
+            }
         }
     }
 
     func relayDisasterSOS(_ packet: SOSPacket) {
-        guard disasterMode || repeaterMode else { return }
+        guard drawing.project != nil else { return }
         publishDisaster(kind: .sos, sos: packet)
         if let beacon = packet.beacon {
             offerLoRa(
@@ -232,14 +234,39 @@ extension FieldModel {
     }
 
     func relayDisasterHeld(now: Date) {
-        guard disasterMode || repeaterMode else { return }
-        let interval = BatterySaver.relayInterval(enabled: batterySaver)
+        guard drawing.project != nil, MeshDuty.relaying(meshPresence) else { return }
+        let interval = MeshDuty.relayInterval(
+            batteryPercent: repeaterBattery,
+            charging: repeaterCharging,
+            saver: batterySaver
+        )
         if let last = lastDisasterRelay, now.timeIntervalSince(last) < interval { return }
         lastDisasterRelay = now
         prepareBucket()
-        for envelope in bucketDesk.forwardable(now: now) {
+        for envelope in bucketDesk.forwardable(now: now) where meshChoice(for: envelope) == .forward {
             nearby.send(envelope)
         }
+    }
+
+    func noteMeshPresence(_ presence: MeshDuty.Presence) {
+        let wasLive = MeshDuty.relaying(meshPresence)
+        meshPresence = presence
+        guard MeshDuty.relaying(presence), !wasLive else { return }
+        lastDisasterRelay = nil
+        relayDisasterHeld(now: Date())
+    }
+
+    private func meshChoice(for envelope: BucketEnvelope) -> MeshRelayChoice {
+        MeshDuty.choice(
+            addressedTo: nil,
+            selfID: crew.deviceID,
+            kind: envelope.kind,
+            hops: envelope.hops.count,
+            hopLimit: envelope.hopLimit,
+            batteryPercent: repeaterBattery,
+            charging: repeaterCharging,
+            presence: meshPresence
+        )
     }
 
     func disasterPeerCount(_ count: Int) {
@@ -300,11 +327,13 @@ extension FieldModel {
         passage: PassageSample? = nil,
         radioPacket: RadioPacket? = nil,
         beacon: RepeaterBeacon? = nil,
-        hopLimit: Int = BucketRelay.hopLimit
+        hopLimit: Int = BucketRelay.hopLimit,
+        envelopeID: UUID = UUID()
     ) {
         guard let project = drawing.project else { return }
         prepareBucket()
         let envelope = BucketRelay.envelope(
+            id: envelopeID,
             projectID: project.id,
             kind: kind,
             deviceID: crew.deviceID,
@@ -319,7 +348,9 @@ extension FieldModel {
             beacon: beacon
         )
         guard let sent = bucketDesk.originate(envelope, now: Date()) else { return }
-        nearby.send(sent)
+        if MeshDuty.relaying(meshPresence) {
+            nearby.send(sent)
+        }
         objectWillChange.send()
     }
 

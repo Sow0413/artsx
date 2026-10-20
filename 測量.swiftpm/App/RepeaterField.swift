@@ -53,8 +53,14 @@ extension FieldModel {
     }
 
     func relayRadio(_ packet: RadioPacket) {
-        guard repeaterMode, drawing.project != nil else { return }
-        publishDisaster(kind: .radio, radioPacket: packet)
+        guard drawing.project != nil else { return }
+        guard MeshDuty.forwards(.radio, batteryPercent: repeaterBattery, charging: repeaterCharging) else { return }
+        publishDisaster(
+            kind: .radio,
+            radioPacket: packet,
+            hopLimit: BucketRelay.hopLimit,
+            envelopeID: MeshDuty.radioEnvelopeID(packet)
+        )
         if loraCertified {
             loraStatus = LoRaPolicy.voiceNote
         }
@@ -62,8 +68,8 @@ extension FieldModel {
 
     func maintainRepeater(now: Date) {
         loadRepeaterIfNeeded()
-        guard repeaterMode else { return }
         readBattery()
+        guard repeaterMode else { return }
         repeaterBoard.age(now: now)
         repeaterLinks = repeaterBoard.links
         sendRepeaterBeacon(force: false, now: now)

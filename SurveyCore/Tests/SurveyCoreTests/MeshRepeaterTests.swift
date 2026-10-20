@@ -148,6 +148,106 @@ final class MeshRepeaterTests: XCTestCase {
         XCTAssertNil(MeshtasticCodec.decodeText(Data([0x08, 0x01])))
     }
 
+    func testEveryPhoneForwardsTrafficThatIsNotAddressedToIt() {
+        XCTAssertEqual(
+            MeshDuty.choice(
+                addressedTo: "佐藤", selfID: "田中", kind: .text, hops: 1, hopLimit: 6,
+                batteryPercent: 80, charging: false, presence: .active
+            ),
+            .forward
+        )
+        XCTAssertEqual(
+            MeshDuty.choice(
+                addressedTo: "田中", selfID: "田中", kind: .text, hops: 1, hopLimit: 6,
+                batteryPercent: 80, charging: false, presence: .active
+            ),
+            .forward
+        )
+        XCTAssertEqual(
+            MeshDuty.choice(
+                addressedTo: "佐藤", selfID: "田中", kind: .position, hops: 6, hopLimit: 6,
+                batteryPercent: 90, charging: false, presence: .active
+            ),
+            .keep
+        )
+    }
+
+    func testALowBatteryPhoneRelaysOnlyUrgentKinds() {
+        XCTAssertFalse(MeshDuty.sparing(batteryPercent: 20, charging: false))
+        XCTAssertTrue(MeshDuty.sparing(batteryPercent: 19, charging: false))
+        XCTAssertFalse(MeshDuty.sparing(batteryPercent: 5, charging: true))
+        XCTAssertFalse(MeshDuty.sparing(batteryPercent: nil, charging: false))
+        for kind in [BucketKind.sos, .radio, .text] {
+            XCTAssertEqual(
+                MeshDuty.choice(
+                    addressedTo: nil, selfID: "a", kind: kind, hops: 1, hopLimit: 6,
+                    batteryPercent: 10, charging: false, presence: .active
+                ),
+                .forward
+            )
+        }
+        for kind in [BucketKind.position, .site, .passage, .beacon] {
+            XCTAssertEqual(
+                MeshDuty.choice(
+                    addressedTo: "ほか", selfID: "a", kind: kind, hops: 1, hopLimit: 6,
+                    batteryPercent: 10, charging: false, presence: .active
+                ),
+                .spare
+            )
+        }
+        XCTAssertEqual(
+            MeshDuty.choice(
+                addressedTo: "ほか", selfID: "a", kind: .position, hops: 1, hopLimit: 6,
+                batteryPercent: 5, charging: true, presence: .active
+            ),
+            .forward
+        )
+        XCTAssertEqual(MeshDuty.relayInterval(batteryPercent: 10, charging: false, saver: false), MeshDuty.sparingRelaySeconds)
+        XCTAssertEqual(MeshDuty.relayInterval(batteryPercent: 10, charging: true, saver: false), BatterySaver.relayInterval(enabled: false))
+        XCTAssertEqual(MeshDuty.relayInterval(batteryPercent: 80, charging: false, saver: true), BatterySaver.relayInterval(enabled: true))
+    }
+
+    func testRelayStopsOutsideTheForeground() {
+        XCTAssertEqual(
+            MeshDuty.choice(
+                addressedTo: nil, selfID: "a", kind: .sos, hops: 0, hopLimit: 6,
+                batteryPercent: 100, charging: true, presence: .background
+            ),
+            .stopped
+        )
+        XCTAssertEqual(
+            MeshDuty.choice(
+                addressedTo: nil, selfID: "a", kind: .sos, hops: 0, hopLimit: 6,
+                batteryPercent: 100, charging: false, presence: .inactive
+            ),
+            .stopped
+        )
+        XCTAssertTrue(MeshDuty.relaying(.active))
+        XCTAssertFalse(MeshDuty.relaying(.background))
+        XCTAssertEqual(MeshDuty.stoppedLabel, "中継停止中")
+        XCTAssertTrue(MeshDuty.locationBackgroundNote.contains("位置情報"))
+        XCTAssertTrue(MeshDuty.locationBackgroundNote.contains("維持しません"))
+        XCTAssertTrue(MeshDuty.pttStandbyNote.contains("PTT"))
+        XCTAssertTrue(MeshDuty.everyoneNote.contains("自分宛て"))
+        XCTAssertTrue(RepeaterPosture.roleNote.contains("補助"))
+    }
+
+    func testTheSameVoiceGetsOneEnvelopeID() {
+        let packet = radioPacket(at: date(3))
+        let first = MeshDuty.radioEnvelopeID(packet)
+        XCTAssertEqual(first, MeshDuty.radioEnvelopeID(packet))
+        var changed = packet
+        changed.audio = Data([9])
+        XCTAssertNotEqual(first, MeshDuty.radioEnvelopeID(changed))
+        var desk = BucketDesk(selfID: "b")
+        let heard = BucketRelay.envelope(id: first, projectID: "field", kind: .radio, deviceID: "a", at: date(3), radio: packet)
+        guard case .forward = desk.receive(heard, now: date(4), projectID: "field") else {
+            return XCTFail("先に受けた")
+        }
+        let again = BucketRelay.envelope(id: first, projectID: "field", kind: .radio, deviceID: "b", at: date(4), radio: packet)
+        XCTAssertNil(desk.originate(again, now: date(4)))
+    }
+
     func testTheForegroundConditionIsExplicit() {
         XCTAssertTrue(RepeaterPosture.condition.contains("前面"))
         XCTAssertTrue(RepeaterPosture.condition.contains("ロック"))

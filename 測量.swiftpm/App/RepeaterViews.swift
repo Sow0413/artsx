@@ -10,11 +10,45 @@ struct RepeaterSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    Text(MeshDuty.everyoneNote)
+                        .font(.system(size: 16, weight: .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(RepeaterPosture.roleNote)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !MeshDuty.relaying(field.meshPresence) {
+                        Text(MeshDuty.stoppedLabel)
+                            .font(.system(size: 18, weight: .black))
+                            .foregroundStyle(SurveyColor.red)
+                        Text(MeshDuty.stoppedReason)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(SurveyColor.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(MeshDuty.locationBackgroundNote)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(MeshDuty.pttStandbyNote)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if MeshDuty.sparing(batteryPercent: field.repeaterBattery, charging: field.repeaterCharging) {
+                        Text(MeshDuty.sparingLabel)
+                            .font(.system(size: 16, weight: .heavy))
+                            .foregroundStyle(SurveyColor.amber)
+                        Text(MeshDuty.sparingNote)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(SurveyColor.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Toggle(isOn: Binding(
                         get: { field.repeaterMode },
                         set: { field.setRepeaterMode($0) }
                     )) {
-                        Text("中継専用")
+                        Text("固定の中継（穴埋め）")
                             .font(.system(size: 18, weight: .heavy))
                             .foregroundStyle(SurveyColor.text)
                     }
@@ -98,7 +132,7 @@ struct RepeaterSheet: View {
                 .padding(16)
             }
             .background(SurveyColor.background)
-            .navigationTitle("中継専用")
+            .navigationTitle("中継")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -126,9 +160,15 @@ struct RepeaterCover: View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 14) {
-                Text("中継中")
+                Text(MeshDuty.relaying(field.meshPresence) ? "中継中" : MeshDuty.stoppedLabel)
                     .font(.system(size: 28, weight: .black))
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(MeshDuty.relaying(field.meshPresence) ? Color.white : SurveyColor.red)
+                if !MeshDuty.relaying(field.meshPresence) {
+                    Text(MeshDuty.stoppedReason)
+                        .font(.system(size: 16, weight: .heavy))
+                        .foregroundStyle(Color.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Text(batteryLine)
                     .font(.system(size: 18, weight: .heavy))
                     .foregroundStyle(Color.white)
@@ -155,6 +195,56 @@ struct RepeaterCover: View {
     private var batteryLine: String {
         let percent = field.repeaterBattery.map { "電池 \($0)%" } ?? "電池 不明"
         return field.repeaterCharging ? "\(percent) 充電中" : percent
+    }
+}
+
+struct MeshRelayStatus: View {
+    @ObservedObject var field: FieldModel
+
+    var body: some View {
+        if !MeshDuty.relaying(field.meshPresence) {
+            status(MeshDuty.stoppedLabel, MeshDuty.stoppedReason, SurveyColor.red, SurveyColor.redBackground)
+        } else if MeshDuty.sparing(batteryPercent: field.repeaterBattery, charging: field.repeaterCharging) {
+            status(MeshDuty.sparingLabel, MeshDuty.sparingNote, SurveyColor.amber, SurveyColor.amberBackground)
+        }
+    }
+
+    private func status(_ title: String, _ detail: String, _ titleColor: Color, _ fill: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 18, weight: .black))
+                .foregroundStyle(titleColor)
+            Text(detail)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(SurveyColor.text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(fill)
+    }
+}
+
+private struct MeshPresenceWatcher: ViewModifier {
+    @ObservedObject var field: FieldModel
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { field.noteMeshPresence(Self.presence(scenePhase)) }
+            .onChange(of: scenePhase) { _, phase in
+                field.noteMeshPresence(Self.presence(phase))
+            }
+    }
+
+    private static func presence(_ phase: ScenePhase) -> MeshDuty.Presence {
+        switch phase {
+        case .active: return .active
+        case .inactive: return .inactive
+        case .background: return .background
+        @unknown default: return .background
+        }
     }
 }
 

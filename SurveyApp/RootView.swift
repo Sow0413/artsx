@@ -25,6 +25,7 @@ struct RootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            MeshRelayStatus(field: field)
             if field.tab != .seat {
                 AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
                     .padding(.horizontal, 12)
@@ -67,6 +68,7 @@ struct RootView: View {
         .preferredColorScheme(.dark)
         .onAppear { field.start() }
         .onDisappear { field.stop() }
+        .modifier(MeshPresenceWatcher(field: field))
         .overlay {
             if field.repeaterMode && field.repeaterDimmed {
                 RepeaterCover(field: field)
