@@ -7,6 +7,7 @@ final class NearbyLink {
     var onCrew: ((CrewPacket) -> Void)?
     var onFall: ((FallNotice) -> Void)?
     var onSOS: ((SOSPacket) -> Void)?
+    var onAid: ((AidPacket) -> Void)?
     private var peerObservers: [(Int) -> Void] = []
 
     #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
@@ -26,6 +27,9 @@ final class NearbyLink {
         }
         peers.onSOS = { [weak self] packet in
             self?.onSOS?(packet)
+        }
+        peers.onAid = { [weak self] packet in
+            self?.onAid?(packet)
         }
         peers.onPeerCount = { [weak self] count in
             self?.peerObservers.forEach { $0(count) }
@@ -72,6 +76,14 @@ final class NearbyLink {
     }
 
     func send(_ packet: SOSPacket) {
+        #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
+        peers.send(packet)
+        #else
+        _ = packet
+        #endif
+    }
+
+    func send(_ packet: AidPacket) {
         #if !SURVEY_PLAYGROUND && canImport(MultipeerConnectivity)
         peers.send(packet)
         #else

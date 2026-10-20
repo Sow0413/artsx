@@ -90,6 +90,7 @@ struct DrawingTabView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
+                FirstResponseCard(field: field)
                 SOSControl(field: field)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
@@ -421,6 +422,7 @@ struct DrawingTabView: View {
             machineSection
             proximitySection
             fallSection
+            SiteAidEditor(field: field)
             eyeSection
             Picker("都道府県", selection: prefectureBinding) {
                 Text("未選択").tag(Optional<String>.none)
@@ -884,7 +886,7 @@ struct DrawingTabView: View {
     }
 }
 
-private struct SurveyPlainButton: ButtonStyle {
+struct SurveyPlainButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 15, weight: .heavy))

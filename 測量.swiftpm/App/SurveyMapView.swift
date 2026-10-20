@@ -43,6 +43,7 @@ struct SurveyMapView: UIViewRepresentable {
         )
         context.coordinator.syncReach(on: map, field: field)
         context.coordinator.syncCrew(on: map, field: field)
+        context.coordinator.syncAid(on: map, field: field)
         context.coordinator.syncHeat(on: map, field: field)
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
@@ -73,6 +74,8 @@ struct SurveyMapView: UIViewRepresentable {
         private var crewOverlays: [MKOverlay] = []
         private var crewAnnotations: [CrewAnnotation] = []
         private var crewKey = ""
+        private var aidAnnotations: [AidAnnotation] = []
+        private var aidKey = ""
         private var heatOverlays: [MKOverlay] = []
         private var heatKey = ""
         private var mapPick = false
@@ -216,6 +219,28 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }
 
+        func syncAid(on map: MKMapView, field: FieldModel) {
+            let arrows = field.aidArrows
+            let key = arrows.map { "\($0.id):\($0.latitudeDegrees):\($0.longitudeDegrees):\($0.text)" }.joined(separator: "|")
+            if key == aidKey { return }
+            aidKey = key
+            if !aidAnnotations.isEmpty {
+                map.removeAnnotations(aidAnnotations)
+                aidAnnotations = []
+            }
+            for arrow in arrows {
+                let mark = AidAnnotation(
+                    pointID: arrow.id,
+                    coordinate: CLLocationCoordinate2D(latitude: arrow.latitudeDegrees, longitude: arrow.longitudeDegrees),
+                    title: arrow.text
+                )
+                aidAnnotations.append(mark)
+            }
+            if !aidAnnotations.isEmpty {
+                map.addAnnotations(aidAnnotations)
+            }
+        }
+
         private static func reachColor(_ coverage: ReachCoverage?) -> UIColor {
             switch coverage {
             case .inside, .onRadius: return SurveyUIColor.green
@@ -352,6 +377,17 @@ struct SurveyMapView: UIViewRepresentable {
                 marker.annotation = point
                 marker.configure(title: point.title ?? point.pointID, selected: point.pointID == selectedControlID)
                 return marker
+            }
+            if let aid = annotation as? AidAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "aid-pin")
+                    ?? MKMarkerAnnotationView(annotation: aid, reuseIdentifier: "aid-pin")
+                view.annotation = aid
+                if let marker = view as? MKMarkerAnnotationView {
+                    marker.markerTintColor = SurveyUIColor.red
+                    marker.glyphText = String(aid.title?.prefix(1) ?? "救")
+                }
+                view.canShowCallout = true
+                return view
             }
             if let crew = annotation as? CrewAnnotation {
                 let view = mapView.dequeueReusableAnnotationView(withIdentifier: "crew-dot")
@@ -650,6 +686,19 @@ final class ReachAreaOverlay: MKPolygon {
 
 final class ReachLineOverlay: MKPolyline {
     var stroke: UIColor = SurveyUIColor.red
+}
+
+final class AidAnnotation: NSObject, MKAnnotation {
+    let pointID: String
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    let title: String?
+
+    init(pointID: String, coordinate: CLLocationCoordinate2D, title: String) {
+        self.pointID = pointID
+        self.coordinate = coordinate
+        self.title = title
+        super.init()
+    }
 }
 
 final class CrewAnnotation: NSObject, MKAnnotation {

@@ -75,6 +75,7 @@ struct OperatorView: View {
                     FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
                         field.cancelFall()
                     }
+                    FirstResponseCard(field: field)
                     SOSControl(field: field)
                     directionHeadline
                     hailButton

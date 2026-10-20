@@ -171,6 +171,8 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
     public var notice: String
     /// そのときの天候。無い記録は nil。
     public var weather: String?
+    /// 初動の時刻。確定前だけ足せる。無い記録は nil。
+    public var aidLog: [AidStamp]?
 
     public init(
         id: UUID = UUID(),
@@ -188,7 +190,8 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
         radio: [IncidentRadioClip],
         strokes: [IncidentStroke] = [],
         notice: String = SafetyNotice.text,
-        weather: String? = nil
+        weather: String? = nil,
+        aidLog: [AidStamp]? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -206,6 +209,7 @@ public struct IncidentOpening: Codable, Equatable, Sendable, Identifiable {
         self.strokes = strokes
         self.notice = notice
         self.weather = weather
+        self.aidLog = aidLog
     }
 }
 
@@ -231,6 +235,7 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
     public var voiceMemoFile: String?
     public var notice: String
     public var weather: String?
+    public var aidLog: [AidStamp]?
 
     public init(
         id: UUID,
@@ -253,7 +258,8 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
         photoFile: String?,
         voiceMemoFile: String?,
         notice: String,
-        weather: String? = nil
+        weather: String? = nil,
+        aidLog: [AidStamp]? = nil
     ) {
         self.id = id
         self.projectID = projectID
@@ -276,6 +282,7 @@ public struct IncidentRecord: Codable, Equatable, Sendable, Identifiable {
         self.voiceMemoFile = voiceMemoFile
         self.notice = notice
         self.weather = weather
+        self.aidLog = aidLog
     }
 }
 
@@ -487,6 +494,17 @@ public enum IncidentBook {
         try encode(opening, to: url)
     }
 
+    public static func replaceOpening(_ opening: IncidentOpening, projectName: String, at root: URL) throws {
+        let directory = try incidentDirectory(opening.id, projectName: projectName, at: root, create: false)
+        if FileManager.default.fileExists(atPath: directory.appendingPathComponent(recordName).path) {
+            throw IncidentError.alreadySealed
+        }
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent(openingName).path) else {
+            throw IncidentError.missingOpening
+        }
+        try encode(opening, to: directory.appendingPathComponent(openingName))
+    }
+
     public static func appendSample(_ sample: IncidentSample, incidentID: UUID, projectName: String, at root: URL) throws {
         let directory = try incidentDirectory(incidentID, projectName: projectName, at: root, create: false)
         if FileManager.default.fileExists(atPath: directory.appendingPathComponent(recordName).path) {
@@ -589,7 +607,8 @@ public enum IncidentBook {
             photoFile: photo,
             voiceMemoFile: voice,
             notice: opening.notice,
-            weather: opening.weather
+            weather: opening.weather,
+            aidLog: opening.aidLog
         )
         try encode(record, to: recordURL)
         try IncidentReport.pdf(record).write(to: directory.appendingPathComponent(pdfName))
@@ -831,6 +850,16 @@ public final class IncidentSession {
         try IncidentBook.attachVoice(data, incidentID: id, projectName: projectName, at: root)
     }
 
+    public func noteAid(_ stamp: AidStamp, incidentID: UUID, projectName: String, at root: URL) throws {
+        guard var opening = open[incidentID] else { throw IncidentError.missingOpening }
+        var log = opening.aidLog ?? []
+        if log.contains(where: { $0.at == stamp.at && $0.text == stamp.text }) { return }
+        log.append(stamp)
+        opening.aidLog = log
+        try IncidentBook.replaceOpening(opening, projectName: projectName, at: root)
+        open[incidentID] = opening
+    }
+
     public func closeDue(
         projectName: String,
         at root: URL,
@@ -949,6 +978,18 @@ enum IncidentReport {
                 let audio = clip.audioFile == nil ? "音声 \(clip.audioByteCount)バイト" : "音声ファイルあり"
                 let delivered = clip.delivered ? "届いた" : "届いていない"
                 lines.append("\(clip.speaker) \(station) \(audio) \(delivered)")
+            }
+        }
+        if record.trigger == .sos || record.trigger == .fall || !(record.aidLog ?? []).isEmpty {
+            lines.append("初動")
+            lines.append(FirstCall.recordNote)
+            let log = record.aidLog ?? []
+            if log.isEmpty {
+                lines.append("なし")
+            } else {
+                for item in log.sorted(by: { $0.at < $1.at }) {
+                    lines.append("\(stamp.string(from: item.at)) \(item.text)")
+                }
             }
         }
         lines.append("図面 \(record.drawingFile)")

@@ -48,6 +48,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var approachRepeatSeconds: Double?
     /// 現場の天候。集計の列に使う。測っていないときは nil。
     public var weather: String?
+    /// AED、担架、救急箱、住所、連絡先。古いプロジェクトは nil。
+    public var siteAid: SiteAid?
 
     public init(
         id: String = UUID().uuidString,
@@ -69,7 +71,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         proximityMarginMeters: Double? = nil,
         approachLeadMeters: Double? = nil,
         approachRepeatSeconds: Double? = nil,
-        weather: String? = nil
+        weather: String? = nil,
+        siteAid: SiteAid? = nil
     ) {
         self.id = id
         self.name = name
@@ -91,6 +94,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.approachLeadMeters = approachLeadMeters
         self.approachRepeatSeconds = approachRepeatSeconds
         self.weather = weather
+        self.siteAid = siteAid
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -98,6 +102,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         case machinePreset, machineRadiusMeters, eyeHeightMeters, sightDatum, phoneAtEyes
         case stationIntervalMeters, stationOrigin, stationLine
         case cautionMeters, proximityMarginMeters, approachLeadMeters, approachRepeatSeconds, weather
+        case siteAid
     }
 
     public init(from decoder: Decoder) throws {
@@ -122,6 +127,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         approachLeadMeters = try container.decodeIfPresent(Double.self, forKey: .approachLeadMeters)
         approachRepeatSeconds = try container.decodeIfPresent(Double.self, forKey: .approachRepeatSeconds)
         weather = try container.decodeIfPresent(String.self, forKey: .weather)
+        siteAid = try container.decodeIfPresent(SiteAid.self, forKey: .siteAid)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -146,6 +152,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(approachLeadMeters, forKey: .approachLeadMeters)
         try container.encodeIfPresent(approachRepeatSeconds, forKey: .approachRepeatSeconds)
         try container.encodeIfPresent(weather, forKey: .weather)
+        try container.encodeIfPresent(siteAid, forKey: .siteAid)
     }
 }
 

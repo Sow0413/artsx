@@ -437,6 +437,16 @@ final class DrawingSession: ObservableObject {
         weatherLabel = project.weather ?? ""
     }
 
+    func setSiteAid(_ aid: SiteAid) {
+        guard var current = project else {
+            message = "先にプロジェクトを作ってください。"
+            return
+        }
+        current.siteAid = aid.isBlank ? nil : aid
+        project = current
+        persistProject()
+    }
+
     func setWeather(_ label: String) {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         weatherLabel = trimmed

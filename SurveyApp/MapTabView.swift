@@ -28,6 +28,7 @@ struct MapTabView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
+                FirstResponseCard(field: field)
                 SOSControl(field: field)
                     .padding(.horizontal, 12)
                     .padding(.top, 6)

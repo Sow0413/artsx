@@ -79,6 +79,11 @@ final class FieldModel: ObservableObject {
     let fall = FallMonitor()
     let fallRelay = FallRelay(reachable: false)
     let sosRelay = SOSRelay(reachable: false)
+    let aidRelay = AidRelay(reachable: false)
+    @Published private(set) var firstEpisode: FirstEpisode?
+    @Published private(set) var firstView: FirstView?
+    @Published private(set) var aidArrows: [AidArrow] = []
+    @Published var showsReadout119 = false
     @Published private(set) var sosActive = false
     @Published private(set) var sosPointer: SOSPointer?
     @Published private(set) var sosHelpers = ""
@@ -107,6 +112,10 @@ final class FieldModel: ObservableObject {
     private var campaignPoint: ControlPoint?
     private var sosDesk = SOSDesk()
     private var sosIncoming: SOSBeacon?
+    private var firstDesk = FirstDesk()
+    private var firstIncidentID: UUID?
+    private var lastIncidentID: UUID?
+    private var spokenFirst = ""
     private var cancellables: Set<AnyCancellable> = []
 
     init(
@@ -209,7 +218,9 @@ final class FieldModel: ObservableObject {
         sosActive = true
         SOSSound.arm()
         crew.tellWatchSOS(live: true)
+        let previousIncident = lastIncidentID
         refreshSOS(now: Date())
+        beginFirst(trigger: .sos, incidentID: lastIncidentID != previousIncident ? lastIncidentID : nil)
     }
 
     func stopSOS() {
@@ -313,6 +324,210 @@ final class FieldModel: ObservableObject {
         }
     }
 
+    func acceptNearestDuty() {
+        guard let episode = firstDesk.acceptNearest(deviceID: crew.deviceID, at: Date()) else { return }
+        commitFirst(episode)
+    }
+
+    func assignGreeter(id: String, name: String) {
+        guard let episode = firstDesk.assignGreeter(id: id, name: name, at: Date()) else { return }
+        commitFirst(episode)
+    }
+
+    func acceptGreeterDuty() {
+        guard let episode = firstDesk.acceptGreeter(deviceID: crew.deviceID, at: Date()) else { return }
+        commitFirst(episode)
+    }
+
+    func takeGreeterDuty() {
+        assignGreeter(id: crew.deviceID, name: crew.displayName)
+        acceptGreeterDuty()
+    }
+
+    func setAidCheck(_ item: AidCheck, answer: Bool) {
+        guard let episode = firstDesk.setCheck(item, answer: answer, at: Date()) else { return }
+        commitFirst(episode)
+    }
+
+    func openReadout119() {
+        showsReadout119 = true
+        if let episode = firstDesk.noteReadout(at: Date()) {
+            commitFirst(episode)
+        }
+        CrewVoice.say(readoutSpeech())
+    }
+
+    func noteCall119() {
+        if let episode = firstDesk.noteCall(at: Date()) {
+            commitFirst(episode)
+        }
+    }
+
+    func endFirst() {
+        guard let episode = firstDesk.end(at: Date()) else { return }
+        commitFirst(episode)
+    }
+
+    func saveSiteAid(_ aid: SiteAid) {
+        drawing.setSiteAid(aid)
+        refreshAidArrows()
+    }
+
+    func addAidPoint(_ kind: AidPointKind) {
+        guard let position = workingReading.position, position.isPlottable else {
+            incidentNote = "位置が無いので置けません。"
+            return
+        }
+        var aid = drawing.project?.siteAid ?? .empty
+        aid.points.append(AidPoint(
+            kind: kind,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees
+        ))
+        saveSiteAid(aid)
+        incidentNote = "\(kind.label)をここに置きました"
+    }
+
+    func removeAidPoint(_ id: String) {
+        var aid = drawing.project?.siteAid ?? .empty
+        aid.points.removeAll { $0.id == id }
+        saveSiteAid(aid)
+    }
+
+    func addAidContact(name: String, phone: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPhone = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty || !trimmedPhone.isEmpty else { return }
+        var aid = drawing.project?.siteAid ?? .empty
+        aid.contacts.append(AidContact(name: trimmedName, phone: trimmedPhone))
+        saveSiteAid(aid)
+    }
+
+    func removeAidContact(_ id: String) {
+        var aid = drawing.project?.siteAid ?? .empty
+        aid.contacts.removeAll { $0.id == id }
+        saveSiteAid(aid)
+    }
+
+    private func beginFirst(trigger: IncidentTrigger, incidentID: UUID?) {
+        guard let project = drawing.project else { return }
+        guard let position = workingReading.position, position.isPlottable else { return }
+        let peers = crew.peers.map {
+            FirstPeer(
+                id: $0.id,
+                name: $0.name,
+                latitudeDegrees: $0.latitudeDegrees,
+                longitudeDegrees: $0.longitudeDegrees,
+                sentAt: $0.sentAt,
+                courseDegrees: $0.courseDegrees,
+                headingDegrees: $0.headingDegrees
+            )
+        }
+        guard let episode = firstDesk.begin(
+            trigger: trigger,
+            victimID: crew.deviceID,
+            victimName: crew.displayName,
+            latitude: position.latitudeDegrees,
+            longitude: position.longitudeDegrees,
+            channelID: project.id,
+            peers: peers,
+            at: Date()
+        ) else { return }
+        firstIncidentID = incidentID
+        commitFirst(episode)
+    }
+
+    private func commitFirst(_ episode: FirstEpisode) {
+        publishFirst(speak: true)
+        sendAid(AidPacket(episode: episode))
+        recordAidStamps(episode.stamps)
+    }
+
+    private func publishFirst(speak: Bool) {
+        let episode = firstDesk.episode
+        firstEpisode = episode
+        refreshAidArrows()
+        guard let episode, episode.active else {
+            firstView = nil
+            spokenFirst = ""
+            return
+        }
+        let position = workingReading.position
+        let plottable = position?.isPlottable == true
+        let view = FirstCall.view(
+            episode: episode,
+            selfID: crew.deviceID,
+            selfLatitude: plottable ? position?.latitudeDegrees : nil,
+            selfLongitude: plottable ? position?.longitudeDegrees : nil,
+            courseDegrees: position?.courseDegrees,
+            headingDegrees: position?.headingDegrees,
+            facing: tab == .seat ? .machine : .own
+        )
+        firstView = view
+        let line = view.nearestOpen || view.greeterOpen ? view.headline : view.progress
+        if speak, line != spokenFirst {
+            spokenFirst = line
+            CrewVoice.say(line)
+        }
+    }
+
+    private func refreshAidArrows() {
+        let position = workingReading.position
+        let plottable = position?.isPlottable == true
+        aidArrows = FirstCall.arrows(
+            points: drawing.project?.siteAid?.points ?? [],
+            selfLatitude: plottable ? position?.latitudeDegrees : nil,
+            selfLongitude: plottable ? position?.longitudeDegrees : nil,
+            courseDegrees: position?.courseDegrees,
+            headingDegrees: position?.headingDegrees,
+            facing: tab == .seat ? .machine : .own
+        )
+    }
+
+    private func recordAidStamps(_ stamps: [AidStamp]) {
+        guard firstDesk.originated, let id = firstIncidentID, let project = drawing.project else { return }
+        for stamp in stamps {
+            try? incidents.noteAid(stamp, incidentID: id, projectName: project.name, at: drawing.projectsRoot)
+        }
+    }
+
+    private func readoutSpeech() -> String {
+        let site = drawing.project?.siteAid ?? .empty
+        let position = workingReading.position
+        let plottable = position?.isPlottable == true
+        return Readout119.speech(
+            site: site,
+            latitude: plottable ? position?.latitudeDegrees : nil,
+            longitude: plottable ? position?.longitudeDegrees : nil
+        )
+    }
+
+    func ingestAid(_ packet: AidPacket, arrived: SOSPath) {
+        guard packet.episode.channelID == drawing.project?.id else { return }
+        let before = firstDesk.episode?.stamps ?? []
+        guard firstDesk.hear(packet.episode) else { return }
+        if firstDesk.originated {
+            let known = Set(before.map { "\($0.at.timeIntervalSince1970)|\($0.text)" })
+            let fresh = packet.episode.stamps.filter { !known.contains("\($0.at.timeIntervalSince1970)|\($0.text)") }
+            recordAidStamps(fresh)
+        }
+        publishFirst(speak: true)
+        if firstDesk.shouldForward(packet.episode, arrived: arrived, relayReachable: radio.relayReachable) {
+            aidRelay.isReachable = true
+            aidRelay.submit(packet)
+        }
+    }
+
+    private func sendAid(_ packet: AidPacket) {
+        switch SOSPath.choose(relayReachable: radio.relayReachable) {
+        case .relay:
+            aidRelay.isReachable = true
+            aidRelay.submit(packet)
+        case .nearby:
+            nearby.send(packet)
+        }
+    }
+
     private func sosNotice(_ trigger: IncidentTrigger) -> String {
         switch trigger {
         case .fall:
@@ -403,6 +618,7 @@ final class FieldModel: ObservableObject {
             let id = try incidents.open(opening, projectName: project.name, at: drawing.projectsRoot)
             incidentOpen = incidents.latestID != nil
             if id == opening.id {
+                lastIncidentID = id
                 switch trigger {
                 case .alarm:
                     incidentNote = "接近警報を記録しています"
@@ -445,7 +661,9 @@ final class FieldModel: ObservableObject {
         let delivery = fallRelay.submit(notice)
         crew.rememberFallSpeech("\(kind.label)を知らせました", at: now)
         crew.noteWatchFallSent("\(kind.label)を近くに知らせました")
+        let previousIncident = lastIncidentID
         let recorded = recordIncident(trigger: .fall, workKind: kind.label, workName: "転倒検知")
+        beginFirst(trigger: .fall, incidentID: lastIncidentID != previousIncident ? lastIncidentID : nil)
         if recorded {
             incidentNote = delivery == .sent
                 ? "\(kind.label)を記録し、P510へ渡しました"
@@ -717,6 +935,11 @@ final class FieldModel: ObservableObject {
         nearby.onSOS = { [weak self] packet in
             DispatchQueue.main.async {
                 self?.ingestSOS(packet, arrived: .nearby)
+            }
+        }
+        nearby.onAid = { [weak self] packet in
+            DispatchQueue.main.async {
+                self?.ingestAid(packet, arrived: .nearby)
             }
         }
         fall.start()
@@ -1185,6 +1408,11 @@ final class FieldModel: ObservableObject {
         radio.rename(crew.displayName)
         radio.refreshSpace()
         refreshSOS()
+        if firstDesk.episode?.active == true {
+            publishFirst(speak: false)
+        } else {
+            refreshAidArrows()
+        }
         trackIncidents()
         refreshVisibleControlPoints()
         guard followUser, let position = workingReading.position, position.isPlottable else { return }
@@ -1235,6 +1463,8 @@ final class FieldModel: ObservableObject {
         fallRelay.flush()
         sosRelay.isReachable = radio.relayReachable
         sosRelay.flush()
+        aidRelay.isReachable = radio.relayReachable
+        aidRelay.flush()
         let results = (try? incidents.closeDue(
             projectName: project.name,
             at: drawing.projectsRoot,
