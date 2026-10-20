@@ -83,6 +83,7 @@ final class FieldModel: ObservableObject {
     @Published var showsARStakeout = false
     @Published var pace = PaceProfile.load()
     @Published var stakeoutUnit = StakeoutPacePreference.load()
+    @Published var arHandoff = ARHandoffPreference.load()
     @Published private(set) var walkMode: WalkMode = .gnss
     @Published private(set) var bridgeFix: WalkFix?
     @Published private(set) var bridgeNotice: String?
@@ -1029,6 +1030,17 @@ final class FieldModel: ObservableObject {
         let preference = StakeoutPacePreference(unit: unit)
         stakeoutUnit = preference
         preference.save()
+    }
+
+    func setARHandoff(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), let meters = ARHandoffPreference.accepted(value) else {
+            return "切替距離は 0.2m から 20m です。"
+        }
+        let preference = ARHandoffPreference(meters: meters)
+        arHandoff = preference
+        preference.save()
+        return "\(String(format: "%g", meters))m 未満で数値、\(String(format: "%g", preference.resumeMeters))m でARに戻します。"
     }
 
     var paceFactorText: String {

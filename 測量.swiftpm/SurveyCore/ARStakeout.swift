@@ -82,13 +82,59 @@ public struct ARStaff: Equatable, Sendable {
     }
 }
 
+public enum ARGuidanceMode: String, Codable, Sendable, Equatable {
+    case augmented
+    case numeric
+}
+
+/// 端末の中だけ。1m 未満で数値、その 1.2 倍で AR に戻す。
+public struct ARHandoffPreference: Codable, Sendable, Equatable {
+    public static let storageKey = "survey.ar.handoff"
+    public static let defaultMeters = 1.0
+    public static let resumeFactor = 1.2
+    public static let minimumMeters = 0.2
+    public static let maximumMeters = 20.0
+    public var meters: Double
+
+    public var resumeMeters: Double { meters * Self.resumeFactor }
+
+    public init(meters: Double = defaultMeters) {
+        self.meters = Self.accepted(meters) ?? Self.defaultMeters
+    }
+
+    public static func accepted(_ meters: Double) -> Double? {
+        guard meters.isFinite, meters >= minimumMeters, meters <= maximumMeters else { return nil }
+        return meters
+    }
+
+    public func save(to defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    public static func load(from defaults: UserDefaults = .standard) -> ARHandoffPreference {
+        guard let data = defaults.data(forKey: storageKey),
+              let stored = try? JSONDecoder().decode(ARHandoffPreference.self, from: data),
+              accepted(stored.meters) != nil else {
+            return ARHandoffPreference()
+        }
+        return stored
+    }
+}
+
 public struct ARStakeoutPicture: Equatable, Sendable {
     public var staffs: [ARStaff]
     public var errorMeters: Double
     public var errorText: String
     public var realign: Bool
     public var numeric: Bool
+    public var mode: ARGuidanceMode
     public var speech: String?
+    public var detail: String?
+    /// 前が正。数値誘導のゲージ用。
+    public var alongCentimeters: Int
+    /// 右が正。
+    public var acrossCentimeters: Int
     public var methodLabel: String
     public var residualText: String?
 
@@ -98,7 +144,11 @@ public struct ARStakeoutPicture: Equatable, Sendable {
         errorText: String,
         realign: Bool,
         numeric: Bool,
+        mode: ARGuidanceMode,
         speech: String?,
+        detail: String?,
+        alongCentimeters: Int,
+        acrossCentimeters: Int,
         methodLabel: String,
         residualText: String?
     ) {
@@ -107,7 +157,11 @@ public struct ARStakeoutPicture: Equatable, Sendable {
         self.errorText = errorText
         self.realign = realign
         self.numeric = numeric
+        self.mode = mode
         self.speech = speech
+        self.detail = detail
+        self.alongCentimeters = alongCentimeters
+        self.acrossCentimeters = acrossCentimeters
         self.methodLabel = methodLabel
         self.residualText = residualText
     }
@@ -125,10 +179,8 @@ public struct ARScreenPoint: Equatable, Sendable {
     }
 }
 
-/// 位置出しのAR。杖の位置、合わせ、ドリフト、最後の数cmの切替。実機のARKitは未確認。
+/// 位置出しのAR。杖の位置、合わせ、ドリフト、1mでの数値への切替。実機のARKitは未確認。
 public enum ARStakeoutMath {
-    /// これより近い目標は、数値の誘導に切り替える。
-    public static let handoffMeters = 0.05
     /// これを超えたら、もう一度合わせる。設計値。
     public static let realignMeters = 0.10
     public static let driftMetersPerSecond = 0.005
@@ -237,6 +289,19 @@ public enum ARStakeoutMath {
         error.isFinite && error > realignMeters
     }
 
+    /// 1m 未満で数値。数値のあいだは 1.2m 以上になるまで AR に戻さない。
+    public static func mode(distanceMeters: Double, current: ARGuidanceMode, switchMeters: Double) -> ARGuidanceMode {
+        let limit = ARHandoffPreference.accepted(switchMeters) ?? ARHandoffPreference.defaultMeters
+        let resume = limit * ARHandoffPreference.resumeFactor
+        guard distanceMeters.isFinite, distanceMeters >= 0 else { return current }
+        switch current {
+        case .augmented:
+            return distanceMeters < limit ? .numeric : .augmented
+        case .numeric:
+            return distanceMeters >= resume ? .augmented : .numeric
+        }
+    }
+
     /// LiDAR、無ければ検出した平面、無ければ高さ0の仮定。
     public static func ground(lidarY: Double?, planeY: Double?) -> (y: Double, source: String) {
         if let lidarY, lidarY.isFinite { return (lidarY, "LiDAR") }
@@ -263,25 +328,30 @@ public enum ARStakeoutMath {
         strideMeters: Double?,
         unit: StakeoutUnit,
         seconds: TimeInterval,
-        walkedMeters: Double
+        walkedMeters: Double,
+        current: ARGuidanceMode = .augmented,
+        switchMeters: Double = ARHandoffPreference.defaultMeters
     ) -> ARStakeoutPicture? {
         guard targets.indices.contains(currentIndex) else { return nil }
         guard hereEasting.isFinite, hereNorthing.isFinite, groundY.isFinite else { return nil }
-        let current = targets[currentIndex]
+        let selected = targets[currentIndex]
         let here = PlanarPoint(x: hereEasting, y: hereNorthing)
-        let target = PlanarPoint(x: current.eastingMeters, y: current.northingMeters)
+        let target = PlanarPoint(x: selected.eastingMeters, y: selected.northingMeters)
         let distance = here.distance(to: target)
         let azimuth = GeoMath.degrees(fromRadians: GeoMath.arctangent(target.x - here.x, target.y - here.y))
+        let heading = azimuth < 0 ? azimuth + 360 : azimuth
         let guide = StakeoutPace.guide(
             distanceMeters: distance,
-            azimuthDegrees: azimuth < 0 ? azimuth + 360 : azimuth,
+            azimuthDegrees: heading,
             facingDegrees: facingDegrees,
             strideMeters: strideMeters,
             unit: unit
         )
-        let numeric = distance < handoffMeters
+        let chosen = mode(distanceMeters: distance, current: current, switchMeters: switchMeters)
+        let numeric = chosen == .numeric
+        let axes = numeric ? StakeoutPace.axes(distanceMeters: distance, azimuthDegrees: heading, facingDegrees: facingDegrees) : nil
         var staffs: [ARStaff] = []
-        if let staff = staff(current, alignment: alignment, groundY: groundY, label: guide?.speech ?? current.name, primary: true), !numeric {
+        if let staff = staff(selected, alignment: alignment, groundY: groundY, label: guide?.speech ?? selected.name, primary: true), !numeric {
             staffs.append(staff)
         }
         if currentIndex + 1 < targets.count {
@@ -302,7 +372,11 @@ public enum ARStakeoutMath {
             errorText: errorText,
             realign: realign,
             numeric: numeric,
-            speech: guide?.speech,
+            mode: chosen,
+            speech: numeric ? axes?.speech : guide?.speech,
+            detail: axes?.detail,
+            alongCentimeters: axes?.alongCentimeters ?? 0,
+            acrossCentimeters: axes?.acrossCentimeters ?? 0,
             methodLabel: alignment.method.label,
             residualText: alignment.method == .knownPoints ? residualText(alignment.residualsMeters) : nil
         )

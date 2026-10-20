@@ -127,6 +127,72 @@ final class ARStakeoutTests: XCTestCase {
         XCTAssertTrue(near.errorText.contains("もう一度合わせてください"))
     }
 
+    func testHandoffUsesOneMeterAndHysteresis() throws {
+        XCTAssertEqual(ARHandoffPreference().meters, 1, accuracy: 1e-12)
+        XCTAssertEqual(ARHandoffPreference().resumeMeters, 1.2, accuracy: 1e-12)
+        XCTAssertEqual(ARStakeoutMath.mode(distanceMeters: 1, current: .augmented, switchMeters: 1), .augmented)
+        XCTAssertEqual(ARStakeoutMath.mode(distanceMeters: 0.99, current: .augmented, switchMeters: 1), .numeric)
+        XCTAssertEqual(ARStakeoutMath.mode(distanceMeters: 1.19, current: .numeric, switchMeters: 1), .numeric)
+        XCTAssertEqual(ARStakeoutMath.mode(distanceMeters: 1.2, current: .numeric, switchMeters: 1), .augmented)
+        XCTAssertEqual(ARStakeoutMath.mode(distanceMeters: 2.3, current: .numeric, switchMeters: 2), .numeric)
+        XCTAssertEqual(ARStakeoutMath.mode(distanceMeters: 2.4, current: .numeric, switchMeters: 2), .augmented)
+        XCTAssertNil(ARHandoffPreference.accepted(0.1))
+        let name = "handoff-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        ARHandoffPreference(meters: 2).save(to: defaults)
+        XCTAssertEqual(ARHandoffPreference.load(from: defaults).meters, 2, accuracy: 1e-12)
+        XCTAssertEqual(ARHandoffPreference.load(from: defaults).resumeMeters, 2.4, accuracy: 1e-12)
+        XCTAssertNil(defaults.data(forKey: StatureProfile.storageKey))
+
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let alignment = try XCTUnwrap(ARStakeoutMath.align(pairs: [
+            ARStakeoutPair(name: "A1", arX: 0, arZ: 0, eastingMeters: 0, northingMeters: 0),
+            ARStakeoutPair(name: "A2", arX: 10, arZ: 0, eastingMeters: 10, northingMeters: 0)
+        ], at: date))
+        let inside = try XCTUnwrap(ARStakeoutMath.picture(
+            alignment: alignment,
+            targets: [ARStakeoutTarget(name: "K1", eastingMeters: 0.12, northingMeters: 0.80)],
+            currentIndex: 0,
+            groundY: 0,
+            hereEasting: 0,
+            hereNorthing: 0,
+            facingDegrees: 0,
+            strideMeters: 0.8,
+            unit: .steps,
+            seconds: 0,
+            walkedMeters: 0,
+            current: .augmented,
+            switchMeters: 1
+        ))
+        XCTAssertEqual(inside.mode, .numeric)
+        XCTAssertTrue(inside.staffs.isEmpty)
+        XCTAssertEqual(inside.speech, "あと80cm前")
+        XCTAssertEqual(inside.detail, "前 80cm　右 12cm")
+        XCTAssertEqual(inside.alongCentimeters, 80)
+        XCTAssertEqual(inside.acrossCentimeters, 12)
+
+        let held = try XCTUnwrap(ARStakeoutMath.picture(
+            alignment: alignment,
+            targets: [ARStakeoutTarget(name: "K1", eastingMeters: 0, northingMeters: 1.05)],
+            currentIndex: 0,
+            groundY: 0,
+            hereEasting: 0,
+            hereNorthing: 0,
+            facingDegrees: 0,
+            strideMeters: 0.8,
+            unit: .steps,
+            seconds: 0,
+            walkedMeters: 0,
+            current: .numeric,
+            switchMeters: 1
+        ))
+        XCTAssertEqual(held.mode, .numeric)
+        XCTAssertFalse(held.speech?.contains("歩") == true)
+        XCTAssertEqual(held.detail, "前 105cm")
+        print("SURVEY ARHANDOFF 1.2m")
+    }
+
     func testProjectionAndGroundTap() throws {
         var camera = Array(repeating: 0.0, count: 16)
         camera[0] = 1

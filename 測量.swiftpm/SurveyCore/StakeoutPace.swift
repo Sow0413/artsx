@@ -101,17 +101,32 @@ public enum StakeoutPace {
         return "現在地から \(StakeoutText.meters(distanceMeters, precision: precision))、北から時計回り \(azimuth)°"
     }
 
+    /// 距離を前後左右のセンチにする。歩数の閾値は見ない。前が正、右が正。
+    public static func axes(distanceMeters: Double, azimuthDegrees: Double, facingDegrees: Double?) -> StakeoutAxes? {
+        guard distanceMeters.isFinite, distanceMeters >= 0, azimuthDegrees.isFinite else { return nil }
+        let relative = facingDegrees.flatMap { facing -> Double? in
+            guard facing.isFinite else { return nil }
+            return ThreatBearing.relative(targetAzimuthDegrees: azimuthDegrees, facingDegrees: facing)
+        }
+        return split(distanceMeters: distanceMeters, relativeDegrees: relative)
+    }
+
     private static func closeGuide(distanceMeters: Double, relativeDegrees: Double?) -> StakeoutPaceGuide {
+        let axes = split(distanceMeters: distanceMeters, relativeDegrees: relativeDegrees)
+        return StakeoutPaceGuide(speech: axes.speech, detail: axes.detail, steps: 0, close: true)
+    }
+
+    private static func split(distanceMeters: Double, relativeDegrees: Double?) -> StakeoutAxes {
         if distanceMeters < 0.005 {
-            return StakeoutPaceGuide(speech: "着きました", detail: nil, steps: 0, close: true)
+            return StakeoutAxes(speech: "着きました", detail: nil, alongCentimeters: 0, acrossCentimeters: 0)
         }
         guard let relativeDegrees else {
             let cm = centimeters(distanceMeters)
-            return StakeoutPaceGuide(
+            return StakeoutAxes(
                 speech: "あと\(cm)cm。向きが無いので、方向は出せません。",
                 detail: nil,
-                steps: 0,
-                close: true
+                alongCentimeters: 0,
+                acrossCentimeters: 0
             )
         }
         let radians = GeoMath.radians(fromDegrees: relativeDegrees)
@@ -129,7 +144,12 @@ public enum StakeoutPace {
         } else {
             speech = "着きました"
         }
-        return StakeoutPaceGuide(speech: speech, detail: detail, steps: 0, close: true)
+        return StakeoutAxes(
+            speech: speech,
+            detail: detail,
+            alongCentimeters: signedCentimeters(along),
+            acrossCentimeters: signedCentimeters(across)
+        )
     }
 
     /// 「あと35cm前」
@@ -150,5 +170,26 @@ public enum StakeoutPace {
 
     private static func centimeters(_ meters: Double) -> Int {
         Int((abs(meters) * 100).rounded())
+    }
+
+    private static func signedCentimeters(_ meters: Double) -> Int {
+        let cm = centimeters(meters)
+        return meters >= 0 ? cm : -cm
+    }
+}
+
+public struct StakeoutAxes: Equatable, Sendable {
+    public var speech: String
+    public var detail: String?
+    /// 前が正、うしろが負。
+    public var alongCentimeters: Int
+    /// 右が正、左が負。
+    public var acrossCentimeters: Int
+
+    public init(speech: String, detail: String?, alongCentimeters: Int, acrossCentimeters: Int) {
+        self.speech = speech
+        self.detail = detail
+        self.alongCentimeters = alongCentimeters
+        self.acrossCentimeters = acrossCentimeters
     }
 }

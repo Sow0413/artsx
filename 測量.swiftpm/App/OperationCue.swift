@@ -33,6 +33,16 @@ enum LevelCue {
     }
 }
 
+/// ARと数値の案内が切り替わったとき、振動と音を一度返す。実機のマナーモードは未確認。
+enum ARHandoffCue {
+    static func play() {
+        #if !SURVEY_PLAYGROUND
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        AudioServicesPlaySystemSound(1104)
+        #endif
+    }
+}
+
 /// 水準器が ±0.1° に入ったとき、一度だけ振動する。実機は未確認。
 enum CrosshairCue {
     static func play() {

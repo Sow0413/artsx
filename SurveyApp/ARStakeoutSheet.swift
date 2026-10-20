@@ -19,7 +19,8 @@ struct ARStakeoutSheet: View {
             targets: targets,
             facing: facing,
             stride: field.pace.strideMeters,
-            unit: field.stakeoutUnit.unit
+            unit: field.stakeoutUnit.unit,
+            switchMeters: field.arHandoff.meters
         )
         NavigationStack {
             ZStack {
@@ -31,17 +32,8 @@ struct ARStakeoutSheet: View {
                         .padding(10)
                         .background(SurveyColor.card.opacity(0.94))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    if let picture, picture.numeric, let speech = picture.speech {
-                        Text(speech)
-                            .font(SurveyType(40, .heavy))
-                            .foregroundStyle(SurveyColor.text)
-                            .padding(12)
-                            .frame(maxWidth: .infinity)
-                            .background(SurveyColor.card)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        Text("数cm以内なので、数値の誘導に切り替えました。")
-                            .font(SurveyType(16, .heavy))
-                            .foregroundStyle(SurveyColor.text)
+                    if let picture, picture.numeric {
+                        numericGuide(picture)
                     }
                     Spacer(minLength: 0)
                         .allowsHitTesting(false)
@@ -72,9 +64,15 @@ struct ARStakeoutSheet: View {
         .gesture(tap)
         .onAppear {
             targets = field.arTargets()
+            handoffText = String(format: "%g", field.arHandoff.meters)
             start()
         }
         .onDisappear(perform: stop)
+        .onChange(of: picture?.mode) { _, next in
+            guard let next, next != model.mode else { return }
+            model.mode = next
+            ARHandoffCue.play()
+        }
         .onChange(of: picture?.speech) { _, speech in
             if picture?.numeric == true, let speech {
                 StakeoutVoice.say(speech)
@@ -198,12 +196,61 @@ struct ARStakeoutSheet: View {
                     .foregroundStyle(SurveyColor.text)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            Text("RTK FIXのあいだは、向きを保って位置を足し続けます。実機のARは未確認です。")
+            Text("切替 \(String(format: "%g", field.arHandoff.meters))m。\(String(format: "%g", field.arHandoff.resumeMeters))mでARに戻ります。")
+                .font(SurveyType(15, .heavy))
+            HStack(spacing: 8) {
+                TextField("切替距離 m", text: $handoffText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(SurveyType(16, .semibold))
+                Button("反映") {
+                    handoffNote = field.setARHandoff(handoffText)
+                }
+                .buttonStyle(.plain)
+                .font(SurveyType(16, .heavy))
+                .frame(minWidth: 72, minHeight: OutdoorContrast.primaryPoints)
+                .background(SurveyColor.blue)
+                .foregroundStyle(SurveyColor.onAccent)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            if !handoffNote.isEmpty {
+                Text(handoffNote)
+                    .font(SurveyType(14, .semibold))
+            }
+            Text("RTK FIXのあいだは、向きを保って位置を足し続けます。切替の振動と音、実機のARは未確認です。")
                 .font(SurveyType(13, .semibold))
                 .foregroundStyle(SurveyColor.muted)
         }
         .padding(12)
         .background(SurveyColor.card.opacity(0.94))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    @State private var handoffText = ""
+    @State private var handoffNote = ""
+
+    private func numericGuide(_ picture: ARStakeoutPicture) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let speech = picture.speech {
+                Text(speech)
+                    .font(SurveyType(40, .heavy))
+                    .foregroundStyle(SurveyColor.text)
+            }
+            if let detail = picture.detail {
+                Text(detail)
+                    .font(SurveyType(22, .heavy))
+            }
+            ARPlanGauge(
+                alongCentimeters: picture.alongCentimeters,
+                acrossCentimeters: picture.acrossCentimeters,
+                spanCentimeters: max(1, Int((field.arHandoff.meters * 100).rounded()))
+            )
+            .frame(maxWidth: .infinity)
+            Text("\(String(format: "%g", field.arHandoff.meters))m未満なので、前後左右をセンチで出します。")
+                .font(SurveyType(16, .heavy))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SurveyColor.card)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
@@ -271,12 +318,62 @@ struct ARStakeoutSheet: View {
     }
 }
 
+struct ARPlanGauge: View {
+    var alongCentimeters: Int
+    var acrossCentimeters: Int
+    var spanCentimeters: Int
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(SurveyColor.background)
+            Rectangle()
+                .fill(SurveyColor.text)
+                .frame(height: 3)
+            Rectangle()
+                .fill(SurveyColor.text)
+                .frame(width: 3)
+            Circle()
+                .fill(SurveyColor.color(OutdoorContrast.yellow))
+                .frame(width: 22, height: 22)
+                .offset(x: lateral, y: -forward)
+            Text("前").font(SurveyType(14, .heavy)).frame(maxHeight: .infinity, alignment: .top)
+            Text("うしろ").font(SurveyType(14, .heavy)).frame(maxHeight: .infinity, alignment: .bottom)
+            Text("左").font(SurveyType(14, .heavy)).frame(maxWidth: .infinity, alignment: .leading)
+            Text("右").font(SurveyType(14, .heavy)).frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .frame(width: 200, height: 200)
+        .accessibilityLabel(label)
+    }
+
+    private var forward: CGFloat {
+        CGFloat(clamped(alongCentimeters))
+    }
+
+    private var lateral: CGFloat {
+        CGFloat(clamped(acrossCentimeters))
+    }
+
+    private func clamped(_ centimeters: Int) -> Double {
+        let span = Double(max(spanCentimeters, 1))
+        let ratio = min(1, max(-1, Double(centimeters) / span))
+        return ratio * 72
+    }
+
+    private var label: String {
+        let fore = alongCentimeters >= 0 ? "前 \(alongCentimeters)cm" : "うしろ \(-alongCentimeters)cm"
+        let side = acrossCentimeters >= 0 ? "右 \(acrossCentimeters)cm" : "左 \(-acrossCentimeters)cm"
+        return "\(fore)、\(side)"
+    }
+}
+
 final class ARStakeoutModel: ObservableObject {
     @Published var pairs: [ARStakeoutPair] = []
     @Published var alignment: ARStakeoutAlignment?
     @Published var index = 0
     @Published var frame: VisionFrame?
     @Published var pending: ARStakeoutTarget?
+    @Published var mode = ARGuidanceMode.augmented
     @Published private(set) var walkedMeters = 0.0
     private var lastStep: (Double, Double)?
     private var track: [(Double, Double)] = []
@@ -352,7 +449,7 @@ final class ARStakeoutModel: ObservableObject {
         walkedMeters = 0
     }
 
-    func picture(targets: [ARStakeoutTarget], facing: Double?, stride: Double?, unit: StakeoutUnit) -> ARStakeoutPicture? {
+    func picture(targets: [ARStakeoutTarget], facing: Double?, stride: Double?, unit: StakeoutUnit, switchMeters: Double) -> ARStakeoutPicture? {
         guard let alignment else { return nil }
         let current = min(max(0, index), max(0, targets.count - 1))
         let here: (Double, Double)
@@ -380,7 +477,9 @@ final class ARStakeoutModel: ObservableObject {
             strideMeters: stride,
             unit: unit,
             seconds: seconds,
-            walkedMeters: walkedMeters
+            walkedMeters: walkedMeters,
+            current: mode,
+            switchMeters: switchMeters
         )
     }
 }
