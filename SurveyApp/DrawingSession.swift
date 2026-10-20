@@ -55,6 +55,12 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var eyeHeightMeters = 2.0
     @Published private(set) var sightDatum: SightDatum = .ground
     @Published private(set) var phoneAtEyes = true
+    /// 測点間隔。既定 20m。
+    @Published private(set) var stationIntervalMeters = OperatorStation.intervalMeters
+    /// 中心線の始点を No. いくつにするか。
+    @Published private(set) var stationOrigin = 0
+    /// 追加距離付きの中心線。無いときは測点を出さない。
+    @Published private(set) var stationLine: StationLine?
 
     let projectsRoot: URL
     private var reference: (latitude: Double, longitude: Double, name: String)?
@@ -201,6 +207,7 @@ final class DrawingSession: ObservableObject {
         project?.zone = number
         persistProject()
         refresh()
+        rebuildStationLine()
     }
 
     func refreshPlacement(latitude: Double?, longitude: Double?, overrideZone: Bool) {
@@ -242,6 +249,7 @@ final class DrawingSession: ObservableObject {
         project?.axis = next
         persistProject()
         refresh()
+        rebuildStationLine()
     }
 
     func toggleLayer(_ name: String, visible: Bool) {
@@ -256,6 +264,9 @@ final class DrawingSession: ObservableObject {
 
     func operatorGuide(at position: GeodeticPosition?) -> OperatorGuide? {
         guard let position, position.isPlottable else { return nil }
+        if let stationLine {
+            return stationLine.locate(latitudeDegrees: position.latitudeDegrees, longitudeDegrees: position.longitudeDegrees)
+        }
         guard let alignment = operatorPlaneLine(), alignment.count >= 2 else { return nil }
         guard let plane = PlaneRectangular.forward(
             latitudeDegrees: position.latitudeDegrees,
@@ -263,7 +274,12 @@ final class DrawingSession: ObservableObject {
             zone: zone
         ) else { return nil }
         let here = PlanarPoint(x: plane.eastingMeters, y: plane.northingMeters)
-        return OperatorStation.guide(point: here, alignment: alignment)
+        return OperatorStation.guide(
+            point: here,
+            alignment: alignment,
+            interval: stationIntervalMeters,
+            originStation: stationOrigin
+        )
     }
 
     func setDesignHeight(_ text: String) {
@@ -398,6 +414,13 @@ final class DrawingSession: ObservableObject {
         }
         sightDatum = project.sightDatum ?? .ground
         phoneAtEyes = project.phoneAtEyes ?? true
+        if let interval = project.stationIntervalMeters, interval > 0 {
+            stationIntervalMeters = interval
+        } else {
+            stationIntervalMeters = OperatorStation.intervalMeters
+        }
+        stationOrigin = project.stationOrigin ?? 0
+        stationLine = project.stationLine
     }
 
     private func storeCab() {
@@ -412,33 +435,101 @@ final class DrawingSession: ObservableObject {
     }
 
     private func operatorPlaneLine() -> [PlanarPoint]? {
-        guard let document else { return nil }
-        let lines = document.entities.filter { $0.stroke.count >= 2 }
-        let chosen: DrawingEntity?
-        if let operatorEntityID, let found = lines.first(where: { $0.id == operatorEntityID }) {
-            chosen = found
-        } else {
-            let designNames = Set(document.layers.filter { $0.role == .design }.map(\.name))
-            let design = lines.filter { designNames.contains($0.layer) }
-            let pool = design.isEmpty ? lines : design
-            chosen = pool.max { strokeLength($0) < strokeLength($1) }
-        }
-        guard let chosen else { return nil }
-        let plane = chosen.stroke.compactMap { vertex -> PlanarPoint? in
-            guard let geo = DrawingPlacement.geographic(
-                vertex,
-                zone: zone,
-                axis: axis,
-                transform: activeTransform,
-                composesAxis: activeComposesAxis
-            ), let projected = PlaneRectangular.forward(
-                latitudeDegrees: geo.latitudeDegrees,
-                longitudeDegrees: geo.longitudeDegrees,
-                zone: zone
-            ) else { return nil }
-            return PlanarPoint(x: projected.eastingMeters, y: projected.northingMeters)
+        guard let operatorEntityID else { return nil }
+        return planeVertices(entityID: operatorEntityID)
+    }
+
+    private func planeVertices(entityID: Int) -> [PlanarPoint]? {
+        guard let document, let entity = document.entities.first(where: { $0.id == entityID }) else { return nil }
+        let plane = entity.stroke.compactMap { vertex -> PlanarPoint? in
+            planePoint(vertex)
         }
         return plane.count >= 2 ? plane : nil
+    }
+
+    private func planePoint(_ point: PlanarPoint) -> PlanarPoint? {
+        guard let geo = DrawingPlacement.geographic(
+            point,
+            zone: zone,
+            axis: axis,
+            transform: activeTransform,
+            composesAxis: activeComposesAxis
+        ), let projected = PlaneRectangular.forward(
+            latitudeDegrees: geo.latitudeDegrees,
+            longitudeDegrees: geo.longitudeDegrees,
+            zone: zone
+        ) else { return nil }
+        return PlanarPoint(x: projected.eastingMeters, y: projected.northingMeters)
+    }
+
+    private func stationLabels(near vertices: [PlanarPoint]) -> [StationAnchor] {
+        guard let document else { return [] }
+        var labels: [StationAnchor] = []
+        for entity in document.entities {
+            guard case let .text(origin, string, _, _) = entity.primitive else { continue }
+            guard StationName.chainageMeters(in: string, interval: stationIntervalMeters) != nil else { continue }
+            guard let plane = planePoint(origin) else { continue }
+            guard let hit = OperatorStation.project(plane, onto: vertices), abs(hit.offset) <= 40 else { continue }
+            labels.append(StationAnchor(name: string, point: plane))
+        }
+        return labels
+    }
+
+    private func verticesLength(_ vertices: [PlanarPoint]) -> Double {
+        guard vertices.count >= 2 else { return 0 }
+        return OperatorStation.geometricChainage(vertices).last ?? 0
+    }
+
+    private func rebuildStationLine() {
+        guard let existing = stationLine else { return }
+        switch existing.source {
+        case .polyline:
+            guard let operatorEntityID, let vertices = planeVertices(entityID: operatorEntityID) else { return }
+            stationLine = StationLine.polyline(
+                vertices: vertices,
+                zone: zone,
+                intervalMeters: stationIntervalMeters,
+                originStation: stationOrigin,
+                name: existing.name,
+                anchors: stationLabels(near: vertices),
+                id: existing.id
+            )
+        case .anchors:
+            guard let project else { return }
+            let entries = ProjectStore.coordinateBookEntries(projectName: project.name, at: projectsRoot)
+            let anchors = entries.compactMap { entry -> StationAnchor? in
+                guard StationName.chainageMeters(in: entry.name, interval: stationIntervalMeters) != nil else { return nil }
+                guard let plane = PlaneRectangular.forward(
+                    latitudeDegrees: entry.latitudeDegrees,
+                    longitudeDegrees: entry.longitudeDegrees,
+                    zone: zone
+                ) else { return nil }
+                return StationAnchor(name: entry.name, point: PlanarPoint(x: plane.eastingMeters, y: plane.northingMeters))
+            }.sorted { left, right in
+                let leftChain = StationName.chainageMeters(in: left.name, interval: stationIntervalMeters) ?? 0
+                let rightChain = StationName.chainageMeters(in: right.name, interval: stationIntervalMeters) ?? 0
+                return leftChain < rightChain
+            }
+            if let rebuilt = StationLine.namedPoints(
+                anchors: anchors,
+                zone: zone,
+                intervalMeters: stationIntervalMeters,
+                originStation: stationOrigin,
+                name: existing.name,
+                id: existing.id
+            ) {
+                stationLine = rebuilt
+            }
+        }
+    }
+
+    private func storeStation() {
+        guard var current = project else { return }
+        current.stationIntervalMeters = stationIntervalMeters
+        current.stationOrigin = stationOrigin
+        current.stationLine = stationLine
+        project = current
+        persistProject()
     }
 
     private func nearestLineID(to point: PlanarPoint) -> Int? {
@@ -526,13 +617,93 @@ final class DrawingSession: ObservableObject {
         )
     }
 
+    func setStationInterval(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value >= 1, value <= 1000 else {
+            message = "測点間隔は 1m から 1000m です。"
+            return
+        }
+        stationIntervalMeters = MachineReach.roundTenths(value)
+        rebuildStationLine()
+        storeStation()
+        message = "測点間隔を \(String(format: "%.1f", stationIntervalMeters))m にしました。"
+    }
+
+    func setStationOrigin(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Int(trimmed), value >= 0, value <= 9999 else {
+            message = "起点の測点番号は 0 から 9999 です。"
+            return
+        }
+        stationOrigin = value
+        rebuildStationLine()
+        storeStation()
+        message = "起点を No.\(value) にしました。"
+    }
+
     func adoptOperatorLine() {
         guard let inspection else {
             message = "先に図面の線をタップしてください。"
             return
         }
-        operatorEntityID = nearestLineID(to: PlanarPoint(x: inspection.drawingX, y: inspection.drawingY))
-        message = operatorEntityID == nil ? "線が見つかりません。" : "オペの基準線にしました。オペ画面は、この線からの測点だけを出します。"
+        let tapped = PlanarPoint(x: inspection.drawingX, y: inspection.drawingY)
+        operatorEntityID = nearestLineID(to: tapped)
+        guard let operatorEntityID, let vertices = planeVertices(entityID: operatorEntityID) else {
+            message = "線が見つかりません。"
+            return
+        }
+        let labels = stationLabels(near: vertices)
+        guard let line = StationLine.polyline(
+            vertices: vertices,
+            zone: zone,
+            intervalMeters: stationIntervalMeters,
+            originStation: stationOrigin,
+            anchors: labels
+        ) else {
+            message = "中心線にできませんでした。"
+            return
+        }
+        stationLine = line
+        storeStation()
+        let length = String(format: "%.0f", verticesLength(vertices))
+        message = labels.isEmpty
+            ? "中心線にしました。追加距離 \(length)m。起点は No.\(stationOrigin) です。"
+            : "中心線にしました。近くの測点名 \(labels.count) 個で追加距離を張りました。"
+    }
+
+    /// 座標簿のうち、No.23 や No.23+5 の名前の点を順につないで中心線にする。
+    func adoptNamedStations() {
+        guard let project else {
+            message = "先にプロジェクトを作ってください。"
+            return
+        }
+        let entries = ProjectStore.coordinateBookEntries(projectName: project.name, at: projectsRoot)
+        let anchors = entries.compactMap { entry -> StationAnchor? in
+            guard StationName.chainageMeters(in: entry.name, interval: stationIntervalMeters) != nil else { return nil }
+            guard let plane = PlaneRectangular.forward(
+                latitudeDegrees: entry.latitudeDegrees,
+                longitudeDegrees: entry.longitudeDegrees,
+                zone: zone
+            ) else { return nil }
+            return StationAnchor(name: entry.name, point: PlanarPoint(x: plane.eastingMeters, y: plane.northingMeters))
+        }.sorted { left, right in
+            let leftChain = StationName.chainageMeters(in: left.name, interval: stationIntervalMeters) ?? 0
+            let rightChain = StationName.chainageMeters(in: right.name, interval: stationIntervalMeters) ?? 0
+            return leftChain < rightChain
+        }
+        guard let line = StationLine.namedPoints(
+            anchors: anchors,
+            zone: zone,
+            intervalMeters: stationIntervalMeters,
+            originStation: stationOrigin
+        ) else {
+            message = "測点名の点が2つ以上要ります。名前は No.23 や No.23+5 です。"
+            return
+        }
+        operatorEntityID = nil
+        stationLine = line
+        storeStation()
+        message = "測点 \(anchors.count) 点を中心線にしました。追加距離 \(String(format: "%.0f", abs(line.lengthMeters)))m。"
     }
 
     func addTarget(kind: AlignmentTargetKind, latitude: Double, longitude: Double, label: String) {

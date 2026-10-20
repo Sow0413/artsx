@@ -8,6 +8,18 @@ struct MapTabView: View {
             SurveyMapView(field: field)
             VStack(spacing: 0) {
                 WorkBar(field: field)
+                if let station = field.drawing.operatorGuide(at: field.workingReading.position)?.line,
+                   field.drawing.stationLine != nil {
+                    Text(station)
+                        .font(.system(size: 34, weight: .heavy))
+                        .minimumScaleFactor(0.4)
+                        .lineLimit(1)
+                        .foregroundStyle(SurveyColor.text)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 12)
+                        .background(SurveyColor.card.opacity(0.94))
+                }
                 HStack {
                     Spacer()
                     Text(reachCaption)

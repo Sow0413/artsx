@@ -10,6 +10,8 @@ struct DrawingTabView: View {
     @State private var recordName = "起点"
     @State private var radiusDraft = ""
     @State private var eyeDraft = ""
+    @State private var stationIntervalDraft = ""
+    @State private var stationOriginDraft = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -102,6 +104,42 @@ struct DrawingTabView: View {
         .onChange(of: drawing.machineRadiusMeters) { _, _ in syncCabDrafts() }
         .onChange(of: drawing.eyeHeightMeters) { _, _ in syncCabDrafts() }
         .onChange(of: drawing.project?.id) { _, _ in syncCabDrafts() }
+        .onChange(of: drawing.stationIntervalMeters) { _, _ in syncCabDrafts() }
+        .onChange(of: drawing.stationOrigin) { _, _ in syncCabDrafts() }
+    }
+
+    private var stationSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("測点")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            HStack {
+                TextField("間隔 m", text: $stationIntervalDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                TextField("起点 No.", text: $stationOriginDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+                Button("保存") {
+                    drawing.setStationInterval(stationIntervalDraft)
+                    drawing.setStationOrigin(stationOriginDraft)
+                }
+                .buttonStyle(SurveyPlainButton())
+            }
+            Button("測点名の点列を中心線にする") {
+                drawing.adoptNamedStations()
+            }
+            .buttonStyle(SurveyPlainButton())
+            if let line = drawing.stationLine {
+                Text("\(line.name)　\(line.zone)系　\(String(format: "%.0f", abs(line.lengthMeters)))m　間隔 \(String(format: "%g", line.intervalMeters))m　起点 No.\(line.originStation)")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+            } else {
+                Text("図面の線をタップして中心線にするか、座標簿の No. から点列を作ります。")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+            }
+        }
     }
 
     private var machineSection: some View {
@@ -163,6 +201,8 @@ struct DrawingTabView: View {
     private func syncCabDrafts() {
         radiusDraft = String(format: "%g", drawing.machineRadiusMeters)
         eyeDraft = String(format: "%g", drawing.eyeHeightMeters)
+        stationIntervalDraft = String(format: "%g", drawing.stationIntervalMeters)
+        stationOriginDraft = String(drawing.stationOrigin)
     }
 
     private var projectSection: some View {
@@ -238,6 +278,7 @@ struct DrawingTabView: View {
                     .foregroundStyle(SurveyColor.yellow)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            stationSection
             TextField("計画高 m（床掘底。空なら高さそのもの）", text: designHeightBinding)
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.numbersAndPunctuation)
@@ -454,10 +495,13 @@ struct DrawingTabView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
-                Button("オペの基準線にする") {
+                Button("この線を中心線にする") {
                     drawing.adoptOperatorLine()
                 }
                 .buttonStyle(SurveyPlainButton())
+                Text("追加距離を張り、現在地を No.23+5.0m 左 3.2m のように出します。iPhone の精度で足ります。")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SurveyColor.muted)
                 Text("この点がオペの目標です。作業半径の内と外を色で出します。")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(SurveyColor.muted)

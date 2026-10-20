@@ -32,6 +32,12 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var sightDatum: SightDatum?
     /// 端末を目の高さで持つ。false のとき、端末の高さに視線高を足す。
     public var phoneAtEyes: Bool?
+    /// 測点間隔。無いときは 20m。
+    public var stationIntervalMeters: Double?
+    /// 中心線の始点の測点番号。無いときは 0。
+    public var stationOrigin: Int?
+    /// 追加距離を張った中心線。将来の位置共有でも、この値を渡せば測点を出せる。
+    public var stationLine: StationLine?
 
     public init(
         id: String = UUID().uuidString,
@@ -45,7 +51,10 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         machineRadiusMeters: Double? = nil,
         eyeHeightMeters: Double? = nil,
         sightDatum: SightDatum? = nil,
-        phoneAtEyes: Bool? = nil
+        phoneAtEyes: Bool? = nil,
+        stationIntervalMeters: Double? = nil,
+        stationOrigin: Int? = nil,
+        stationLine: StationLine? = nil
     ) {
         self.id = id
         self.name = name
@@ -59,11 +68,15 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.eyeHeightMeters = eyeHeightMeters
         self.sightDatum = sightDatum
         self.phoneAtEyes = phoneAtEyes
+        self.stationIntervalMeters = stationIntervalMeters
+        self.stationOrigin = stationOrigin
+        self.stationLine = stationLine
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, zone, axis, drawings, prefecture
         case machinePreset, machineRadiusMeters, eyeHeightMeters, sightDatum, phoneAtEyes
+        case stationIntervalMeters, stationOrigin, stationLine
     }
 
     public init(from decoder: Decoder) throws {
@@ -80,6 +93,9 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         eyeHeightMeters = try container.decodeIfPresent(Double.self, forKey: .eyeHeightMeters)
         sightDatum = try container.decodeIfPresent(SightDatum.self, forKey: .sightDatum)
         phoneAtEyes = try container.decodeIfPresent(Bool.self, forKey: .phoneAtEyes)
+        stationIntervalMeters = try container.decodeIfPresent(Double.self, forKey: .stationIntervalMeters)
+        stationOrigin = try container.decodeIfPresent(Int.self, forKey: .stationOrigin)
+        stationLine = try container.decodeIfPresent(StationLine.self, forKey: .stationLine)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -96,6 +112,9 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(eyeHeightMeters, forKey: .eyeHeightMeters)
         try container.encodeIfPresent(sightDatum, forKey: .sightDatum)
         try container.encodeIfPresent(phoneAtEyes, forKey: .phoneAtEyes)
+        try container.encodeIfPresent(stationIntervalMeters, forKey: .stationIntervalMeters)
+        try container.encodeIfPresent(stationOrigin, forKey: .stationOrigin)
+        try container.encodeIfPresent(stationLine, forKey: .stationLine)
     }
 }
 

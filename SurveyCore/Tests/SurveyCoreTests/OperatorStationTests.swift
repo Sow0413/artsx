@@ -5,7 +5,7 @@ final class OperatorStationTests: XCTestCase {
     func testStationAndLeftOffsetUseTwentyMeterPoints() {
         let line = [PlanarPoint(x: 0, y: 0), PlanarPoint(x: 500, y: 0)]
         let guide = OperatorStation.guide(point: PlanarPoint(x: 465, y: 3), alignment: line)
-        XCTAssertEqual(guide?.line, "No.23+5m 左3m")
+        XCTAssertEqual(guide?.line, "No.23+5.0m 左 3.0m")
         XCTAssertEqual(guide?.alongMeters ?? 0, 465, accuracy: 1e-6)
         XCTAssertEqual(guide?.offsetMeters ?? 0, 3, accuracy: 1e-6)
         XCTAssertEqual(guide?.forwardAzimuthDegrees ?? -1, 90, accuracy: 1e-6)
@@ -15,15 +15,15 @@ final class OperatorStationTests: XCTestCase {
         let line = [PlanarPoint(x: 0, y: 0), PlanarPoint(x: 100, y: 0)]
         XCTAssertEqual(
             OperatorStation.guide(point: PlanarPoint(x: 40, y: -2.6), alignment: line)?.line,
-            "No.2+0m 右3m"
+            "No.2+0.0m 右 2.6m"
         )
         XCTAssertEqual(
             OperatorStation.guide(point: PlanarPoint(x: -12, y: 0.2), alignment: line)?.line,
-            "起点の手前12m 中心"
+            "起点の手前 12.0m 左 0.2m"
         )
         XCTAssertEqual(
             OperatorStation.guide(point: PlanarPoint(x: 108, y: -0.4), alignment: line)?.line,
-            "終点の先8m 中心"
+            "終点の先 8.0m 右 0.4m"
         )
     }
 
@@ -159,5 +159,87 @@ final class MachineReachTests: XCTestCase {
         XCTAssertEqual(saved.sightDatum, .ground)
         XCTAssertEqual(saved.phoneAtEyes, true)
         XCTAssertEqual(saved.prefecture, loaded.prefecture)
+    }
+}
+
+final class StationLineTests: XCTestCase {
+    func testTenthsAndAShiftedOrigin() {
+        let line = [PlanarPoint(x: 0, y: 0), PlanarPoint(x: 1000, y: 0)]
+        let here = OperatorStation.guide(point: PlanarPoint(x: 465, y: 3.2), alignment: line)
+        XCTAssertEqual(here?.line, "No.23+5.0m 左 3.2m")
+
+        let shifted = OperatorStation.guide(
+            point: PlanarPoint(x: 5, y: -1.24),
+            alignment: line,
+            interval: 20,
+            originStation: 10
+        )
+        XCTAssertEqual(shifted?.line, "No.10+5.0m 右 1.2m")
+
+        let wide = OperatorStation.guide(
+            point: PlanarPoint(x: 250, y: 0),
+            alignment: line,
+            interval: 100,
+            originStation: 0
+        )
+        XCTAssertEqual(wide?.line, "No.2+50.0m 中心")
+
+        let rolled = OperatorStation.guide(point: PlanarPoint(x: 479.96, y: 0), alignment: line)
+        XCTAssertEqual(rolled?.line, "No.24+0.0m 中心")
+    }
+
+    func testNamesBecomeChainageAndIgnorePlainPointNames() {
+        XCTAssertEqual(StationName.chainageMeters(in: "No.23+5.2", interval: 20), 465.2)
+        XCTAssertEqual(StationName.chainageMeters(in: "No.23", interval: 20), 460)
+        XCTAssertEqual(StationName.chainageMeters(in: "23+5", interval: 20), 465)
+        XCTAssertEqual(StationName.chainageMeters(in: "Ｎｏ．２３＋５", interval: 20) ?? -1, 465, accuracy: 1e-6)
+        XCTAssertNil(StationName.chainageMeters(in: "T1", interval: 20))
+        XCTAssertNil(StationName.chainageMeters(in: "120", interval: 20))
+    }
+
+    func testNamedPointsStampChainageEvenWhenTheGeometryIsShort() {
+        let anchors = [
+            StationAnchor(name: "No.0", point: PlanarPoint(x: 0, y: 0)),
+            StationAnchor(name: "No.50", point: PlanarPoint(x: 980, y: 0))
+        ]
+        let line = StationLine.namedPoints(anchors: anchors, zone: 9, intervalMeters: 20, originStation: 0)
+        let middle = line?.locate(PlanarPoint(x: 490, y: 3.2))
+        XCTAssertEqual(middle?.line, "No.25+0.0m 左 3.2m")
+        XCTAssertEqual(line?.chainageMeters.last ?? 0, 1000, accuracy: 1e-6)
+    }
+
+    func testTheSamePacketGivesTheSameStationOnAnotherPhone() throws {
+        let built = try XCTUnwrap(StationLine.polyline(
+            vertices: [PlanarPoint(x: 0, y: 0), PlanarPoint(x: 1000, y: 0)],
+            zone: 9,
+            intervalMeters: 20,
+            originStation: 0,
+            anchors: [StationAnchor(name: "No.0", point: PlanarPoint(x: 0, y: 0)), StationAnchor(name: "No.23+5", point: PlanarPoint(x: 465, y: 1))]
+        ))
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let shared = try decoder.decode(StationLine.self, from: encoder.encode(built))
+        let local = built.locate(PlanarPoint(x: 465, y: 3.2))?.line
+        let remote = shared.locate(PlanarPoint(x: 465, y: 3.2))?.line
+        XCTAssertEqual(local, remote)
+        XCTAssertEqual(remote, "No.23+5.0m 左 3.2m")
+
+        var project = SurveyProject(name: "路線", createdAt: Date(timeIntervalSince1970: 0), zone: 9)
+        project.stationLine = shared
+        project.stationIntervalMeters = 20
+        project.stationOrigin = 0
+        let projectEncoder = JSONEncoder()
+        projectEncoder.dateEncodingStrategy = .iso8601
+        let projectDecoder = JSONDecoder()
+        projectDecoder.dateDecodingStrategy = .iso8601
+        let loaded = try projectDecoder.decode(SurveyProject.self, from: projectEncoder.encode(project))
+        XCTAssertEqual(loaded.stationLine?.locate(PlanarPoint(x: 200, y: 0))?.line, built.locate(PlanarPoint(x: 200, y: 0))?.line)
+
+        let older = """
+        {"axis":"cadEastNorth","createdAt":"2026-10-20T00:00:00Z","drawings":[],"id":"p","name":"現場","zone":9}
+        """.data(using: .utf8)!
+        let plain = try projectDecoder.decode(SurveyProject.self, from: older)
+        XCTAssertNil(plain.stationLine)
+        XCTAssertNil(plain.stationIntervalMeters)
     }
 }

@@ -65,16 +65,37 @@ public enum OperatorStation {
     /// 日本の道路でよく使う測点間隔。No.1 は 20m。
     public static let intervalMeters = 20.0
 
-    /// 点と折れ線は同じ平面。x は東、y は北。
+    /// 点と折れ線は同じ平面。x は東、y は北。追加距離は幾何の距離に、起点番号の分を足す。
     public static func guide(
         point: PlanarPoint,
         alignment: [PlanarPoint],
-        interval: Double = intervalMeters
+        interval: Double = intervalMeters,
+        originStation: Int = 0
     ) -> OperatorGuide? {
-        guard alignment.count >= 2, interval > 0 else { return nil }
-        guard let hit = project(point, onto: alignment) else { return nil }
+        guard interval > 0 else { return nil }
+        let shift = Double(originStation) * interval
+        let chainage = geometricChainage(alignment).map { shift + $0 }
+        return guide(point: point, vertices: alignment, chainageMeters: chainage, interval: interval)
+    }
+
+    /// 頂点ごとの追加距離を使う。将来の共有でも、同じ頂点と同じ追加距離なら同じ測点になる。
+    public static func guide(
+        point: PlanarPoint,
+        vertices: [PlanarPoint],
+        chainageMeters: [Double],
+        interval: Double
+    ) -> OperatorGuide? {
+        guard vertices.count >= 2, vertices.count == chainageMeters.count, interval > 0 else { return nil }
+        guard let hit = project(point, onto: vertices) else { return nil }
+        let chainage = chainage(at: hit.along, vertices: vertices, chainageMeters: chainageMeters)
         return OperatorGuide(
-            line: format(along: hit.along, offset: hit.offset, total: hit.total, interval: interval),
+            line: format(
+                chainage: chainage,
+                geometricAlong: hit.along,
+                geometricTotal: hit.total,
+                offset: hit.offset,
+                interval: interval
+            ),
             alongMeters: hit.along,
             offsetMeters: hit.offset,
             forwardAzimuthDegrees: hit.azimuth
@@ -138,29 +159,78 @@ public enum OperatorStation {
         return delta
     }
 
-    public static func format(along: Double, offset: Double, total: Double, interval: Double = intervalMeters) -> String {
+    /// 0.1m。`No.23+5.0m 左 3.2m`。線の外は起点の手前、終点の先。
+    public static func format(
+        chainage: Double,
+        geometricAlong: Double,
+        geometricTotal: Double,
+        offset: Double,
+        interval: Double
+    ) -> String {
         let side = sideText(offset)
-        let meters = Int(along.rounded())
-        if meters < 0 {
-            return "起点の手前\(abs(meters))m \(side)"
+        let along = MachineReach.roundTenths(geometricAlong)
+        let total = MachineReach.roundTenths(geometricTotal)
+        if along < -0.001 {
+            return "起点の手前 \(meters(abs(along))) \(side)"
         }
-        if Double(meters) > total + 0.5 {
-            return "終点の先\(meters - Int(total.rounded()))m \(side)"
+        if along > total + 0.001 {
+            return "終点の先 \(meters(MachineReach.roundTenths(along - total))) \(side)"
         }
-        let step = max(1, Int(interval.rounded()))
-        let number = meters / step
-        let plus = meters % step
-        return "No.\(number)+\(plus)m \(side)"
+        let here = MachineReach.roundTenths(chainage)
+        let step = interval
+        var number = Int((here / step).rounded(.down))
+        var plus = MachineReach.roundTenths(here - Double(number) * step)
+        if plus + 0.001 >= step {
+            number += 1
+            plus = 0
+        }
+        if number < 0 {
+            return "起点の手前 \(meters(abs(here))) \(side)"
+        }
+        return "No.\(number)+\(meters(plus)) \(side)"
+    }
+
+    static func chainage(at along: Double, vertices: [PlanarPoint], chainageMeters: [Double]) -> Double {
+        let geometric = geometricChainage(vertices)
+        guard geometric.count == chainageMeters.count, let first = geometric.first, let last = geometric.last else {
+            return along
+        }
+        if along <= first { return chainageMeters[0] + (along - first) }
+        if along >= last { return chainageMeters[chainageMeters.count - 1] + (along - last) }
+        for index in 0..<(geometric.count - 1) {
+            let end = geometric[index + 1]
+            if along <= end || index == geometric.count - 2 {
+                let span = end - geometric[index]
+                let fraction = span < 1e-8 ? 0 : (along - geometric[index]) / span
+                return chainageMeters[index] + fraction * (chainageMeters[index + 1] - chainageMeters[index])
+            }
+        }
+        return chainageMeters[chainageMeters.count - 1]
+    }
+
+    public static func geometricChainage(_ vertices: [PlanarPoint]) -> [Double] {
+        guard let first = vertices.first else { return [] }
+        var distances = [0.0]
+        var cursor = first
+        for vertex in vertices.dropFirst() {
+            distances.append(distances[distances.count - 1] + cursor.distance(to: vertex))
+            cursor = vertex
+        }
+        return distances
     }
 
     private static func sideText(_ offset: Double) -> String {
-        let meters = Int(offset.rounded())
-        if meters == 0 { return "中心" }
-        if meters > 0 { return "左\(meters)m" }
-        return "右\(abs(meters))m"
+        let meters = MachineReach.roundTenths(offset)
+        if abs(meters) < 0.05 { return "中心" }
+        if meters > 0 { return "左 \(Self.meters(meters))" }
+        return "右 \(Self.meters(abs(meters)))"
     }
 
-    private static func project(_ point: PlanarPoint, onto alignment: [PlanarPoint]) -> (along: Double, offset: Double, total: Double, azimuth: Double)? {
+    private static func meters(_ value: Double) -> String {
+        String(format: "%.1fm", value)
+    }
+
+    public static func project(_ point: PlanarPoint, onto alignment: [PlanarPoint]) -> (along: Double, offset: Double, total: Double, azimuth: Double)? {
         var chain = 0.0
         var total = 0.0
         for index in 0..<(alignment.count - 1) {

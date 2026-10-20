@@ -77,7 +77,7 @@ struct OperatorView: View {
 
     private func stationText(position: GeodeticPosition?, guide: OperatorGuide?) -> String {
         if position == nil || position?.isPlottable != true { return "位置がありません" }
-        return guide?.line ?? "基準の線がありません"
+        return guide?.line ?? "中心線がありません"
     }
 
     private func reachCall(position: GeodeticPosition?) -> (text: String, coverage: ReachCoverage?) {
