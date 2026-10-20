@@ -102,9 +102,10 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         stage: PositionStage,
         durationSeconds: TimeInterval?,
         epochCount: Int?,
-        stature profile: StatureProfile? = nil
+        stature profile: StatureProfile? = nil,
+        sight: SightSample? = nil
     ) -> ObservationCondition {
-        let record = profile.flatMap { StatureMath.record(profile: $0, deviceHeight: position.ellipsoidalHeightMeters) }
+        let record = profile.flatMap { StatureMath.record(profile: $0, deviceHeight: position.ellipsoidalHeightMeters, sight: sight) }
             .flatMap { StatureMath.applies(stage: stage, receiver: position.receiver) ? $0 : nil }
         return ObservationCondition(
             solution: position.fixQuality,
@@ -152,6 +153,9 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         ]
         if let stature {
             lines.append("\(stature.screenLabel)（\(stature.style.title)）")
+            if let note = stature.sightNote {
+                lines.append(note)
+            }
             if let ground = stature.groundHeightMeters {
                 lines.append("地盤高 \(String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), ground))m")
             }

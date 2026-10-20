@@ -26,6 +26,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>画面までの距離を、顔の位置から測るために使います。映像は保存せず、誰かを識別するためにも使いません。</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>GNSS 受信機とつなぐために使います。切れたら、アプリが前面にあるあいだだけつなぎ直します。</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
@@ -33,7 +35,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>現在地と精度の円を地図に出すために使います。座標は端末内に WGS84/ITRF で保持します。</string>
 	<key>NSMotionUsageDescription</key>
-	<string>転倒と強い衝撃を、加速度から補助的に見るために使います。緊急通報の代わりではありません。</string>
+	<string>端末の傾きから、画面を見ている高さの補正を出すために使います。おまけの転倒検知をオンにしたときは、加速度も見ます。緊急通報の代わりではありません。</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

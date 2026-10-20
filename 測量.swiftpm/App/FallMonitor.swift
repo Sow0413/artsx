@@ -25,9 +25,6 @@ final class FallMonitor: ObservableObject {
     private var started = false
     private var seenExternal: Set<String> = []
     private let defaults: UserDefaults
-    #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
-    private let motion = SystemMotion()
-    #endif
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -147,16 +144,16 @@ final class FallMonitor: ObservableObject {
 
     private func startMotion() {
         #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
-        motion.onSample = { [weak self] sample in
+        SystemMotion.shared.onSample = { [weak self] sample in
             self?.ingest(sample)
         }
-        motion.start()
+        SystemMotion.shared.setFall(true)
         #endif
     }
 
     private func stopMotion() {
         #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
-        motion.stop()
+        SystemMotion.shared.setFall(false)
         #endif
     }
 
@@ -226,27 +223,61 @@ struct FallBanner: View {
 }
 
 #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
-/// iPhone の加速度。50Hz。実機での転倒判定は未確認。
+/// 端末の姿勢は一つだけ取る。転倒の加速度と、身長補正の pitch を同時に配る。実機は未確認。
 final class SystemMotion {
+    static let shared = SystemMotion()
     var onSample: ((FallSample) -> Void)?
+    var onPitchRadians: ((Double) -> Void)?
     private let manager = CMMotionManager()
+    private var fallOn = false
+    private var pitchOn = false
     private var running = false
 
-    func start() {
-        guard !running, manager.isDeviceMotionAvailable else { return }
-        running = true
-        manager.deviceMotionUpdateInterval = 1.0 / 50.0
-        manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
-            guard let self, let motion else { return }
-            let user = motion.userAcceleration
-            let gravity = motion.gravity
-            let userG = Self.magnitude(user.x, user.y, user.z)
-            let totalG = Self.magnitude(user.x + gravity.x, user.y + gravity.y, user.z + gravity.z)
-            self.onSample?(FallSample(at: Date(), userG: userG, totalG: totalG))
+    private init() {}
+
+    func setFall(_ on: Bool) {
+        fallOn = on
+        sync()
+    }
+
+    func setPitch(_ on: Bool) {
+        pitchOn = on
+        sync()
+    }
+
+    private func sync() {
+        if fallOn || pitchOn {
+            start()
+        } else {
+            stop()
         }
     }
 
-    func stop() {
+    private func start() {
+        guard !running, manager.isDeviceMotionAvailable else { return }
+        running = true
+        manager.deviceMotionUpdateInterval = 1.0 / 50.0
+        let deliver: CMDeviceMotionHandler = { [weak self] motion, _ in
+            guard let self, let motion else { return }
+            if self.fallOn {
+                let user = motion.userAcceleration
+                let gravity = motion.gravity
+                let userG = Self.magnitude(user.x, user.y, user.z)
+                let totalG = Self.magnitude(user.x + gravity.x, user.y + gravity.y, user.z + gravity.z)
+                self.onSample?(FallSample(at: Date(), userG: userG, totalG: totalG))
+            }
+            if self.pitchOn {
+                self.onPitchRadians?(motion.attitude.pitch)
+            }
+        }
+        if CMMotionManager.availableAttitudeReferenceFrames().contains(.xArbitraryZVertical) {
+            manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main, withHandler: deliver)
+        } else {
+            manager.startDeviceMotionUpdates(to: .main, withHandler: deliver)
+        }
+    }
+
+    private func stop() {
         guard running else { return }
         manager.stopDeviceMotionUpdates()
         running = false

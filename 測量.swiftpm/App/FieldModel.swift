@@ -77,6 +77,10 @@ final class FieldModel: ObservableObject {
     @Published var stature = StatureProfile.load()
     @Published var showsStature = false
     @Published var asksStature = false
+    @Published private(set) var sightTiltRadians: Double?
+    @Published private(set) var measuredEyeDistance: Double?
+    let deviceMachine = DeviceIdentity.machine
+    private var sightInForeground = false
     private var epochWatch = EpochWatch()
 
     let tiles: TileStore
@@ -971,7 +975,8 @@ final class FieldModel: ObservableObject {
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
             epochCount: epochWatch.count,
-            stature: stature
+            stature: stature,
+            sight: liveSight
         )
         let observation = FieldObservation(
             name: name,
@@ -1030,9 +1035,23 @@ final class FieldModel: ObservableObject {
         return true
     }
 
+    var liveSight: SightSample? {
+        guard let sightTiltRadians else { return nil }
+        return SightSample.resolved(
+            tiltRadians: sightTiltRadians,
+            measuredDistance: measuredEyeDistance,
+            antennaAlongUpMeters: AntennaCatalog.alongUpMeters(model: deviceMachine)
+        )
+    }
+
     var statureNotice: String? {
         guard let position = reading.position else { return nil }
-        return StatureMath.notice(profile: stature, stage: stageTransition.stage, receiver: position.receiver)
+        return StatureMath.notice(profile: stature, stage: stageTransition.stage, receiver: position.receiver, sight: liveSight)
+    }
+
+    func setSightForeground(_ active: Bool) {
+        sightInForeground = active
+        syncSightSensors()
     }
 
     func saveStature(_ profile: StatureProfile) {
@@ -1041,6 +1060,7 @@ final class FieldModel: ObservableObject {
         if profile.statureMeters != nil {
             asksStature = false
         }
+        syncSightSensors()
     }
 
     func reapplyStature() {
@@ -1215,8 +1235,22 @@ final class FieldModel: ObservableObject {
     }
 
     func stop() {
+        setSightForeground(false)
         pauseGNSS()
         source.stop()
+    }
+
+    private func syncSightSensors() {
+        let on = sightInForeground && stature.style == .sight
+        PhoneSight.setEnabled(on) { [weak self] tilt in
+            self?.sightTiltRadians = tilt
+        } onDistance: { [weak self] meters in
+            self?.measuredEyeDistance = meters
+        }
+        if !on {
+            sightTiltRadians = nil
+            measuredEyeDistance = nil
+        }
     }
 
     func userPannedMap() {

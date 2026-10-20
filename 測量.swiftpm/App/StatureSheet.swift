@@ -5,7 +5,7 @@ struct StatureSheet: View {
     @ObservedObject var field: FieldModel
     @Environment(\.dismiss) private var dismiss
     @State private var statureText = ""
-    @State private var style: HoldStyle = .elbow
+    @State private var style: HoldStyle = .sight
     @State private var manualText = ""
     @State private var elbowText = ""
     @State private var chestText = ""
@@ -18,11 +18,11 @@ struct StatureSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("段階0の iPhone だけで、端末の高さから持ち高さを引いて地盤高にします。既定は肘より上です。外部GNSSのポール高とは別にします。")
+                    Text("段階0の iPhone だけで、端末の高さから持ち高さを引いて地盤高にします。既定は画面の角度です。肘より上は代わりです。外部GNSSのポール高とは別にします。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let label = StatureMath.correction(for: draft, stage: .iphone, receiver: .iphoneGPS)?.screenLabel {
+                    if let label = StatureMath.correction(for: draft, stage: .iphone, receiver: .iphoneGPS, sight: field.liveSight)?.screenLabel {
                         Text(label)
                             .font(SurveyType(28, .heavy))
                     } else {
@@ -49,6 +49,15 @@ struct StatureSheet: View {
                                     .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
                             )
                     }
+                    if style == .sight {
+                        Text(sightLine)
+                            .font(SurveyType(16, .heavy))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("アンテナは端末中心から上へ \(StatureMath.factorText(AntennaCatalog.alongUpMeters(model: field.deviceMachine)))m（この機種の定数）です。顔までの距離が測れないときは 0.35m です。")
+                            .font(SurveyType(14, .semibold))
+                            .foregroundStyle(SurveyColor.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if style == .manual {
                         fieldBlock("持ち高 m") {
                             TextField("1.19", text: $manualText)
@@ -58,7 +67,7 @@ struct StatureSheet: View {
                     }
                     Text("係数")
                         .font(SurveyType(18, .heavy))
-                    Text("肘より上と胸の前は身長×係数。目の高さは身長からこの長さを引きます。運転席は、オペ画面の視線高とは別に、既定 2m です。")
+                    Text("画面の角度は、目の高さ（身長から引く長さ）を使います。肘より上と胸の前は身長×係数。運転席は、オペ画面の視線高とは別に、既定 2m です。")
                         .font(SurveyType(14, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -146,6 +155,16 @@ struct StatureSheet: View {
         }
         .modifier(SurveyScheme())
         .onAppear(perform: load)
+    }
+
+    private var sightLine: String {
+        if let note = StatureMath.correction(for: draft, stage: .iphone, receiver: .iphoneGPS, sight: field.liveSight)?.sightNote {
+            return note
+        }
+        if draft.statureMeters == nil {
+            return "身長が未登録です"
+        }
+        return "傾きを待っています"
     }
 
     private var draft: StatureProfile {
@@ -242,7 +261,7 @@ struct StatureSheet: View {
     }
 }
 
-/// 初回は身長だけ。持ち方の既定は肘より上（身長×0.70）。閉じても測量は止めない。
+/// 初回は身長だけ。持ち方の既定は画面の角度。閉じても測量は止めない。
 struct StatureAskSheet: View {
     @ObservedObject var field: FieldModel
     @Environment(\.dismiss) private var dismiss
@@ -252,7 +271,7 @@ struct StatureAskSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("身長を入れると、段階0の iPhone で地盤高を出せます。持ち方は肘より上（身長×0.70）です。プリセットと係数は、あとから身長の設定で変えられます。")
+                Text("身長を入れると、段階0の iPhone で地盤高を出せます。持ち方は画面の角度です。目の高さ（身長−約10cm）から、傾きと目までの距離で端末の高さを引きます。距離が測れないときは 35cm です。肘より上は、代わりの持ち方です。")
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)

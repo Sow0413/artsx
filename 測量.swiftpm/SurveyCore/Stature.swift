@@ -2,6 +2,7 @@ import Foundation
 
 /// iPhone を持つ高さ。外部 GNSS のポール高とは別。
 public enum HoldStyle: String, Codable, Sendable, Equatable, CaseIterable {
+    case sight
     case elbow
     case chest
     case eye
@@ -11,6 +12,7 @@ public enum HoldStyle: String, Codable, Sendable, Equatable, CaseIterable {
 
     public var title: String {
         switch self {
+        case .sight: return "画面の角度"
         case .elbow: return "肘より上"
         case .chest: return "胸の前"
         case .eye: return "目の高さ"
@@ -22,6 +24,8 @@ public enum HoldStyle: String, Codable, Sendable, Equatable, CaseIterable {
 
     public func menuTitle(coefficients: StatureCoefficients) -> String {
         switch self {
+        case .sight:
+            return "画面の角度（目の高さ−距離×sinθ）"
         case .elbow:
             return "肘より上（身長×\(StatureMath.factorText(coefficients.elbowFactor))）"
         case .chest:
@@ -86,7 +90,7 @@ public struct StatureProfile: Codable, Sendable, Equatable {
 
     public init(
         statureMeters: Double? = nil,
-        style: HoldStyle = .elbow,
+        style: HoldStyle = .sight,
         manualMeters: Double = 1.2,
         coefficients: StatureCoefficients = .standard
     ) {
@@ -144,6 +148,13 @@ public struct StatureRecord: Codable, Sendable, Equatable {
     public var eyeDropMeters: Double
     public var cabMeters: Double
     public var groundHeightMeters: Double?
+    /// 鉛直からの後傾。画面の角度のときだけ。
+    public var tiltRadians: Double?
+    /// 目までの距離。測れないときは 0.35。
+    public var eyeDistanceMeters: Double?
+    public var distanceMeasured: Bool?
+    /// 端末中心から GNSS アンテナへ、portrait 上方向の定数。
+    public var antennaAlongUpMeters: Double?
 
     public init(
         style: HoldStyle,
@@ -154,7 +165,11 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         chestFactor: Double,
         eyeDropMeters: Double,
         cabMeters: Double,
-        groundHeightMeters: Double?
+        groundHeightMeters: Double?,
+        tiltRadians: Double? = nil,
+        eyeDistanceMeters: Double? = nil,
+        distanceMeasured: Bool? = nil,
+        antennaAlongUpMeters: Double? = nil
     ) {
         self.style = style
         self.offsetMeters = offsetMeters
@@ -165,6 +180,10 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         self.eyeDropMeters = eyeDropMeters
         self.cabMeters = cabMeters
         self.groundHeightMeters = groundHeightMeters
+        self.tiltRadians = tiltRadians
+        self.eyeDistanceMeters = eyeDistanceMeters
+        self.distanceMeasured = distanceMeasured
+        self.antennaAlongUpMeters = antennaAlongUpMeters
     }
 
     public init(from decoder: Decoder) throws {
@@ -178,6 +197,10 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         eyeDropMeters = try container.decode(Double.self, forKey: .eyeDropMeters)
         cabMeters = try container.decode(Double.self, forKey: .cabMeters)
         groundHeightMeters = try container.decodeIfPresent(Double.self, forKey: .groundHeightMeters)
+        tiltRadians = try container.decodeIfPresent(Double.self, forKey: .tiltRadians)
+        eyeDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .eyeDistanceMeters)
+        distanceMeasured = try container.decodeIfPresent(Bool.self, forKey: .distanceMeasured)
+        antennaAlongUpMeters = try container.decodeIfPresent(Double.self, forKey: .antennaAlongUpMeters)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -191,14 +214,94 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         try container.encode(eyeDropMeters, forKey: .eyeDropMeters)
         try container.encode(cabMeters, forKey: .cabMeters)
         try container.encodeIfPresent(groundHeightMeters, forKey: .groundHeightMeters)
+        try container.encodeIfPresent(tiltRadians, forKey: .tiltRadians)
+        try container.encodeIfPresent(eyeDistanceMeters, forKey: .eyeDistanceMeters)
+        try container.encodeIfPresent(distanceMeasured, forKey: .distanceMeasured)
+        try container.encodeIfPresent(antennaAlongUpMeters, forKey: .antennaAlongUpMeters)
     }
 
     private enum CodingKeys: String, CodingKey {
         case style, offsetMeters, holdMeters, statureMeters
         case elbowFactor, chestFactor, eyeDropMeters, cabMeters, groundHeightMeters
+        case tiltRadians, eyeDistanceMeters, distanceMeasured, antennaAlongUpMeters
     }
 
     public var screenLabel: String { StatureMath.screenLabel(offsetMeters: offsetMeters) }
+
+    public var sightSample: SightSample? {
+        guard let tiltRadians, let eyeDistanceMeters, let antennaAlongUpMeters else { return nil }
+        return SightSample(
+            tiltRadians: tiltRadians,
+            eyeDistanceMeters: eyeDistanceMeters,
+            distanceMeasured: distanceMeasured ?? false,
+            antennaAlongUpMeters: antennaAlongUpMeters
+        )
+    }
+
+    public var sightNote: String? {
+        guard style == .sight, let tiltRadians, let eyeDistanceMeters, let antennaAlongUpMeters else { return nil }
+        let source = distanceMeasured == true ? "" : "（既定）"
+        return "傾き \(StatureMath.degreeText(tiltRadians))°、目までの距離 \(StatureMath.factorText(eyeDistanceMeters))m\(source)、アンテナ差 \(StatureMath.factorText(antennaAlongUpMeters))m"
+    }
+}
+
+/// 観測を確定した瞬間の、画面の角度。
+public struct SightSample: Equatable, Sendable {
+    public static let defaultEyeDistance = 0.35
+    public static let minimumEyeDistance = 0.15
+    public static let maximumEyeDistance = 1.0
+
+    public var tiltRadians: Double
+    public var eyeDistanceMeters: Double
+    public var distanceMeasured: Bool
+    public var antennaAlongUpMeters: Double
+
+    public init(tiltRadians: Double, eyeDistanceMeters: Double, distanceMeasured: Bool, antennaAlongUpMeters: Double) {
+        self.tiltRadians = tiltRadians
+        self.eyeDistanceMeters = eyeDistanceMeters
+        self.distanceMeasured = distanceMeasured
+        self.antennaAlongUpMeters = antennaAlongUpMeters
+    }
+
+    /// 距離が無い、または 15cm 未満か 1m を超えるときは 35cm。
+    public static func resolved(tiltRadians: Double, measuredDistance: Double?, antennaAlongUpMeters: Double) -> SightSample? {
+        guard tiltRadians.isFinite, antennaAlongUpMeters.isFinite else { return nil }
+        let measured = measuredDistance.flatMap { distance -> Double? in
+            guard distance.isFinite, distance >= minimumEyeDistance, distance <= maximumEyeDistance else { return nil }
+            return distance
+        }
+        return SightSample(
+            tiltRadians: tiltRadians,
+            eyeDistanceMeters: measured ?? defaultEyeDistance,
+            distanceMeasured: measured != nil,
+            antennaAlongUpMeters: antennaAlongUpMeters
+        )
+    }
+}
+
+/// 機種ごとの、端末中心から GNSS アンテナまでの portrait 上方向。上端から 15mm と仮定し、表に無い機種は 0.060m。実機のアンテナ位置は未確認。
+public enum AntennaCatalog {
+    public static let insetFromTopMeters = 0.015
+    public static let unknownAlongUpMeters = 0.060
+
+    public static func alongUpMeters(model: String) -> Double {
+        guard let height = bodyHeightMeters[model] else { return unknownAlongUpMeters }
+        return height / 2 - insetFromTopMeters
+    }
+
+    /// Apple 公表の本体高さ（m）。識別子は hw.machine。
+    static let bodyHeightMeters: [String: Double] = [
+        "iPhone10,3": 0.1436, "iPhone10,6": 0.1436,
+        "iPhone11,2": 0.1436, "iPhone11,4": 0.1575, "iPhone11,6": 0.1575, "iPhone11,8": 0.1509,
+        "iPhone12,1": 0.1509, "iPhone12,3": 0.1440, "iPhone12,5": 0.1580, "iPhone12,8": 0.1384,
+        "iPhone13,1": 0.1315, "iPhone13,2": 0.1467, "iPhone13,3": 0.1467, "iPhone13,4": 0.1608,
+        "iPhone14,2": 0.1467, "iPhone14,3": 0.1608, "iPhone14,4": 0.1315, "iPhone14,5": 0.1467,
+        "iPhone14,6": 0.1384, "iPhone14,7": 0.1467, "iPhone14,8": 0.1608,
+        "iPhone15,2": 0.1475, "iPhone15,3": 0.1607, "iPhone15,4": 0.1476, "iPhone15,5": 0.1609,
+        "iPhone16,1": 0.1466, "iPhone16,2": 0.1599,
+        "iPhone17,1": 0.1496, "iPhone17,2": 0.1630, "iPhone17,3": 0.1476, "iPhone17,4": 0.1609, "iPhone17,5": 0.1467,
+        "iPhone18,1": 0.1500, "iPhone18,2": 0.1634, "iPhone18,3": 0.1496, "iPhone18,4": 0.1562, "iPhone18,5": 0.1467
+    ]
 }
 
 /// 既知の楕円体高で1回観測した、その人の持ち高さ。
@@ -231,9 +334,33 @@ public enum StatureMath {
         String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
+    public static func degreeText(_ radians: Double) -> String {
+        String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), radians * 180 / .pi)
+    }
+
+    /// CoreMotion の pitch。0 は画面を上に向けて水平、+π/2 は端末の上が真上。θ は鉛直からの後傾。
+    public static func tiltFromVertical(pitchRadians: Double) -> Double? {
+        guard pitchRadians.isFinite else { return nil }
+        return (.pi / 2) - pitchRadians
+    }
+
+    /// 目の高さから、距離と後傾とアンテナ差で、GNSS アンテナの地面からの高さ。
+    public static func holdMeters(eyeHeight: Double, sight: SightSample) -> Double? {
+        guard eyeHeight.isFinite, sight.tiltRadians.isFinite, sight.eyeDistanceMeters.isFinite, sight.antennaAlongUpMeters.isFinite else {
+            return nil
+        }
+        let center = eyeHeight - sight.eyeDistanceMeters * GeoMath.sine(sight.tiltRadians)
+        let antenna = center + sight.antennaAlongUpMeters * GeoMath.cosine(sight.tiltRadians)
+        guard antenna.isFinite else { return nil }
+        return max(0, antenna)
+    }
+
     /// 端末を地面からどれだけ上げているか。身長が要る持ち方で未登録なら nil。
-    public static func holdMeters(profile: StatureProfile) -> Double? {
+    public static func holdMeters(profile: StatureProfile, sight: SightSample? = nil) -> Double? {
         switch profile.style {
+        case .sight:
+            guard let eye = eyeHeight(profile), let sight else { return nil }
+            return holdMeters(eyeHeight: eye, sight: sight)
         case .elbow:
             guard let stature = usableStature(profile.statureMeters) else { return nil }
             return max(0, stature * profile.coefficients.elbowFactor)
@@ -253,18 +380,24 @@ public enum StatureMath {
         }
     }
 
-    public static func correction(for profile: StatureProfile, stage: PositionStage, receiver: ReceiverKind) -> StatureRecord? {
+    public static func correction(
+        for profile: StatureProfile,
+        stage: PositionStage,
+        receiver: ReceiverKind,
+        sight: SightSample? = nil
+    ) -> StatureRecord? {
         guard applies(stage: stage, receiver: receiver) else { return nil }
-        return record(profile: profile, deviceHeight: nil)
+        return record(profile: profile, deviceHeight: nil, sight: sight)
     }
 
-    public static func record(profile: StatureProfile, deviceHeight: Double?) -> StatureRecord? {
-        guard let hold = holdMeters(profile: profile) else { return nil }
+    public static func record(profile: StatureProfile, deviceHeight: Double?, sight: SightSample? = nil) -> StatureRecord? {
+        guard let hold = holdMeters(profile: profile, sight: sight) else { return nil }
         let offset = -hold
         let ground = deviceHeight.flatMap { height -> Double? in
             guard height.isFinite else { return nil }
             return height + offset
         }
+        let automatic = profile.style == .sight ? sight : nil
         return StatureRecord(
             style: profile.style,
             offsetMeters: offset,
@@ -274,16 +407,33 @@ public enum StatureMath {
             chestFactor: profile.coefficients.chestFactor,
             eyeDropMeters: profile.coefficients.eyeDropMeters,
             cabMeters: profile.coefficients.cabMeters,
-            groundHeightMeters: ground
+            groundHeightMeters: ground,
+            tiltRadians: automatic?.tiltRadians,
+            eyeDistanceMeters: automatic?.eyeDistanceMeters,
+            distanceMeasured: automatic?.distanceMeasured,
+            antennaAlongUpMeters: automatic?.antennaAlongUpMeters
         )
     }
 
-    public static func notice(profile: StatureProfile, stage: PositionStage, receiver: ReceiverKind) -> String? {
+    public static func notice(
+        profile: StatureProfile,
+        stage: PositionStage,
+        receiver: ReceiverKind,
+        sight: SightSample? = nil
+    ) -> String? {
         guard applies(stage: stage, receiver: receiver) else { return nil }
-        if let record = correction(for: profile, stage: stage, receiver: receiver) {
+        if profile.style == .sight, eyeHeight(profile) != nil, sight == nil {
+            return "傾きを待っています"
+        }
+        if let record = correction(for: profile, stage: stage, receiver: receiver, sight: sight) {
             return record.screenLabel
         }
         return "身長が未登録です"
+    }
+
+    public static func eyeHeight(_ profile: StatureProfile) -> Double? {
+        guard let stature = usableStature(profile.statureMeters) else { return nil }
+        return max(0, stature - profile.coefficients.eyeDropMeters)
     }
 
     /// 既知の楕円体高で1回観測し、肘より上の係数をその人の持ち高さに合わせる。
@@ -321,7 +471,9 @@ extension FieldObservation {
         let stage = condition?.stage ?? captured.stage
         let receiver = condition?.receiver ?? captured.receiver
         guard StatureMath.applies(stage: stage, receiver: receiver) else { return self }
-        guard let record = StatureMath.record(profile: profile, deviceHeight: captured.ellipsoidalHeightMeters) else {
+        let sight = condition?.stature?.sightSample
+        if profile.style == .sight, sight == nil { return self }
+        guard let record = StatureMath.record(profile: profile, deviceHeight: captured.ellipsoidalHeightMeters, sight: sight) else {
             guard condition?.stature != nil else { return self }
             var cleared = self
             cleared.condition?.stature = nil
