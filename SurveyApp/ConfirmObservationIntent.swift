@@ -27,6 +27,15 @@ struct SurveyShortcuts: AppShortcutsProvider {
             shortTitle: "観測を確定",
             systemImageName: "mappin"
         )
+        AppShortcut(
+            intent: HiyariIntent(),
+            phrases: [
+                "\(.applicationName)でヒヤリ",
+                "ヒヤリを\(.applicationName)に残して"
+            ],
+            shortTitle: "ヒヤリ",
+            systemImageName: "exclamationmark.triangle"
+        )
     }
 }
 #endif

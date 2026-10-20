@@ -120,7 +120,9 @@ private final class ARSessionBox: NSObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        preview?.session(session, didUpdate: frame)
+        if let preview {
+            preview.session(session, didUpdate: frame)
+        }
         let now = Date()
         guard now.timeIntervalSince(last) >= 0.1 else { return }
         last = now
@@ -159,15 +161,21 @@ private final class ARSessionBox: NSObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        preview?.session(session, didAdd: anchors)
+        if let preview {
+            preview.session(session, didAdd: anchors)
+        }
     }
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        preview?.session(session, didUpdate: anchors)
+        if let preview {
+            preview.session(session, didUpdate: anchors)
+        }
     }
 
     func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-        preview?.session(session, didRemove: anchors)
+        if let preview {
+            preview.session(session, didRemove: anchors)
+        }
     }
 
     private static func ground(in frame: ARFrame, cameraX: Float, cameraZ: Float) -> (y: Double?, source: String) {

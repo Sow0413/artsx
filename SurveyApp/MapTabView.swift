@@ -1,4 +1,5 @@
 import SwiftUI
+import SurveyCore
 
 struct MapTabView: View {
     @ObservedObject var field: FieldModel
