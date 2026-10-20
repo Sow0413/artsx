@@ -50,6 +50,10 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var weather: String?
     /// AED、担架、救急箱、住所、連絡先。古いプロジェクトは nil。
     public var siteAid: SiteAid?
+    /// 位置を共有してよい範囲。無いプロジェクトは共有しない。
+    public var siteFence: SiteFence?
+    /// 位置を共有してよい時間。無いプロジェクトは共有しない。
+    public var workHours: WorkHours?
 
     public init(
         id: String = UUID().uuidString,
@@ -72,7 +76,9 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         approachLeadMeters: Double? = nil,
         approachRepeatSeconds: Double? = nil,
         weather: String? = nil,
-        siteAid: SiteAid? = nil
+        siteAid: SiteAid? = nil,
+        siteFence: SiteFence? = nil,
+        workHours: WorkHours? = nil
     ) {
         self.id = id
         self.name = name
@@ -95,6 +101,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.approachRepeatSeconds = approachRepeatSeconds
         self.weather = weather
         self.siteAid = siteAid
+        self.siteFence = siteFence
+        self.workHours = workHours
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -102,7 +110,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         case machinePreset, machineRadiusMeters, eyeHeightMeters, sightDatum, phoneAtEyes
         case stationIntervalMeters, stationOrigin, stationLine
         case cautionMeters, proximityMarginMeters, approachLeadMeters, approachRepeatSeconds, weather
-        case siteAid
+        case siteAid, siteFence, workHours
     }
 
     public init(from decoder: Decoder) throws {
@@ -128,6 +136,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         approachRepeatSeconds = try container.decodeIfPresent(Double.self, forKey: .approachRepeatSeconds)
         weather = try container.decodeIfPresent(String.self, forKey: .weather)
         siteAid = try container.decodeIfPresent(SiteAid.self, forKey: .siteAid)
+        siteFence = try container.decodeIfPresent(SiteFence.self, forKey: .siteFence)
+        workHours = try container.decodeIfPresent(WorkHours.self, forKey: .workHours)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -153,6 +163,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(approachRepeatSeconds, forKey: .approachRepeatSeconds)
         try container.encodeIfPresent(weather, forKey: .weather)
         try container.encodeIfPresent(siteAid, forKey: .siteAid)
+        try container.encodeIfPresent(siteFence, forKey: .siteFence)
+        try container.encodeIfPresent(workHours, forKey: .workHours)
     }
 }
 

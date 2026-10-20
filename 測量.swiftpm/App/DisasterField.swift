@@ -160,6 +160,7 @@ extension FieldModel {
     func noteDisasterMotion(force: Bool = false) {
         loadDisasterIfNeeded()
         guard disasterMode, let project = drawing.project else { return }
+        guard locationShare.shares else { return }
         guard let position = workingReading.position, position.isPlottable else { return }
         let now = Date()
         if let point = DisasterEntry.position(

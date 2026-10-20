@@ -120,6 +120,7 @@ public enum IncidentTimeBand: String, CaseIterable, Sendable {
 }
 
 public enum IncidentStats {
+    public static let anonymizeByDefault = true
     public static let heatCellMeters = 25.0
     public static let fileName = "統計.csv"
     public static let tokyo = TimeZone(identifier: "Asia/Tokyo") ?? TimeZone(secondsFromGMT: 9 * 3600)!

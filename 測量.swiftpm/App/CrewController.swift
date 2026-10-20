@@ -179,7 +179,14 @@ final class CrewController: ObservableObject {
         try? CrewIdentityStore.save(identity, projectName: projectName, at: root)
     }
 
-    func note(position: GeodeticPosition?, project: SurveyProject?, radius: Double, root: URL, now: Date = Date()) {
+    func note(
+        position: GeodeticPosition?,
+        project: SurveyProject?,
+        radius: Double,
+        root: URL,
+        broadcast: Bool = true,
+        now: Date = Date()
+    ) {
         self.root = root
         guard let project else {
             desk.leave(at: now)
@@ -233,11 +240,13 @@ final class CrewController: ObservableObject {
             courseDegrees: position.courseDegrees,
             headingDegrees: position.headingDegrees
         )
-        #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
-        _ = desk.publish(fix, uwbToken: RadioHardware.nearbyInteraction ? uwb.tokenData() : nil)
-        #else
-        _ = desk.publish(fix)
-        #endif
+        if broadcast {
+            #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
+            _ = desk.publish(fix, uwbToken: RadioHardware.nearbyInteraction ? uwb.tokenData() : nil)
+            #else
+            _ = desk.publish(fix)
+            #endif
+        }
         desk.evaluate(selfFix: fix, now: now)
         publish(now: now, sound: true)
     }

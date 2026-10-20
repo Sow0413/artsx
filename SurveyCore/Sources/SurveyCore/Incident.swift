@@ -922,9 +922,11 @@ public final class IncidentSession {
         }
     }
 
+    /// 何も開いていなければ直前60秒だけ残す。開いている記録は、その発生の60秒前から残す。
     private func prune(now: Date) {
+        let quiet = now.addingTimeInterval(-LocationPrivacy.ringSeconds)
         let openFrom = open.values.map { $0.occurredAt.addingTimeInterval(-IncidentBook.beforeSeconds) }.min()
-        let horizon = min(openFrom ?? now, now.addingTimeInterval(-(IncidentBook.beforeSeconds + 10)))
+        let horizon = min(openFrom ?? quiet, quiet)
         samples.removeAll { $0.at < horizon }
     }
 }

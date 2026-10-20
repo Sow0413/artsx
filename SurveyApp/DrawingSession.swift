@@ -447,6 +447,26 @@ final class DrawingSession: ObservableObject {
         persistProject()
     }
 
+    func setSiteFence(_ fence: SiteFence?) {
+        guard var current = project else {
+            message = "先にプロジェクトを作ってください。"
+            return
+        }
+        current.siteFence = fence
+        project = current
+        persistProject()
+    }
+
+    func setWorkHours(_ hours: WorkHours?) {
+        guard var current = project else {
+            message = "先にプロジェクトを作ってください。"
+            return
+        }
+        current.workHours = hours
+        project = current
+        persistProject()
+    }
+
     func setWeather(_ label: String) {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         weatherLabel = trimmed

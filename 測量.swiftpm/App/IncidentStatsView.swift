@@ -19,11 +19,15 @@ struct IncidentStatsSheet: View {
                         .foregroundStyle(SurveyColor.amber)
                     Toggle("地図にヒートマップ", isOn: $field.showIncidentHeat)
                         .font(.system(size: 16, weight: .heavy))
-                    Toggle("個人名を役割にする", isOn: $field.anonymizeStats)
+                    Toggle("個人名を役割にする（既定）", isOn: $field.anonymizeStats)
                         .font(.system(size: 16, weight: .heavy))
                         .onChange(of: field.anonymizeStats) { _, _ in
                             field.reloadIncidentStats()
                         }
+                    Text("ヒヤリの件数は、既定で役割ごとにまとめます。個人名は出しません。")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                     weatherPicker
                     countBlock("作業別", IncidentStats.countsByWork(field.incidentStatRows))
                     countBlock("時間帯別", IncidentStats.countsByTime(field.incidentStatRows))

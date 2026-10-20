@@ -122,7 +122,13 @@ final class FieldModel: ObservableObject {
     @Published private(set) var incidentRecordingMemo = false
     @Published var showsIncidentStats = false
     @Published var showIncidentHeat = false
-    @Published var anonymizeStats = true
+    @Published var anonymizeStats = IncidentStats.anonymizeByDefault
+    /// 休憩の一時停止。この画面だけ。project.json には残さない。
+    @Published var sharePaused = false
+    @Published private(set) var locationShare: ShareState = .unset
+    @Published private(set) var shareViewers: [ShareViewer] = []
+    @Published var showsPrivacy = false
+    @Published private(set) var privacyMessage: String?
     @Published private(set) var incidentStatRows: [IncidentStatRow] = []
     @Published private(set) var sealedIncidents: [SealedIncidentRow] = []
     @Published private(set) var incidentHeat: [IncidentHeatCell] = []
@@ -1451,12 +1457,7 @@ final class FieldModel: ObservableObject {
                 name: "現在地"
             )
         }
-        crew.note(
-            position: workingReading.position,
-            project: drawing.project,
-            radius: drawing.machineRadiusMeters,
-            root: drawing.projectsRoot
-        )
+        applyShareGate()
         radio.rename(crew.displayName)
         radio.refreshSpace()
         refreshSOS()
@@ -1470,6 +1471,82 @@ final class FieldModel: ObservableObject {
         refreshVisibleControlPoints()
         guard followUser, let position = workingReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
+    }
+
+    func applyShareGate(now: Date = Date()) {
+        let position = workingReading.position
+        let plottable = position?.isPlottable == true
+        let state = LocationPrivacy.gate(
+            hasFix: plottable,
+            latitude: position?.latitudeDegrees ?? 0,
+            longitude: position?.longitudeDegrees ?? 0,
+            at: now,
+            fence: drawing.project?.siteFence,
+            hours: drawing.project?.workHours,
+            paused: sharePaused
+        )
+        locationShare = state
+        crew.note(
+            position: position,
+            project: drawing.project,
+            radius: drawing.machineRadiusMeters,
+            root: drawing.projectsRoot,
+            broadcast: state.shares,
+            now: now
+        )
+        shareViewers = LocationPrivacy.viewers(
+            sharing: state.shares,
+            peers: crew.peers.map { ShareViewer(id: $0.id, name: $0.name, role: $0.role.label) }
+        )
+    }
+
+    func setSharePaused(_ paused: Bool) {
+        sharePaused = paused
+        applyShareGate()
+    }
+
+    func placeFence(radiusMeters: Double) {
+        guard drawing.project != nil else {
+            privacyMessage = "先にプロジェクトを作ってください。"
+            return
+        }
+        guard let position = workingReading.position, position.isPlottable else {
+            privacyMessage = "現在地がまだ無いので、中心を置けません。"
+            return
+        }
+        let radius = LocationPrivacy.radiusMeters(radiusMeters)
+        drawing.setSiteFence(SiteFence(
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            radiusMeters: radius
+        ))
+        privacyMessage = "現場の中心を現在地にしました。半径\(Int(radius))m。"
+        applyShareGate()
+    }
+
+    func updateFenceRadius(_ meters: Double) {
+        guard var fence = drawing.project?.siteFence else {
+            privacyMessage = "先に現在地を現場の中心にしてください。"
+            return
+        }
+        fence.radiusMeters = LocationPrivacy.radiusMeters(meters)
+        drawing.setSiteFence(fence)
+        privacyMessage = "半径を\(Int(fence.radiusMeters))mにしました。"
+        applyShareGate()
+    }
+
+    func saveWorkHours(start: Int, end: Int) {
+        guard drawing.project != nil else {
+            privacyMessage = "先にプロジェクトを作ってください。"
+            return
+        }
+        guard start >= 0, end <= 24, start < end else {
+            privacyMessage = "作業時間は、同じ日の中で開始より終了を遅くしてください。"
+            return
+        }
+        drawing.setWorkHours(WorkHours(startHour: start, endHour: end))
+        privacyMessage = "作業時間を\(start)時から\(end)時までにしました。"
+        applyShareGate()
     }
 
     private func trackIncidents(now: Date = Date()) {

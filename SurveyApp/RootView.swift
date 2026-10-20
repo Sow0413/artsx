@@ -26,6 +26,7 @@ struct RootView: View {
     var body: some View {
         VStack(spacing: 0) {
             MeshRelayStatus(field: field)
+            LocationShareBanner(field: field)
             if field.tab != .seat {
                 AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
                     .padding(.horizontal, 12)
@@ -69,6 +70,9 @@ struct RootView: View {
         .onAppear { field.start() }
         .onDisappear { field.stop() }
         .modifier(MeshPresenceWatcher(field: field))
+        .sheet(isPresented: $field.showsPrivacy) {
+            LocationPrivacySheet(field: field)
+        }
     }
 }
 
