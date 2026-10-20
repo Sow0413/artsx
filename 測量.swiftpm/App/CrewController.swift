@@ -46,6 +46,7 @@ final class CrewController: ObservableObject {
     private var channelID = ""
     private var heardFalls: Set<UUID> = []
     private var fallUntil: Date?
+    private var alerts = false
     #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
     private let uwb = SystemUWB()
     #endif
@@ -179,18 +180,33 @@ final class CrewController: ObservableObject {
         try? CrewIdentityStore.save(identity, projectName: projectName, at: root)
     }
 
+    func standDown() {
+        guard worst != .clear || callout != nil || !marks.isEmpty || !peers.isEmpty || fallSpeech != nil else { return }
+        callout = nil
+        worst = .clear
+        marks = []
+        peers = []
+        threats = ThreatPicture(facingDegrees: nil, facingSource: "", cues: [], headline: "")
+        fallSpeech = nil
+        fallCue = nil
+        revision += 1
+    }
+
     func note(
         position: GeodeticPosition?,
         project: SurveyProject?,
         radius: Double,
         root: URL,
         broadcast: Bool = true,
+        alert: Bool = true,
+        listen: Bool = true,
         now: Date = Date()
     ) {
         self.root = root
+        alerts = alert
         guard let project else {
             desk.leave(at: now)
-            publish(now: now, sound: true)
+            publish(now: now, sound: alert, alarm: alert)
             return
         }
         if projectName != project.name {
@@ -222,11 +238,13 @@ final class CrewController: ObservableObject {
         courseDegrees = position?.courseDegrees
         headingDegrees = position?.headingDegrees
         guard let position, position.isPlottable else {
-            publish(now: now, sound: false)
+            publish(now: now, sound: false, alarm: alert)
             return
         }
         let channel = RadioChannel.project(id: project.id, name: project.name)
-        nearby.start(channel: channel, name: desk.name)
+        if listen || broadcast {
+            nearby.start(channel: channel, name: desk.name)
+        }
         let fix = CrewFix(
             id: desk.deviceID,
             name: desk.name,
@@ -247,8 +265,10 @@ final class CrewController: ObservableObject {
             _ = desk.publish(fix)
             #endif
         }
-        desk.evaluate(selfFix: fix, now: now)
-        publish(now: now, sound: true)
+        if alert {
+            desk.evaluate(selfFix: fix, now: now)
+        }
+        publish(now: now, sound: alert, alarm: alert)
     }
 
     private func accept(_ packet: CrewPacket) {
@@ -258,7 +278,7 @@ final class CrewController: ObservableObject {
             uwb.accept(tokenData: token, peerID: packet.fix.id)
         }
         #endif
-        publish(now: Date(), sound: true)
+        publish(now: Date(), sound: alerts, alarm: alerts)
     }
 
     func receiveFall(_ notice: FallNotice, position: GeodeticPosition?) {
@@ -294,7 +314,7 @@ final class CrewController: ObservableObject {
         revision += 1
     }
 
-    private func publish(now: Date, sound: Bool) {
+    private func publish(now: Date, sound: Bool, alarm: Bool = true) {
         ageFall(now: now)
         peers = desk.others
         worst = desk.worst
@@ -319,9 +339,11 @@ final class CrewController: ObservableObject {
         callout = approach.open
         statusLine = describe()
         revision += 1
-        persist()
+        if alarm {
+            persist()
+        }
         let fresh = desk.events.filter { $0.level == .alarm && $0.endedAt == nil && !openedAlarms.contains($0.id) }
-        if !fresh.isEmpty, onAlarm?(now) == true {
+        if alarm, !fresh.isEmpty, onAlarm?(now) == true {
             for event in fresh {
                 openedAlarms.insert(event.id)
             }

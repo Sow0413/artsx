@@ -129,6 +129,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var shareViewers: [ShareViewer] = []
     @Published var showsPrivacy = false
     @Published private(set) var privacyMessage: String?
+    @Published var extras: ExtraSwitches
+    @Published var showsExtras = false
     @Published private(set) var incidentStatRows: [IncidentStatRow] = []
     @Published private(set) var sealedIncidents: [SealedIncidentRow] = []
     @Published private(set) var incidentHeat: [IncidentHeatCell] = []
@@ -176,6 +178,7 @@ final class FieldModel: ObservableObject {
         self.prefixStore = prefixes
         self.pointPrefix = prefixes.prefix(for: prefixes.activeKey)
         self.drawing = DrawingSession(projectsRoot: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true))
+        self.extras = ExtraSwitchStore.load(from: siteDirectory)
         let nearby = NearbyLink()
         self.nearby = nearby
         self.radio = RadioController(nearby: nearby)
@@ -245,6 +248,7 @@ final class FieldModel: ObservableObject {
     }
 
     func startSOS() {
+        guard extras.sos else { return }
         guard drawing.project != nil else {
             incidentNote = "先にプロジェクトを作ってください。"
             return
@@ -312,6 +316,7 @@ final class FieldModel: ObservableObject {
     }
 
     func ingestSOS(_ packet: SOSPacket, arrived: SOSPath) {
+        guard extras.sos else { return }
         if let beacon = packet.beacon {
             guard beacon.channelID == drawing.project?.id, beacon.deviceID != crew.deviceID else { return }
             let position = workingReading.position
@@ -447,6 +452,7 @@ final class FieldModel: ObservableObject {
     }
 
     private func beginFirst(trigger: IncidentTrigger, incidentID: UUID?) {
+        guard extras.firstResponse else { return }
         guard let project = drawing.project else { return }
         guard let position = workingReading.position, position.isPlottable else { return }
         let peers = crew.peers.map {
@@ -540,6 +546,7 @@ final class FieldModel: ObservableObject {
     }
 
     func ingestAid(_ packet: AidPacket, arrived: SOSPath) {
+        guard extras.firstResponse else { return }
         guard packet.episode.channelID == drawing.project?.id else { return }
         let before = firstDesk.episode?.stamps ?? []
         guard firstDesk.hear(packet.episode) else { return }
@@ -577,6 +584,7 @@ final class FieldModel: ObservableObject {
     }
 
     func beginRadio() {
+        guard extras.pushToTalk else { return }
         let project = drawing.project
         let channel = RadioChannel.project(id: project?.id ?? "local", name: project?.name ?? "未選択")
         let position = workingReading.position
@@ -602,7 +610,38 @@ final class FieldModel: ObservableObject {
     }
 
     @discardableResult
+    func setExtra(_ key: WritableKeyPath<ExtraSwitches, Bool>, _ on: Bool) {
+        var next = extras
+        next[keyPath: key] = on
+        extras = next
+        try? ExtraSwitchStore.save(next, to: siteDirectory)
+        applyExtraSwitches()
+    }
+
+    func applyExtraSwitches() {
+        fall.setEnabled(extras.fall)
+        if !extras.disaster {
+            disasterMode = false
+            batterySaver = false
+        }
+        if !extras.sos, sosActive {
+            stopSOS()
+        }
+        if !extras.pushToTalk, radio.phase == .transmitting {
+            endRadio()
+        }
+        applyShareGate()
+    }
+
     func recordIncident(trigger: IncidentTrigger, workKind: String? = nil, workName: String? = nil) -> Bool {
+        switch trigger {
+        case .alarm, .manual:
+            guard extras.proximity else { return false }
+        case .fall:
+            guard extras.fall else { return false }
+        case .sos:
+            guard extras.sos else { return false }
+        }
         guard let project = drawing.project else {
             incidentNote = "先にプロジェクトを作ってください。"
             return false
@@ -971,18 +1010,20 @@ final class FieldModel: ObservableObject {
         crew.arm()
         nearby.onFall = { [weak self] notice in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, self.extras.fall else { return }
                 self.crew.receiveFall(notice, position: self.workingReading.position)
             }
         }
         nearby.onSOS = { [weak self] packet in
             DispatchQueue.main.async {
-                self?.ingestSOS(packet, arrived: .nearby)
+                guard let self, self.extras.sos else { return }
+                self.ingestSOS(packet, arrived: .nearby)
             }
         }
         nearby.onAid = { [weak self] packet in
             DispatchQueue.main.async {
-                self?.ingestAid(packet, arrived: .nearby)
+                guard let self, self.extras.firstResponse else { return }
+                self.ingestAid(packet, arrived: .nearby)
             }
         }
         nearby.onBucket = { [weak self] envelope in
@@ -996,6 +1037,7 @@ final class FieldModel: ObservableObject {
             }
         }
         startDisasterUplink()
+        fall.setEnabled(extras.fall)
         fall.start()
         incidentTimer?.invalidate()
         incidentTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -1462,9 +1504,9 @@ final class FieldModel: ObservableObject {
         radio.refreshSpace()
         refreshSOS()
         noteDisasterMotion()
-        if firstDesk.episode?.active == true {
+        if extras.firstResponse, firstDesk.episode?.active == true {
             publishFirst(speak: false)
-        } else {
+        } else if extras.firstResponse {
             refreshAidArrows()
         }
         trackIncidents()
@@ -1476,24 +1518,32 @@ final class FieldModel: ObservableObject {
     func applyShareGate(now: Date = Date()) {
         let position = workingReading.position
         let plottable = position?.isPlottable == true
-        let state = LocationPrivacy.gate(
-            hasFix: plottable,
-            latitude: position?.latitudeDegrees ?? 0,
-            longitude: position?.longitudeDegrees ?? 0,
-            at: now,
-            fence: drawing.project?.siteFence,
-            hours: drawing.project?.workHours,
-            paused: sharePaused
-        )
+        let state = extras.sharesLocation
+            ? LocationPrivacy.gate(
+                hasFix: plottable,
+                latitude: position?.latitudeDegrees ?? 0,
+                longitude: position?.longitudeDegrees ?? 0,
+                at: now,
+                fence: drawing.project?.siteFence,
+                hours: drawing.project?.workHours,
+                paused: sharePaused
+            )
+            : ShareState.unset
         locationShare = state
-        crew.note(
-            position: position,
-            project: drawing.project,
-            radius: drawing.machineRadiusMeters,
-            root: drawing.projectsRoot,
-            broadcast: state.shares,
-            now: now
-        )
+        if extras.usesNearby || state.shares {
+            crew.note(
+                position: position,
+                project: drawing.project,
+                radius: drawing.machineRadiusMeters,
+                root: drawing.projectsRoot,
+                broadcast: state.shares,
+                alert: extras.proximity,
+                listen: extras.usesNearby,
+                now: now
+            )
+        } else {
+            crew.standDown()
+        }
         shareViewers = LocationPrivacy.viewers(
             sharing: state.shares,
             peers: crew.peers.map { ShareViewer(id: $0.id, name: $0.name, role: $0.role.label) }
@@ -1550,6 +1600,7 @@ final class FieldModel: ObservableObject {
     }
 
     private func trackIncidents(now: Date = Date()) {
+        guard extras.recordsIncidents else { return }
         guard let project = drawing.project else { return }
         if restoredIncidentProject != project.name {
             restoredIncidentProject = project.name

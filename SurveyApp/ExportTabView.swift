@@ -11,6 +11,13 @@ struct ExportTabView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("出す")
                     .font(.system(size: 28, weight: .heavy))
+                ExtraEntryButton {
+                    field.showsExtras = true
+                }
+                Text("無線、接近、転倒、SOS、災害、中継、統計はおまけです。既定ではオフで、測量の画面には出ません。")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("受取手が今受け取れる形だけ出します。点群と3Dは点群フォルダに保存するだけで、ここには出しません。")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(SurveyColor.muted)

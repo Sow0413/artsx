@@ -187,6 +187,18 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func syncCrew(on map: MKMapView, field: FieldModel) {
+            guard field.extras.proximity else {
+                if !crewOverlays.isEmpty {
+                    map.removeOverlays(crewOverlays)
+                    crewOverlays = []
+                }
+                if !crewAnnotations.isEmpty {
+                    map.removeAnnotations(crewAnnotations)
+                    crewAnnotations = []
+                }
+                crewKey = ""
+                return
+            }
             let key = field.crew.peers.map { peer in
                 let level = field.crew.marks.first { $0.id == peer.id }?.level.rawValue ?? "clear"
                 return "\(peer.id):\(peer.latitudeDegrees):\(peer.longitudeDegrees):\(peer.workRadiusMeters ?? 0):\(peer.role.rawValue):\(level)"
@@ -224,7 +236,7 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func syncAid(on map: MKMapView, field: FieldModel) {
-            let arrows = field.aidArrows
+            let arrows = field.extras.firstResponse ? field.aidArrows : []
             let key = arrows.map { "\($0.id):\($0.latitudeDegrees):\($0.longitudeDegrees):\($0.text)" }.joined(separator: "|")
             if key == aidKey { return }
             aidKey = key
@@ -246,6 +258,18 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func syncDisaster(on map: MKMapView, field: FieldModel) {
+            guard field.extras.disaster else {
+                if !disasterAnnotations.isEmpty {
+                    map.removeAnnotations(disasterAnnotations)
+                    disasterAnnotations = []
+                }
+                if !disasterOverlays.isEmpty {
+                    map.removeOverlays(disasterOverlays)
+                    disasterOverlays = []
+                }
+                disasterKey = ""
+                return
+            }
             let crewIDs = Set(field.crew.peers.map(\.id))
             let peers = field.disasterPeers.filter { !crewIDs.contains($0.deviceID) && $0.deviceID != field.crew.deviceID }
             let key = field.disasterSites.map { "\($0.id.uuidString):\($0.latitudeDegrees):\($0.longitudeDegrees)" }.joined(separator: "|")
@@ -533,7 +557,7 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func syncHeat(on map: MKMapView, field: FieldModel) {
-            guard field.showIncidentHeat else {
+            guard field.extras.stats, field.showIncidentHeat else {
                 if !heatOverlays.isEmpty {
                     map.removeOverlays(heatOverlays)
                     heatOverlays = []

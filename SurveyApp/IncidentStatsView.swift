@@ -17,6 +17,7 @@ struct IncidentStatsSheet: View {
                     Text(SafetyNotice.text)
                         .font(.system(size: 13, weight: .heavy))
                         .foregroundStyle(SurveyColor.amber)
+                    if field.extras.stats {
                     Toggle("地図にヒートマップ", isOn: $field.showIncidentHeat)
                         .font(.system(size: 16, weight: .heavy))
                     Toggle("個人名を役割にする（既定）", isOn: $field.anonymizeStats)
@@ -45,6 +46,16 @@ struct IncidentStatsSheet: View {
                                 .minimumScaleFactor(0.7)
                         }
                     }
+                    Button("集計CSVを書く") {
+                        field.exportIncidentStats()
+                    }
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(SurveyColor.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    if field.extras.accidentReport {
                     Text("対外説明")
                         .font(.system(size: 18, weight: .heavy))
                     Text("確定した記録から、労基署や警察に見せるPDFを作ります。労働者死傷病報告の様式は作らず、提出もしません。氏名を出すか、関係者番号にするかを選べます。")
@@ -74,14 +85,7 @@ struct IncidentStatsSheet: View {
                             }
                         }
                     }
-                    Button("集計CSVを書く") {
-                        field.exportIncidentStats()
                     }
-                    .font(.system(size: 18, weight: .black))
-                    .foregroundStyle(Color.white)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(SurveyColor.blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     if let message = field.statMessage {
                         Text(message)
                             .font(.system(size: 14, weight: .heavy))

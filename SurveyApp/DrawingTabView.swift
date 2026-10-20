@@ -37,10 +37,18 @@ struct DrawingTabView: View {
         .background(SurveyColor.background)
         .overlay {
             ZStack {
-                SafetyWash(level: field.crew.worst)
-                ThreatRim(cues: [], fall: field.crew.fallCue)
-                TalkRim(pointer: field.talkPointer)
-                SOSRim(pointer: field.sosPointer)
+                if field.extras.proximity {
+                    SafetyWash(level: field.crew.worst)
+                }
+                if field.extras.fall {
+                    ThreatRim(cues: [], fall: field.crew.fallCue)
+                }
+                if field.extras.pushToTalk {
+                    TalkRim(pointer: field.talkPointer)
+                }
+                if field.extras.sos {
+                    SOSRim(pointer: field.sosPointer)
+                }
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: drawingTypes) { result in
@@ -82,19 +90,29 @@ struct DrawingTabView: View {
                 onFit: { drawing.fit(in: $0) }
             )
             VStack {
-                SafetyBanner(crew: field.crew) {
-                    field.recordIncident(trigger: .manual)
+                if field.extras.proximity {
+                    SafetyBanner(crew: field.crew) {
+                        field.recordIncident(trigger: .manual)
+                    }
                 }
-                FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
-                    field.cancelFall()
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 6)
-                FirstResponseCard(field: field)
-                SOSControl(field: field)
+                if field.extras.fall {
+                    FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
+                        field.cancelFall()
+                    }
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
-                IncidentTray(field: field)
+                }
+                if field.extras.firstResponse {
+                    FirstResponseCard(field: field)
+                }
+                if field.extras.sos {
+                    SOSControl(field: field)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                }
+                if field.extras.recordsIncidents {
+                    IncidentTray(field: field)
+                }
                 Spacer()
             }
             if drawing.document == nil {
@@ -420,9 +438,15 @@ struct DrawingTabView: View {
                 .textFieldStyle(.roundedBorder)
                 .keyboardType(.numbersAndPunctuation)
             machineSection
-            proximitySection
-            fallSection
-            SiteAidEditor(field: field)
+            if field.extras.proximity {
+                proximitySection
+            }
+            if field.extras.fall {
+                fallSection
+            }
+            if field.extras.firstResponse {
+                SiteAidEditor(field: field)
+            }
             eyeSection
             Picker("都道府県", selection: prefectureBinding) {
                 Text("未選択").tag(Optional<String>.none)
@@ -779,7 +803,7 @@ struct DrawingTabView: View {
     }
 
     private var crewGlyphs: [CrewGlyph] {
-        guard drawing.document != nil else { return [] }
+        guard field.extras.proximity, drawing.document != nil else { return [] }
         let scale = abs(drawing.activeTransform?.scale ?? 1)
         return field.crew.peers.compactMap { peer in
             guard let placed = DrawingPlacement.user(

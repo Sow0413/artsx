@@ -20,48 +20,67 @@ struct MapTabView: View {
                         .padding(.horizontal, 12)
                         .background(SurveyColor.card.opacity(0.94))
                 }
-                SafetyBanner(crew: field.crew) {
-                    field.recordIncident(trigger: .manual)
+                if field.extras.proximity {
+                    SafetyBanner(crew: field.crew) {
+                        field.recordIncident(trigger: .manual)
+                    }
                 }
-                FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
-                    field.cancelFall()
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 6)
-                FirstResponseCard(field: field)
-                SOSControl(field: field)
+                if field.extras.fall {
+                    FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
+                        field.cancelFall()
+                    }
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
-                IncidentTray(field: field)
+                }
+                if field.extras.firstResponse {
+                    FirstResponseCard(field: field)
+                }
+                if field.extras.sos {
+                    SOSControl(field: field)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                }
+                if field.extras.recordsIncidents {
+                    IncidentTray(field: field)
+                }
                 HStack {
-                    Button(field.radio.spaceAudio ? "定位オン" : "定位") {
-                        field.radio.setSpaceAudio(!field.radio.spaceAudio)
+                    ExtraEntryButton {
+                        field.showsExtras = true
                     }
-                    .font(.system(size: 14, weight: .heavy))
-                    .foregroundStyle(field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.text)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(SurveyColor.card.opacity(0.92))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
-                    Button("災害") {
-                        field.showsDisaster = true
+                    if field.extras.pushToTalk {
+                        Button(field.radio.spaceAudio ? "定位オン" : "定位") {
+                            field.radio.setSpaceAudio(!field.radio.spaceAudio)
+                        }
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(SurveyColor.card.opacity(0.92))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
                     }
-                    .font(.system(size: 14, weight: .heavy))
-                    .foregroundStyle(field.disasterMode ? Color.white : SurveyColor.text)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(field.disasterMode ? SurveyColor.red : SurveyColor.card.opacity(0.92))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    Button("統計") {
-                        field.showsIncidentStats = true
+                    if field.extras.disaster {
+                        Button("災害") {
+                            field.showsDisaster = true
+                        }
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(field.disasterMode ? Color.white : SurveyColor.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(field.disasterMode ? SurveyColor.red : SurveyColor.card.opacity(0.92))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    .font(.system(size: 14, weight: .heavy))
-                    .foregroundStyle(SurveyColor.text)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(field.showIncidentHeat ? SurveyColor.red : SurveyColor.card.opacity(0.92))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    if field.extras.stats || field.extras.accidentReport {
+                        Button(field.extras.stats ? "統計" : "事故報告") {
+                            field.showsIncidentStats = true
+                        }
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(field.showIncidentHeat ? SurveyColor.red : SurveyColor.card.opacity(0.92))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
                     Spacer()
                     Text(reachCaption)
                         .font(.system(size: 13, weight: .heavy))
@@ -73,7 +92,7 @@ struct MapTabView: View {
                 }
                 .padding(.trailing, 12)
                 .padding(.top, 6)
-                if field.disasterMode {
+                if field.extras.disaster, field.disasterMode {
                     Text("災害派遣。圏外のまま、近くの端末へ中継します。")
                         .font(.system(size: 13, weight: .heavy))
                         .foregroundStyle(SurveyColor.text)
@@ -97,10 +116,18 @@ struct MapTabView: View {
         .background(SurveyColor.mapBackdrop)
         .overlay {
             ZStack {
-                SafetyWash(level: field.crew.worst)
-                ThreatRim(cues: [], fall: field.crew.fallCue)
-                TalkRim(pointer: field.talkPointer)
-                SOSRim(pointer: field.sosPointer)
+                if field.extras.proximity {
+                    SafetyWash(level: field.crew.worst)
+                }
+                if field.extras.fall {
+                    ThreatRim(cues: [], fall: field.crew.fallCue)
+                }
+                if field.extras.pushToTalk {
+                    TalkRim(pointer: field.talkPointer)
+                }
+                if field.extras.sos {
+                    SOSRim(pointer: field.sosPointer)
+                }
             }
         }
         .sheet(isPresented: $field.showsIncidentStats) {

@@ -6,6 +6,11 @@ import Network
 
 extension FieldModel {
     func setDisasterMode(_ enabled: Bool) {
+        guard extras.disaster else {
+            disasterMode = false
+            disasterMessage = "おまけの災害派遣をオンにしてから使います。"
+            return
+        }
         guard drawing.project != nil else {
             disasterMode = false
             disasterMessage = "プロジェクトを開いてから災害派遣にします。"
@@ -159,7 +164,7 @@ extension FieldModel {
 
     func noteDisasterMotion(force: Bool = false) {
         loadDisasterIfNeeded()
-        guard disasterMode, let project = drawing.project else { return }
+        guard extras.disaster, disasterMode, let project = drawing.project else { return }
         guard locationShare.shares else { return }
         guard let position = workingReading.position, position.isPlottable else { return }
         let now = Date()
@@ -201,6 +206,7 @@ extension FieldModel {
     }
 
     func ingestBucket(_ envelope: BucketEnvelope) {
+        guard extras.mesh || extras.disaster else { return }
         loadDisasterIfNeeded()
         guard let project = drawing.project else { return }
         prepareBucket()
@@ -212,7 +218,7 @@ extension FieldModel {
             applyBucket(next, projectName: project.name)
         case .forward(let next):
             applyBucket(next, projectName: project.name)
-            if meshChoice(for: next) == .forward {
+            if extras.mesh, meshChoice(for: next) == .forward {
                 nearby.send(next)
             }
         }
@@ -224,7 +230,7 @@ extension FieldModel {
     }
 
     func relayDisasterHeld(now: Date) {
-        guard drawing.project != nil, MeshDuty.relaying(meshPresence) else { return }
+        guard extras.mesh, drawing.project != nil, MeshDuty.relaying(meshPresence) else { return }
         let interval = MeshDuty.relayInterval(
             batteryPercent: meshBattery,
             charging: meshCharging,
@@ -376,8 +382,13 @@ extension FieldModel {
         guard disasterLoadedProject != project.name else { return }
         disasterLoadedProject = project.name
         let settings = DisasterBook.loadSettings(projectName: project.name, at: drawing.projectsRoot)
-        disasterMode = settings.mode
-        batterySaver = settings.batterySaver
+        if extras.disaster {
+            disasterMode = settings.mode
+            batterySaver = settings.batterySaver
+        } else {
+            disasterMode = false
+            batterySaver = false
+        }
         disasterPeersDesk = DisasterPeers()
         for position in DisasterBook.loadPositions(projectName: project.name, at: drawing.projectsRoot) {
             disasterPeersDesk.note(position)

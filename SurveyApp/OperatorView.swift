@@ -27,12 +27,22 @@ struct OperatorView: View {
         let reach = reachCall(position: position)
         return GeometryReader { geo in
             let landscape = geo.size.width > geo.size.height
+            let busy = field.extras.proximity || field.extras.fall || field.extras.sos || field.extras.pushToTalk || field.extras.firstResponse
             ZStack {
                 SurveyColor.background
-                SafetyWash(level: field.crew.worst)
-                ThreatRim(cues: field.crew.threats.cues, fall: field.crew.fallCue)
-                TalkRim(pointer: field.talkPointer)
-                SOSRim(pointer: field.sosPointer)
+                if field.extras.proximity {
+                    SafetyWash(level: field.crew.worst)
+                    ThreatRim(cues: field.crew.threats.cues, fall: nil)
+                }
+                if field.extras.fall {
+                    ThreatRim(cues: [], fall: field.crew.fallCue)
+                }
+                if field.extras.pushToTalk {
+                    TalkRim(pointer: field.talkPointer)
+                }
+                if field.extras.sos {
+                    SOSRim(pointer: field.sosPointer)
+                }
                 if landscape {
                     VStack(spacing: 4) {
                         HStack(spacing: 8) {
@@ -45,7 +55,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 28)
-                    .padding(.bottom, 300)
+                    .padding(.bottom, busy ? 300 : 24)
                 } else {
                     VStack(spacing: 6) {
                         stationLabel(station)
@@ -55,7 +65,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 28)
-                    .padding(.bottom, 340)
+                    .padding(.bottom, busy ? 340 : 24)
                 }
                 VStack {
                     HStack {
@@ -71,24 +81,36 @@ struct OperatorView: View {
                         .foregroundStyle(SurveyColor.muted)
                     }
                     Spacer()
-                    SafetyBanner(crew: field.crew)
-                    FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
-                        field.cancelFall()
+                    if field.extras.proximity {
+                        SafetyBanner(crew: field.crew)
+                        directionHeadline
+                        hailButton
+                        hiyariButton
+                        CrewRadar(
+                            marks: field.crew.marks,
+                            selfRole: field.crew.role,
+                            selfRadius: drawing.machineRadiusMeters,
+                            cautionMeters: drawing.cautionMeters,
+                            facingDegrees: field.crew.threats.facingDegrees
+                        )
                     }
-                    FirstResponseCard(field: field)
-                    SOSControl(field: field)
-                    directionHeadline
-                    hailButton
-                    hiyariButton
-                    IncidentTray(field: field)
-                    CrewRadar(
-                        marks: field.crew.marks,
-                        selfRole: field.crew.role,
-                        selfRadius: drawing.machineRadiusMeters,
-                        cautionMeters: drawing.cautionMeters,
-                        facingDegrees: field.crew.threats.facingDegrees
-                    )
-                    talkButton
+                    if field.extras.fall {
+                        FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
+                            field.cancelFall()
+                        }
+                    }
+                    if field.extras.firstResponse {
+                        FirstResponseCard(field: field)
+                    }
+                    if field.extras.sos {
+                        SOSControl(field: field)
+                    }
+                    if field.extras.recordsIncidents {
+                        IncidentTray(field: field)
+                    }
+                    if field.extras.pushToTalk {
+                        talkButton
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
