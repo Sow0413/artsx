@@ -160,24 +160,39 @@ xcodebuild \
   build
 ```
 
-実機と TestFlight の前に、Apple Developer Program（年額の目安は約13,000円）へ加入し、Xcode の Signing で Development Team を選ぶ。`project.yml` にはチーム ID を書いていない。
+配布用の Bundle ID の仮は `jp.oshiro.survey`。変えるときは GitHub の Actions Variable `BUNDLE_ID` に新しい ID を置く。`project.yml` の既定も同じ ID。fastlane は使わない。
 
 ## クラウド Mac と TestFlight
 
-GitHub Actions（`.github/workflows/ci.yml`）は次の3つ。
+GitHub Actions（`.github/workflows/ci.yml`）は macOS 15 のランナーで、次の3つ。
 
 1. Ubuntu で `SurveyCore` の `swift test`
-2. macOS で署名なしの `xcodebuild`
-3. 手動実行で `upload_testflight` を選んだときだけ、Archive して App Store Connect へ上げる
+2. macOS で署名なしの `xcodebuild`。API キーが無くてもここは通る
+3. 手動実行で `upload_testflight` を選んだときだけ、署名して App Store Connect へ上げる。キーが無いときは何も上げず、成功扱いで終わる
 
-3に使う Secrets はリポジトリへ自分で置く。値はこの README にもワークフローにも書かない。
+署名は Xcode の自動署名（`-allowProvisioningUpdates` と App Store Connect API キー）だけ。証明書とプロファイルは、その場で作ってアーカイブに使う。キーの中身はログに出さない。
 
-| Secret | 中身 |
+### captain が一度だけすること
+
+メンバーシップの有効化を待つ。有効になったら、ブラウザで次を行う。
+
+1. [App Store Connect](https://appstoreconnect.apple.com) の「ビジネス」で、有料アプリ契約に同意する。無料配信でも要る。
+2. [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list) で App ID を追加する。Bundle ID は `jp.oshiro.survey`（変えるなら、その ID）。
+3. App Store Connect の「アプリ」→「新規 App」。プラットフォームは iOS、名前は測量、Bundle ID は今作った ID、SKU は `survey` でよい。
+4. 「ユーザとアクセス」→「統合」→ App Store Connect API でキーを作る。役割は Admin。Issuer ID と Key ID を控え、`.p8` をダウンロードする。このファイルは一度しか出ない。
+5. GitHub の Settings → Secrets and variables → Actions に、下の Secret を置く。チャットや README には貼らない。
+6. Actions の CI を手動実行し、`upload_testflight` をオンにする。ビルド番号は実行回数になる。
+
+| Secret | 渡す値 |
 | --- | --- |
-| `DEVELOPMENT_TEAM` | Apple Developer の Team ID |
-| `APPSTORE_ISSUER_ID` | App Store Connect API の Issuer ID |
-| `APPSTORE_KEY_ID` | API キーの Key ID |
-| `APPSTORE_PRIVATE_KEY` | API キーの `.p8` の中身 |
+| `ASC_ISSUER_ID` | API キーの Issuer ID（UUID） |
+| `ASC_KEY_ID` | API キーの Key ID（10文字） |
+| `ASC_KEY_P8` | `.p8` の中身。`BEGIN PRIVATE KEY` から終わりまで。改行の代わりに `\n` でも、Base64 1行でもよい |
+| `ASC_TEAM_ID` | 任意。チームが複数あるときだけ、10文字の Team ID |
+
+Variable `BUNDLE_ID` と `MARKETING_VERSION` は任意。空なら `jp.oshiro.survey` と `0.1.0`。
+
+iPad の Playgrounds 用 ID `jp.captain.survey.playground` は、この配信 ID とは別のまま。
 
 ## 次のスライス
 

@@ -68,33 +68,77 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Require signing secrets
+      - name: Sign and upload when the API key is present
         env:
-          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
-          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
-          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_TEAM_ID: ${{ secrets.ASC_TEAM_ID }}
+          BUNDLE_ID: ${{ vars.BUNDLE_ID }}
+          MARKETING_VERSION: ${{ vars.MARKETING_VERSION }}
         run: |
           set -euo pipefail
-          test -n "$DEVELOPMENT_TEAM"
-          test -n "$APPSTORE_ISSUER_ID"
-          test -n "$APPSTORE_KEY_ID"
-          test -n "$APPSTORE_PRIVATE_KEY"
-      - name: Generate the Xcode project
-        run: |
-          set -euo pipefail
+          if [ -z "${ASC_ISSUER_ID}" ] || [ -z "${ASC_KEY_ID}" ] || [ -z "${ASC_KEY_P8}" ]; then
+            echo "ASC_ISSUER_ID / ASC_KEY_ID / ASC_KEY_P8 が無いので、署名とアップロードは飛ばします。"
+            echo "署名なしビルドは別のジョブです。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           brew install xcodegen
           xcodegen generate
-      - name: Archive and upload
-        env:
-          DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
-          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
-          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          mkdir -p build
-          printf '%s' "$APPSTORE_PRIVATE_KEY" > build/AuthKey.p8
+          key_dir="$HOME/private_keys"
+          key_path="$key_dir/AuthKey_${ASC_KEY_ID}.p8"
+          mkdir -p "$key_dir" build
+          umask 077
+          if printf '%s' "$ASC_KEY_P8" | grep -q "BEGIN PRIVATE KEY"; then
+            printf '%s' "$ASC_KEY_P8" | sed 's/\\n/\n/g' > "$key_path"
+          else
+            if ! printf '%s' "$ASC_KEY_P8" | tr -d ' \n' | base64 --decode > "$key_path" 2>/dev/null; then
+              printf '%s' "$ASC_KEY_P8" | tr -d ' \n' | base64 -D > "$key_path"
+            fi
+          fi
+          chmod 600 "$key_path"
+          printf '\n' >> "$key_path"
+          if ! grep -q "BEGIN PRIVATE KEY" "$key_path"; then
+            echo "ASC_KEY_P8 を秘密鍵として読めませんでした。" >&2
+            exit 1
+          fi
+          trap 'rm -f "$key_path"' EXIT
+          if [ -n "${ASC_TEAM_ID}" ]; then
+            team="$ASC_TEAM_ID"
+          else
+            team="$(
+              xcrun altool --list-providers \
+                --apiKey "$ASC_KEY_ID" \
+                --apiIssuer "$ASC_ISSUER_ID" \
+                --output-format json \
+              | python3 -c '
+          import json, sys
+          raw = sys.stdin.read()
+          data = json.loads(raw[raw.find("{"):])
+          teams = []
+          def walk(node):
+              if isinstance(node, dict):
+                  value = node.get("WWDRTeamID")
+                  if isinstance(value, str) and len(value) == 10:
+                      teams.append(value)
+                  for child in node.values():
+                      walk(child)
+              elif isinstance(node, list):
+                  for child in node:
+                      walk(child)
+          walk(data)
+          unique = list(dict.fromkeys(teams))
+          if len(unique) == 0:
+              raise SystemExit("WWDRTeamID がありません。ASC_TEAM_ID を Secret に置いてください。")
+          if len(unique) > 1:
+              raise SystemExit("チームが複数あります。ASC_TEAM_ID を Secret に置いてください。")
+          print(unique[0])
+          '
+            )"
+          fi
+          bundle="${BUNDLE_ID:-jp.oshiro.survey}"
+          version="${MARKETING_VERSION:-0.1.0}"
+          echo "team ${team}, bundle ${bundle}, version ${version} (${GITHUB_RUN_NUMBER})"
           cat > build/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -107,7 +151,7 @@ jobs:
             <key>signingStyle</key>
             <string>automatic</string>
             <key>teamID</key>
-            <string>${DEVELOPMENT_TEAM}</string>
+            <string>${team}</string>
             <key>uploadSymbols</key>
             <true/>
           </dict>
@@ -119,12 +163,15 @@ jobs:
             -destination 'generic/platform=iOS' \
             -configuration Release \
             -archivePath "$PWD/build/Survey.xcarchive" \
-            DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+            DEVELOPMENT_TEAM="$team" \
             CODE_SIGN_STYLE=Automatic \
+            PRODUCT_BUNDLE_IDENTIFIER="$bundle" \
+            MARKETING_VERSION="$version" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$PWD/build/AuthKey.p8" \
-            -authenticationKeyID "$APPSTORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
+            -authenticationKeyPath "$key_path" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             archive
           xcodebuild \
             -exportArchive \
@@ -132,7 +179,6 @@ jobs:
             -exportPath "$PWD/build/export" \
             -exportOptionsPlist "$PWD/build/ExportOptions.plist" \
             -allowProvisioningUpdates \
-            -authenticationKeyPath "$PWD/build/AuthKey.p8" \
-            -authenticationKeyID "$APPSTORE_KEY_ID" \
-            -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID"
-          rm -f build/AuthKey.p8
+            -authenticationKeyPath "$key_path" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"

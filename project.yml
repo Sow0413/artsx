@@ -1,6 +1,6 @@
 name: Survey
 options:
-  bundleIdPrefix: jp.captain
+  bundleIdPrefix: jp.oshiro
   deploymentTarget:
     iOS: "17.0"
   developmentLanguage: ja
@@ -28,7 +28,7 @@ targets:
         product: SurveyCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: jp.captain.survey
+        PRODUCT_BUNDLE_IDENTIFIER: jp.oshiro.survey
         PRODUCT_NAME: Survey
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_FILE: SurveyApp/Info.plist
