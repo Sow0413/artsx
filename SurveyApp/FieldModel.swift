@@ -81,6 +81,7 @@ final class FieldModel: ObservableObject {
     @Published var showsBatter = false
     @Published var showsPace = false
     @Published var pace = PaceProfile.load()
+    @Published var stakeoutUnit = StakeoutPacePreference.load()
     @Published private(set) var walkMode: WalkMode = .gnss
     @Published private(set) var bridgeFix: WalkFix?
     @Published private(set) var bridgeNotice: String?
@@ -976,6 +977,36 @@ final class FieldModel: ObservableObject {
         let distance = walking ? pacePathMeters : nil
         let sigma = distance.map { PaceMath.paceSigma(distanceMeters: $0) }
         return PaceMath.badge(distanceMeters: distance, sigmaMeters: sigma)
+    }
+
+    /// タップした測設点までの案内。オペ画面の測点には使わない。
+    var stakeoutGuide: StakeoutPaceGuide? {
+        guard let inspection = drawing.inspection,
+              let targetLatitude = inspection.latitudeDegrees,
+              let targetLongitude = inspection.longitudeDegrees,
+              let here = navigationReading.position,
+              here.isPlottable,
+              let inverse = GRS80Geodesic.inverse(
+                latitude1: here.latitudeDegrees,
+                longitude1: here.longitudeDegrees,
+                latitude2: targetLatitude,
+                longitude2: targetLongitude
+              ) else { return nil }
+        let facing = ThreatBearing.facing(courseDegrees: here.courseDegrees, headingDegrees: here.headingDegrees)
+        return StakeoutPace.guide(
+            distanceMeters: inverse.distanceMeters,
+            azimuthDegrees: inverse.azimuthDegrees,
+            facingDegrees: facing?.degrees,
+            strideMeters: pace.strideMeters,
+            unit: stakeoutUnit.unit,
+            precision: StakeoutPrecision.decide(drawing.stakeoutAccuracy)
+        )
+    }
+
+    func setStakeoutUnit(_ unit: StakeoutUnit) {
+        let preference = StakeoutPacePreference(unit: unit)
+        stakeoutUnit = preference
+        preference.save()
     }
 
     var paceFactorText: String {

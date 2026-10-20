@@ -8,6 +8,29 @@ struct MapTabView: View {
             SurveyMapView(field: field)
             VStack(spacing: 0) {
                 WorkBar(field: field)
+                if let guide = field.stakeoutGuide {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(guide.speech)
+                            .font(SurveyType(34, .heavy))
+                            .minimumScaleFactor(0.5)
+                            .lineLimit(2)
+                        if let detail = guide.detail {
+                            Text(detail)
+                                .font(SurveyType(20, .heavy))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                        }
+                    }
+                    .foregroundStyle(SurveyColor.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(SurveyColor.card)
+                    .overlay(alignment: .bottom) {
+                        Rectangle().fill(SurveyColor.line).frame(height: SurveyColor.stroke)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
                 if let station = field.drawing.operatorGuide(at: field.navigationReading.position)?.line,
                    field.drawing.stationLine != nil {
                     Text(station)

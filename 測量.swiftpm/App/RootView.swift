@@ -3,6 +3,10 @@ import Foundation
 import SwiftUI
 import SurveyCore
 
+#if !SURVEY_PLAYGROUND && canImport(AVFoundation)
+import AVFoundation
+#endif
+
 struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var field: FieldModel
@@ -87,6 +91,7 @@ struct RootView: View {
         .preferredColorScheme(appearance.outdoor ? .light : .dark)
         .background {
             OperationKeyCommands(field: field)
+            StakeoutSpeaker(field: field)
             if field.operation.level == .skilled, field.operation.eyesFree {
                 VolumeSliderHost()
                     .frame(width: 1, height: 1)
@@ -172,6 +177,61 @@ struct RootView: View {
         .padding(.bottom, 8)
         .accessibilityLabel(appearance.label)
     }
+}
+
+/// 地図と図面で、位置出しの文が変わったときだけ読む。オペ画面では読まない。実機の声は未確認。
+private struct StakeoutSpeaker: View {
+    @ObservedObject var field: FieldModel
+    @State private var spoken = ""
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .onChange(of: phrase) { _, next in
+                guard let next, next != spoken else {
+                    if next == nil { StakeoutVoice.stop() }
+                    return
+                }
+                spoken = next
+                StakeoutVoice.say(next)
+            }
+            .onChange(of: field.tab) { _, tab in
+                if tab == .seat {
+                    spoken = ""
+                    StakeoutVoice.stop()
+                }
+            }
+    }
+
+    private var phrase: String? {
+        guard field.tab == .map || field.tab == .drawing else { return nil }
+        return field.stakeoutGuide?.speech
+    }
+}
+
+enum StakeoutVoice {
+    static func say(_ text: String) {
+        #if !SURVEY_PLAYGROUND && canImport(AVFoundation)
+        speaker.stopSpeaking(at: .immediate)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
+        utterance.rate = 0.5
+        speaker.speak(utterance)
+        #else
+        _ = text
+        #endif
+    }
+
+    static func stop() {
+        #if !SURVEY_PLAYGROUND && canImport(AVFoundation)
+        speaker.stopSpeaking(at: .immediate)
+        #endif
+    }
+
+    #if !SURVEY_PLAYGROUND && canImport(AVFoundation)
+    private static let speaker = AVSpeechSynthesizer()
+    #endif
 }
 
 enum AppEnvironment {

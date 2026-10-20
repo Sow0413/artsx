@@ -687,10 +687,27 @@ struct DrawingTabView: View {
                 Text("この点がオペの目標です。作業半径の内と外を色で出します。")
                     .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
-                if let distance = inspection.distanceMeters, let azimuth = inspection.azimuthDegrees {
-                    Text("現在地から \(StakeoutText.meters(distance, precision: stakeoutPrecision))、北から時計回り \(String(format: "%.1f°", azimuth))")
-                        .font(SurveyType(15, .heavy))
-                } else {
+                if let guide = field.stakeoutGuide {
+                    Text(guide.speech)
+                        .font(SurveyType(34, .heavy))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = guide.detail {
+                        Text(detail)
+                            .font(SurveyType(20, .heavy))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 8) {
+                        ForEach(StakeoutUnit.allCases, id: \.self) { unit in
+                            Button(unit.label) { field.setStakeoutUnit(unit) }
+                                .buttonStyle(.plain)
+                                .font(SurveyType(16, .heavy))
+                                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                                .background(field.stakeoutUnit.unit == unit ? SurveyColor.blue : SurveyColor.card)
+                                .foregroundStyle(field.stakeoutUnit.unit == unit ? SurveyColor.onAccent : SurveyColor.text)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                    }
+                } else if inspection.distanceMeters == nil {
                     Text("現在地が無いので、距離と方向は出せません。")
                         .font(SurveyType(14, .semibold))
                         .foregroundStyle(SurveyColor.muted)
