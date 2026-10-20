@@ -97,6 +97,7 @@ struct RootView: View {
         }
         .onAppear {
             field.start()
+            field.setSightForeground(scenePhase == .active)
             syncVolume()
         }
         .onDisappear {
@@ -109,6 +110,7 @@ struct RootView: View {
             } else {
                 field.pauseGNSS()
             }
+            field.setSightForeground(phase == .active)
             syncVolume()
         }
         .onChange(of: field.operation.level) { _, _ in syncVolume() }

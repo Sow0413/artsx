@@ -99,20 +99,98 @@ final class StatureTests: XCTestCase {
         XCTAssertNil(external.applying(profile).condition?.stature)
     }
 
-    func testElbowIsDefaultAndFirstPreset() {
+    func testSightIsDefaultAndElbowIsTheAlternative() {
         let fresh = StatureProfile()
-        XCTAssertEqual(fresh.style, .elbow)
+        XCTAssertEqual(fresh.style, .sight)
         XCTAssertEqual(fresh.coefficients.elbowFactor, 0.70, accuracy: 1e-12)
-        XCTAssertEqual(fresh.coefficients.chestFactor, 0.72, accuracy: 1e-12)
         XCTAssertNil(fresh.statureMeters)
-        XCTAssertEqual(HoldStyle.allCases.first, .elbow)
+        XCTAssertEqual(HoldStyle.allCases.first, .sight)
+        XCTAssertEqual(Array(HoldStyle.allCases.dropFirst()).first, .elbow)
+        XCTAssertEqual(HoldStyle.sight.menuTitle(coefficients: .standard), "画面の角度（目の高さ−距離×sinθ）")
         XCTAssertEqual(HoldStyle.elbow.menuTitle(coefficients: .standard), "肘より上（身長×0.70）")
 
+        let elbow = StatureProfile(statureMeters: 1.70, style: .elbow)
+        XCTAssertEqual(StatureMath.holdMeters(profile: elbow) ?? -1, 1.19, accuracy: 1e-12)
+        XCTAssertEqual(StatureMath.correction(for: elbow, stage: .iphone, receiver: .iphoneGPS)?.screenLabel, "身長補正 −1.19m")
+        XCTAssertEqual(StatureMath.notice(profile: StatureProfile(statureMeters: 1.70), stage: .iphone, receiver: .iphoneGPS), "傾きを待っています")
+    }
+
+    func testSightSubtractsDistanceAndAddsTheAntenna() {
+        let tilt = StatureMath.tiltFromVertical(pitchRadians: .pi / 3)
+        XCTAssertEqual(tilt ?? -1, .pi / 6, accuracy: 1e-12)
+        XCTAssertEqual(StatureMath.tiltFromVertical(pitchRadians: .pi / 2) ?? -1, 0, accuracy: 1e-12)
+        XCTAssertNil(StatureMath.tiltFromVertical(pitchRadians: .nan))
+
+        let assumed = SightSample.resolved(tiltRadians: tilt!, measuredDistance: nil, antennaAlongUpMeters: 0.06)
+        XCTAssertEqual(assumed?.eyeDistanceMeters ?? -1, 0.35, accuracy: 1e-12)
+        XCTAssertEqual(assumed?.distanceMeasured, false)
+        let measured = SightSample.resolved(tiltRadians: tilt!, measuredDistance: 0.40, antennaAlongUpMeters: 0.06)
+        XCTAssertEqual(measured?.distanceMeasured, true)
+        XCTAssertEqual(measured?.eyeDistanceMeters ?? -1, 0.40, accuracy: 1e-12)
+        let tooFar = SightSample.resolved(tiltRadians: tilt!, measuredDistance: 2, antennaAlongUpMeters: 0.06)
+        XCTAssertEqual(tooFar?.distanceMeasured, false)
+        XCTAssertEqual(tooFar?.eyeDistanceMeters ?? -1, SightSample.defaultEyeDistance, accuracy: 1e-12)
+        XCTAssertNil(SightSample.resolved(tiltRadians: .nan, measuredDistance: 0.40, antennaAlongUpMeters: 0.06))
+
+        let expected = 1.425 + 0.03 * 3.0.squareRoot()
         let profile = StatureProfile(statureMeters: 1.70)
-        XCTAssertEqual(StatureMath.holdMeters(profile: profile) ?? -1, 1.19, accuracy: 1e-12)
-        let label = StatureMath.correction(for: profile, stage: .iphone, receiver: .iphoneGPS)?.screenLabel
-        XCTAssertEqual(label, "身長補正 −1.19m")
-        print("SURVEY STATURE \(label ?? "")")
+        let record = StatureMath.record(profile: profile, deviceHeight: 12.4, sight: assumed)
+        XCTAssertEqual(record?.holdMeters ?? -1, expected, accuracy: 1e-9)
+        XCTAssertEqual(record?.offsetMeters ?? 1, -expected, accuracy: 1e-9)
+        XCTAssertEqual(record?.tiltRadians ?? -1, .pi / 6, accuracy: 1e-12)
+        XCTAssertEqual(record?.eyeDistanceMeters ?? -1, 0.35, accuracy: 1e-12)
+        XCTAssertEqual(record?.antennaAlongUpMeters ?? -1, 0.06, accuracy: 1e-12)
+        XCTAssertEqual(record?.groundHeightMeters ?? 0, 12.4 - expected, accuracy: 1e-9)
+        XCTAssertEqual(record?.screenLabel, "身長補正 −1.48m")
+        XCTAssertEqual(record?.sightNote, "傾き 30.0°、目までの距離 0.35m（既定）、アンテナ差 0.06m")
+        print("SURVEY STATURE \(record?.screenLabel ?? "") \(record?.sightNote ?? "")")
+
+        let vertical = SightSample(tiltRadians: 0, eyeDistanceMeters: 0.35, distanceMeasured: false, antennaAlongUpMeters: 0.06)
+        XCTAssertEqual(StatureMath.holdMeters(eyeHeight: 1.60, sight: vertical) ?? -1, 1.66, accuracy: 1e-12)
+        let flat = SightSample(tiltRadians: .pi / 2, eyeDistanceMeters: 0.35, distanceMeasured: true, antennaAlongUpMeters: 0.06)
+        XCTAssertEqual(StatureMath.holdMeters(eyeHeight: 1.60, sight: flat) ?? -1, 1.25, accuracy: 1e-12)
+
+        XCTAssertNil(StatureMath.correction(for: profile, stage: .rtk, receiver: .rtk, sight: assumed))
+        XCTAssertEqual(AntennaCatalog.alongUpMeters(model: "iPhone15,4"), 0.1476 / 2 - 0.015, accuracy: 1e-12)
+        XCTAssertEqual(AntennaCatalog.alongUpMeters(model: "iPhone99,9"), AntennaCatalog.unknownAlongUpMeters)
+        XCTAssertNotEqual(
+            AntennaCatalog.alongUpMeters(model: "iPhone18,2"),
+            AntennaCatalog.alongUpMeters(model: "iPhone14,4")
+        )
+    }
+
+    func testReapplyKeepsTheAngleFromThatMoment() {
+        let sight = SightSample(tiltRadians: .pi / 6, eyeDistanceMeters: 0.35, distanceMeasured: false, antennaAlongUpMeters: 0.06)
+        var profile = StatureProfile(statureMeters: 1.70)
+        let position = samplePosition(height: 12.4)
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: .iphone,
+            durationSeconds: 1,
+            epochCount: 1,
+            stature: profile,
+            sight: sight
+        )
+        let observation = FieldObservation(name: "T2", workID: "preview", captured: position, condition: condition)
+        let lines = condition.reportLines.joined(separator: "\n")
+        XCTAssertTrue(lines.contains("身長補正 −1.48m（画面の角度）"))
+        XCTAssertTrue(lines.contains("傾き 30.0°"))
+        XCTAssertTrue(lines.contains("目までの距離 0.35m"))
+        profile.statureMeters = 1.80
+        let redone = observation.applying(profile)
+        XCTAssertEqual(redone.captured.ellipsoidalHeightMeters ?? 0, 12.4, accuracy: 1e-12)
+        XCTAssertEqual(redone.condition?.stature?.tiltRadians ?? -1, .pi / 6, accuracy: 1e-12)
+        XCTAssertEqual(redone.condition?.stature?.eyeDistanceMeters ?? -1, 0.35, accuracy: 1e-12)
+        XCTAssertEqual(redone.condition?.stature?.antennaAlongUpMeters ?? -1, 0.06, accuracy: 1e-12)
+        let grown = (redone.condition?.stature?.holdMeters ?? 0) - (observation.condition?.stature?.holdMeters ?? 0)
+        XCTAssertEqual(grown, 0.10, accuracy: 1e-9)
+
+        let elbow = StatureProfile(statureMeters: 1.71, style: .elbow)
+        let elbowCondition = ObservationCondition.snapshot(position: position, stage: .iphone, durationSeconds: 1, epochCount: 1, stature: elbow)
+        let elbowPoint = FieldObservation(name: "T3", workID: "preview", captured: position, condition: elbowCondition)
+        let kept = elbowPoint.applying(StatureProfile(statureMeters: 1.80, style: .sight))
+        XCTAssertEqual(kept.condition?.stature?.style, .elbow)
+        XCTAssertNil(kept.condition?.stature?.tiltRadians)
     }
 
     func testOldProfilesKeepChestWhenElbowFactorIsMissing() throws {
