@@ -71,6 +71,7 @@ struct OperatorView: View {
                     Spacer()
                     SafetyBanner(crew: field.crew)
                     directionHeadline
+                    hailButton
                     CrewRadar(
                         marks: field.crew.marks,
                         selfRole: field.crew.role,
@@ -88,6 +89,23 @@ struct OperatorView: View {
         .background(SurveyColor.background)
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+    }
+
+    @ViewBuilder
+    private var hailButton: some View {
+        if let callout = field.crew.callout {
+            let talking = field.radio.phase == .transmitting
+            Button(talking ? "話しています" : callout.buttonTitle) {
+                field.toggleHail()
+            }
+            .font(.system(size: 28, weight: .black))
+            .foregroundStyle(Color.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 84)
+            .background(talking ? SurveyColor.red : SurveyColor.amber)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .accessibilityLabel(talking ? "話しています。もう一度押すと終わります" : callout.buttonTitle)
+        }
     }
 
     private var directionHeadline: some View {

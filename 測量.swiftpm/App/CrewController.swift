@@ -12,6 +12,7 @@ final class CrewController: ObservableObject {
     @Published private(set) var role: CrewRole = .worker
     @Published private(set) var limits = ProximityLimits.standard
     @Published private(set) var threats = ThreatPicture(facingDegrees: nil, facingSource: "", cues: [], headline: "近くに人はいません")
+    @Published private(set) var callout: ApproachNotice?
     @Published var speakDirections = false
     @Published private(set) var revision = 0
 
@@ -28,6 +29,10 @@ final class CrewController: ObservableObject {
     private var courseDegrees: Double?
     private var headingDegrees: Double?
     private var lastSpoken = ""
+    private var approachMemory: [ApproachMemory] = []
+    private var workRadius = MachineCatalog.twentyTon.radiusMeters
+    private var approachLead = ApproachCallout.defaultLeadMeters
+    private var approachRepeat = ApproachCallout.defaultRepeatSeconds
     #if !SURVEY_PLAYGROUND && canImport(NearbyInteraction)
     private let uwb = SystemUWB()
     #endif
@@ -102,9 +107,14 @@ final class CrewController: ObservableObject {
             let history = ProximityLog.load(projectName: project.name, at: root)
             desk.remember(history)
             savedSignature = signature(history)
+            approachMemory = []
+            callout = nil
         }
         limits = ProximityLimits.resolved(caution: project.cautionMeters, margin: project.proximityMarginMeters)
         desk.limits = limits
+        workRadius = radius
+        approachLead = ApproachCallout.lead(from: project.approachLeadMeters)
+        approachRepeat = ApproachCallout.repeatSeconds(from: project.approachRepeatSeconds)
         courseDegrees = position?.courseDegrees
         headingDegrees = position?.headingDegrees
         guard let position, position.isPlottable else {
@@ -152,12 +162,30 @@ final class CrewController: ObservableObject {
             marks = []
         }
         threats = currentPicture()
+        let approach = ApproachCallout.evaluate(
+            selfRole: role,
+            selfWorkRadius: workRadius,
+            marks: marks,
+            courseDegrees: courseDegrees,
+            headingDegrees: headingDegrees,
+            leadMeters: approachLead,
+            repeatSeconds: approachRepeat,
+            now: now,
+            memory: approachMemory
+        )
+        approachMemory = approach.memory
+        callout = approach.open
         statusLine = describe()
         revision += 1
         persist()
         guard sound else { return }
         signal(now: now)
-        speak()
+        if let spoken = approach.spoken {
+            lastSpoken = spoken.speech
+            CrewVoice.say(spoken.speech)
+        } else {
+            speak()
+        }
     }
 
     private func currentPicture() -> ThreatPicture {

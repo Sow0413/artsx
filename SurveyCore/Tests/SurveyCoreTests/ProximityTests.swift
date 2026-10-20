@@ -192,6 +192,111 @@ final class ProximityTests: XCTestCase {
         )
     }
 
+    func testApproachCallSpeaksBeforeTheRadiusAndDoesNotRepeat() {
+        let person = CrewMark(id: "w", name: "歩", role: .worker, eastMeters: 10.6, northMeters: -10.6, workRadiusMeters: nil, level: .caution)
+        let far = CrewMark(id: "far", name: "遠", role: .worker, eastMeters: 0, northMeters: 25, workRadiusMeters: nil, level: .clear)
+        let first = ApproachCallout.evaluate(
+            selfRole: .machine,
+            selfWorkRadius: 9,
+            marks: [far, person],
+            courseDegrees: 0,
+            headingDegrees: 90,
+            leadMeters: 10,
+            repeatSeconds: 30,
+            now: date(0),
+            memory: []
+        )
+        XCTAssertEqual(first.spoken?.speech, "右うしろ、人、15メートル")
+        XCTAssertEqual(first.spoken?.buttonTitle, "右うしろの人に話す")
+        XCTAssertEqual(first.open?.peerID, "w")
+
+        let soon = ApproachCallout.evaluate(
+            selfRole: .machine,
+            selfWorkRadius: 9,
+            marks: [person],
+            courseDegrees: 0,
+            headingDegrees: nil,
+            leadMeters: 10,
+            repeatSeconds: 30,
+            now: date(10),
+            memory: first.memory
+        )
+        XCTAssertNil(soon.spoken)
+        XCTAssertEqual(soon.open?.peerID, "w")
+
+        let jitter = CrewMark(id: "w", name: "歩", role: .worker, eastMeters: 10.4, northMeters: -10.4, workRadiusMeters: nil, level: .caution)
+        let twitched = ApproachCallout.evaluate(
+            selfRole: .machine,
+            selfWorkRadius: 9,
+            marks: [jitter],
+            courseDegrees: 0,
+            headingDegrees: nil,
+            leadMeters: 10,
+            repeatSeconds: 30,
+            now: date(12),
+            memory: soon.memory
+        )
+        XCTAssertNil(twitched.spoken)
+
+        let closer = CrewMark(id: "w", name: "歩", role: .worker, eastMeters: 9, northMeters: -9, workRadiusMeters: nil, level: .alarm)
+        let again = ApproachCallout.evaluate(
+            selfRole: .machine,
+            selfWorkRadius: 9,
+            marks: [closer],
+            courseDegrees: 0,
+            headingDegrees: nil,
+            leadMeters: 10,
+            repeatSeconds: 30,
+            now: date(14),
+            memory: twitched.memory
+        )
+        XCTAssertEqual(again.spoken?.speech, "右うしろ、人、13メートル")
+
+        let later = ApproachCallout.evaluate(
+            selfRole: .machine,
+            selfWorkRadius: 9,
+            marks: [person],
+            courseDegrees: 0,
+            headingDegrees: nil,
+            leadMeters: 10,
+            repeatSeconds: 30,
+            now: date(45),
+            memory: again.memory
+        )
+        XCTAssertEqual(later.spoken?.peerID, "w")
+
+        let machine = CrewMark(id: "m", name: "掘", role: .machine, eastMeters: -10, northMeters: 10, workRadiusMeters: 9, level: .caution)
+        let onFoot = ApproachCallout.evaluate(
+            selfRole: .worker,
+            selfWorkRadius: 9,
+            marks: [machine, person],
+            courseDegrees: nil,
+            headingDegrees: 0,
+            leadMeters: 10,
+            repeatSeconds: 30,
+            now: date(0),
+            memory: []
+        )
+        XCTAssertEqual(onFoot.spoken?.speech, "重機に近づいています、左前")
+        XCTAssertEqual(onFoot.spoken?.buttonTitle, "重機に話す")
+
+        let blind = ApproachCallout.evaluate(
+            selfRole: .machine,
+            selfWorkRadius: 9,
+            marks: [person],
+            courseDegrees: nil,
+            headingDegrees: nil,
+            leadMeters: 10,
+            repeatSeconds: 30,
+            now: date(0),
+            memory: []
+        )
+        XCTAssertNil(blind.spoken)
+        XCTAssertNil(blind.open)
+        XCTAssertEqual(ApproachCallout.lead(from: nil), 10)
+        XCTAssertEqual(ApproachCallout.repeatSeconds(from: nil), 30)
+    }
+
     func testEventsOpenUpgradeAndClose() throws {
         let relay = CrewRelayStub(reachable: false)
         let mesh = CrewMesh()

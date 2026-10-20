@@ -52,6 +52,8 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var machineRadiusMeters = MachineCatalog.twentyTon.radiusMeters
     @Published private(set) var cautionMeters = ProximityLimits.defaultCautionMeters
     @Published private(set) var proximityMarginMeters = ProximityLimits.defaultMarginMeters
+    @Published private(set) var approachLeadMeters = ApproachCallout.defaultLeadMeters
+    @Published private(set) var approachRepeatSeconds = ApproachCallout.defaultRepeatSeconds
     @Published private(set) var machinePresetID: String? = MachineCatalog.twentyTon.id
     /// 地盤または機体から目まで。端末を目の高さで持つときは下がりに足さない。
     @Published private(set) var eyeHeightMeters = 2.0
@@ -419,6 +421,8 @@ final class DrawingSession: ObservableObject {
         let limits = ProximityLimits.resolved(caution: project.cautionMeters, margin: project.proximityMarginMeters)
         cautionMeters = limits.cautionMeters
         proximityMarginMeters = limits.marginMeters
+        approachLeadMeters = ApproachCallout.lead(from: project.approachLeadMeters)
+        approachRepeatSeconds = ApproachCallout.repeatSeconds(from: project.approachRepeatSeconds)
         if let interval = project.stationIntervalMeters, interval > 0 {
             stationIntervalMeters = interval
         } else {
@@ -437,6 +441,8 @@ final class DrawingSession: ObservableObject {
         current.phoneAtEyes = phoneAtEyes
         current.cautionMeters = cautionMeters
         current.proximityMarginMeters = proximityMarginMeters
+        current.approachLeadMeters = approachLeadMeters
+        current.approachRepeatSeconds = approachRepeatSeconds
         project = current
         persistProject()
     }
@@ -461,6 +467,28 @@ final class DrawingSession: ObservableObject {
         proximityMarginMeters = MachineReach.roundTenths(value)
         storeCab()
         message = "半径の余裕を \(String(format: "%.1f", proximityMarginMeters))m にしました。"
+    }
+
+    func setApproachLead(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value >= 0, value <= 200 else {
+            message = "声をかける距離は、半径に足して 0m から 200m です。"
+            return
+        }
+        approachLeadMeters = MachineReach.roundTenths(value)
+        storeCab()
+        message = "半径の \(String(format: "%.1f", approachLeadMeters))m 手前で声をかけます。"
+    }
+
+    func setApproachRepeat(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value >= 5, value <= 600 else {
+            message = "読み上げの間隔は 5秒から 600秒です。"
+            return
+        }
+        approachRepeatSeconds = value.rounded()
+        storeCab()
+        message = "同じ相手への読み上げは \(Int(approachRepeatSeconds))秒あけます。近づいたら、その前にもう一度言います。"
     }
 
     private func operatorPlaneLine() -> [PlanarPoint]? {

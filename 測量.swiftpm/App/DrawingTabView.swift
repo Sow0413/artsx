@@ -14,6 +14,8 @@ struct DrawingTabView: View {
     @State private var stationOriginDraft = ""
     @State private var cautionDraft = ""
     @State private var marginDraft = ""
+    @State private var approachDraft = ""
+    @State private var repeatDraft = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -215,6 +217,8 @@ struct DrawingTabView: View {
         stationOriginDraft = String(drawing.stationOrigin)
         cautionDraft = String(format: "%g", drawing.cautionMeters)
         marginDraft = String(format: "%g", drawing.proximityMarginMeters)
+        approachDraft = String(format: "%g", drawing.approachLeadMeters)
+        repeatDraft = String(format: "%g", drawing.approachRepeatSeconds)
     }
 
     private var proximitySection: some View {
@@ -242,7 +246,21 @@ struct DrawingTabView: View {
                 Button("保存") { drawing.setProximityMargin(marginDraft) }
                     .buttonStyle(SurveyPlainButton())
             }
-            Text("人が重機の作業半径＋余裕に入ると赤。注意の距離以内は黄。\(SafetyNotice.text)")
+            HStack {
+                TextField("声をかける手前 m", text: $approachDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                Button("保存") { drawing.setApproachLead(approachDraft) }
+                    .buttonStyle(SurveyPlainButton())
+            }
+            HStack {
+                TextField("読み上げの間隔 秒", text: $repeatDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.numberPad)
+                Button("保存") { drawing.setApproachRepeat(repeatDraft) }
+                    .buttonStyle(SurveyPlainButton())
+            }
+            Text("半径＋この距離の手前で、先に声をかけます。人が半径＋余裕に入ると赤。注意の距離以内は黄。\(SafetyNotice.text)")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(SurveyColor.muted)
         }

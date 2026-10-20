@@ -468,6 +468,146 @@ public enum ThreatBearing {
     }
 }
 
+public struct ApproachMemory: Equatable, Sendable {
+    public var peerID: String
+    public var spokenAt: Date
+    public var distanceMeters: Double
+
+    public init(peerID: String, spokenAt: Date, distanceMeters: Double) {
+        self.peerID = peerID
+        self.spokenAt = spokenAt
+        self.distanceMeters = distanceMeters
+    }
+}
+
+/// 作業半径の手前でかける声と、その相手へ話すボタン。
+public struct ApproachNotice: Equatable, Sendable, Identifiable {
+    public var peerID: String
+    public var name: String
+    public var role: CrewRole
+    public var sector: String
+    public var distanceMeters: Double
+    public var speech: String
+    public var buttonTitle: String
+
+    public var id: String { peerID }
+
+    public init(
+        peerID: String,
+        name: String,
+        role: CrewRole,
+        sector: String,
+        distanceMeters: Double,
+        speech: String,
+        buttonTitle: String
+    ) {
+        self.peerID = peerID
+        self.name = name
+        self.role = role
+        self.sector = sector
+        self.distanceMeters = distanceMeters
+        self.speech = speech
+        self.buttonTitle = buttonTitle
+    }
+}
+
+public enum ApproachCallout {
+    public static let defaultLeadMeters = 10.0
+    public static let defaultRepeatSeconds: TimeInterval = 30
+    /// これより縮んだら、間隔を待たずに言い直す。iPhone の揺れでは鳴らない幅。
+    public static let shrinkMeters = 1.0
+
+    public static func lead(from stored: Double?) -> Double {
+        guard let stored, stored.isFinite, stored >= 0, stored <= 200 else { return defaultLeadMeters }
+        return stored
+    }
+
+    public static func repeatSeconds(from stored: Double?) -> TimeInterval {
+        guard let stored, stored.isFinite, stored >= 5, stored <= 600 else { return defaultRepeatSeconds }
+        return stored
+    }
+
+    /// 声をかける相手がいれば `spoken`。ボタンは、一度呼んだ相手がまだ半径の手前にいるあいだ出す。
+    public static func evaluate(
+        selfRole: CrewRole,
+        selfWorkRadius: Double,
+        marks: [CrewMark],
+        courseDegrees: Double?,
+        headingDegrees: Double?,
+        leadMeters: Double,
+        repeatSeconds: TimeInterval,
+        now: Date,
+        memory: [ApproachMemory]
+    ) -> (spoken: ApproachNotice?, open: ApproachNotice?, memory: [ApproachMemory]) {
+        guard let facing = ThreatBearing.facing(courseDegrees: courseDegrees, headingDegrees: headingDegrees) else {
+            return (nil, nil, memory)
+        }
+        let lead = lead(from: leadMeters)
+        let wanted: CrewRole = selfRole == .machine ? .worker : .machine
+        let ranked = marks.compactMap { mark -> (notice: ApproachNotice, distance: Double)? in
+            guard mark.role == wanted else { return nil }
+            let distance = (mark.eastMeters * mark.eastMeters + mark.northMeters * mark.northMeters).squareRoot()
+            let radius = mark.role == .machine ? (mark.workRadiusMeters ?? selfWorkRadius) : selfWorkRadius
+            guard radius.isFinite, radius > 0, distance <= radius + lead else { return nil }
+            let azimuth = GeoMath.degrees(fromRadians: GeoMath.arctangent(mark.eastMeters, mark.northMeters))
+            let sector = ThreatBearing.sector(relativeDegrees: ThreatBearing.relative(targetAzimuthDegrees: azimuth, facingDegrees: facing.degrees))
+            let shown = MachineReach.roundTenths(distance)
+            return (notice(mark, sector: sector, meters: shown), distance)
+        }.sorted { $0.distance < $1.distance }
+        guard let closest = ranked.first?.notice else {
+            return (nil, nil, memory)
+        }
+        var kept = memory
+        let prior = kept.first { $0.peerID == closest.peerID }
+        let due = shouldSpeak(prior: prior, distance: closest.distanceMeters, now: now, repeatSeconds: repeatSeconds)
+        if due {
+            kept.removeAll { $0.peerID == closest.peerID }
+            kept.append(ApproachMemory(peerID: closest.peerID, spokenAt: now, distanceMeters: closest.distanceMeters))
+            return (closest, closest, kept)
+        }
+        let open = prior == nil ? nil : closest
+        return (nil, open, kept)
+    }
+
+    public static func spokenSector(_ sector: String) -> String {
+        sector.replacingOccurrences(of: "まえ", with: "前")
+    }
+
+    private static func shouldSpeak(
+        prior: ApproachMemory?,
+        distance: Double,
+        now: Date,
+        repeatSeconds: TimeInterval
+    ) -> Bool {
+        guard let prior else { return true }
+        if distance <= prior.distanceMeters - shrinkMeters { return true }
+        return now.timeIntervalSince(prior.spokenAt) >= repeatSeconds
+    }
+
+    private static func notice(_ mark: CrewMark, sector: String, meters: Double) -> ApproachNotice {
+        let said = spokenSector(sector)
+        let whole = Int(meters.rounded())
+        let speech: String
+        let button: String
+        if mark.role == .worker {
+            speech = "\(said)、人、\(whole)メートル"
+            button = "\(said)の人に話す"
+        } else {
+            speech = "重機に近づいています、\(said)"
+            button = "重機に話す"
+        }
+        return ApproachNotice(
+            peerID: mark.id,
+            name: mark.name,
+            role: mark.role,
+            sector: sector,
+            distanceMeters: meters,
+            speech: speech,
+            buttonTitle: button
+        )
+    }
+}
+
 public enum CrewPlot {
     public static func marks(origin: CrewFix, hits: [ProximityHit]) -> [CrewMark] {
         hits.compactMap { hit in

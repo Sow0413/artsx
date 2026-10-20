@@ -146,6 +146,14 @@ final class FieldModel: ObservableObject {
         radio.end(projectName: drawing.project?.name, root: drawing.projectsRoot)
     }
 
+    func toggleHail() {
+        if radio.phase == .transmitting {
+            endRadio()
+        } else {
+            beginRadio()
+        }
+    }
+
     func beginDrawingMapPick() {
         guard drawing.beginMapPick() else { return }
         followUser = false
