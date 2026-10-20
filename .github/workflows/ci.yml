@@ -176,15 +176,11 @@ jobs:
             -configuration Release \
             -archivePath "$PWD/build/artsx.xcarchive" \
             DEVELOPMENT_TEAM="$team" \
-            CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
             PRODUCT_BUNDLE_IDENTIFIER="$bundle" \
             MARKETING_VERSION="$version" \
             CURRENT_PROJECT_VERSION="$build_number" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$key_path" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             archive
           xcodebuild \
             -exportArchive \
