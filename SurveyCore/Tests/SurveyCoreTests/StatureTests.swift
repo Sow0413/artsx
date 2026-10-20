@@ -99,6 +99,63 @@ final class StatureTests: XCTestCase {
         XCTAssertNil(external.applying(profile).condition?.stature)
     }
 
+    func testElbowIsDefaultAndFirstPreset() {
+        let fresh = StatureProfile()
+        XCTAssertEqual(fresh.style, .elbow)
+        XCTAssertEqual(fresh.coefficients.elbowFactor, 0.70, accuracy: 1e-12)
+        XCTAssertEqual(fresh.coefficients.chestFactor, 0.72, accuracy: 1e-12)
+        XCTAssertNil(fresh.statureMeters)
+        XCTAssertEqual(HoldStyle.allCases.first, .elbow)
+        XCTAssertEqual(HoldStyle.elbow.menuTitle(coefficients: .standard), "肘より上（身長×0.70）")
+
+        let profile = StatureProfile(statureMeters: 1.70)
+        XCTAssertEqual(StatureMath.holdMeters(profile: profile) ?? -1, 1.19, accuracy: 1e-12)
+        let label = StatureMath.correction(for: profile, stage: .iphone, receiver: .iphoneGPS)?.screenLabel
+        XCTAssertEqual(label, "身長補正 −1.19m")
+        print("SURVEY STATURE \(label ?? "")")
+    }
+
+    func testOldProfilesKeepChestWhenElbowFactorIsMissing() throws {
+        let coefficients = try JSONDecoder().decode(
+            StatureCoefficients.self,
+            from: Data(#"{"chestFactor":0.72,"eyeDropMeters":0.1,"cabMeters":2}"#.utf8)
+        )
+        XCTAssertEqual(coefficients.elbowFactor, 0.70, accuracy: 1e-12)
+        XCTAssertEqual(coefficients.chestFactor, 0.72, accuracy: 1e-12)
+
+        let profileJSON = #"{"statureMeters":1.71,"style":"chest","manualMeters":1.2,"coefficients":{"chestFactor":0.72,"eyeDropMeters":0.1,"cabMeters":2}}"#
+        let name = "stature-old-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        defaults.set(Data(profileJSON.utf8), forKey: StatureProfile.storageKey)
+        let loaded = StatureProfile.load(from: defaults)
+        XCTAssertEqual(loaded.style, .chest)
+        XCTAssertEqual(loaded.coefficients.elbowFactor, 0.70, accuracy: 1e-12)
+        XCTAssertEqual(StatureMath.holdMeters(profile: loaded) ?? 0, 1.71 * 0.72, accuracy: 1e-12)
+
+        let record = try JSONDecoder().decode(
+            StatureRecord.self,
+            from: Data(#"{"style":"chest","offsetMeters":-1.2312,"holdMeters":1.2312,"statureMeters":1.71,"chestFactor":0.72,"eyeDropMeters":0.1,"cabMeters":2,"groundHeightMeters":11.1688}"#.utf8)
+        )
+        XCTAssertEqual(record.style, .chest)
+        XCTAssertEqual(record.elbowFactor, 0.70, accuracy: 1e-12)
+        XCTAssertEqual(record.screenLabel, "身長補正 −1.23m")
+    }
+
+    func testCalibrationSetsElbowFactorFromOneKnownPoint() {
+        let calibration = StatureMath.calibrate(deviceHeight: 12.4, knownGround: 11.2, stature: 1.70)
+        let hold = 12.4 - 11.2
+        XCTAssertEqual(calibration?.holdMeters ?? -1, hold, accuracy: 1e-12)
+        XCTAssertEqual(calibration?.elbowFactor ?? -1, hold / 1.70, accuracy: 1e-12)
+        let applied = StatureMath.applying(calibration!, to: StatureProfile(statureMeters: 1.70, style: .chest))
+        XCTAssertEqual(applied.style, .elbow)
+        XCTAssertEqual(applied.statureMeters ?? 0, 1.70, accuracy: 1e-12)
+        XCTAssertEqual(StatureMath.holdMeters(profile: applied) ?? -1, hold, accuracy: 1e-9)
+        XCTAssertNil(StatureMath.calibrate(deviceHeight: 10, knownGround: 12, stature: 1.70))
+        XCTAssertNil(StatureMath.calibrate(deviceHeight: 12, knownGround: 11, stature: 0))
+        XCTAssertNil(StatureMath.calibrate(deviceHeight: .nan, knownGround: 1, stature: 1.7))
+    }
+
     func testOldConditionWithoutStatureStillLoads() throws {
         let position = samplePosition()
         let condition = ObservationCondition.snapshot(position: position, stage: .iphone, durationSeconds: nil, epochCount: nil)

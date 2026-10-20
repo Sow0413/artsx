@@ -76,6 +76,7 @@ final class FieldModel: ObservableObject {
     @Published var showsToolOrder = false
     @Published var stature = StatureProfile.load()
     @Published var showsStature = false
+    @Published var asksStature = false
     private var epochWatch = EpochWatch()
 
     let tiles: TileStore
@@ -1037,6 +1038,9 @@ final class FieldModel: ObservableObject {
     func saveStature(_ profile: StatureProfile) {
         stature = profile
         profile.save()
+        if profile.statureMeters != nil {
+            asksStature = false
+        }
     }
 
     func reapplyStature() {
@@ -1136,6 +1140,9 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
+        if stature.statureMeters == nil {
+            asksStature = true
+        }
         consumePendingConfirm()
         radio.arm()
         radio.onRelay = { [weak self] packet in

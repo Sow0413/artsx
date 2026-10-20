@@ -2,6 +2,7 @@ import Foundation
 
 /// iPhone を持つ高さ。外部 GNSS のポール高とは別。
 public enum HoldStyle: String, Codable, Sendable, Equatable, CaseIterable {
+    case elbow
     case chest
     case eye
     case ground
@@ -10,6 +11,7 @@ public enum HoldStyle: String, Codable, Sendable, Equatable, CaseIterable {
 
     public var title: String {
         switch self {
+        case .elbow: return "肘より上"
         case .chest: return "胸の前"
         case .eye: return "目の高さ"
         case .ground: return "地面に置く"
@@ -17,20 +19,59 @@ public enum HoldStyle: String, Codable, Sendable, Equatable, CaseIterable {
         case .manual: return "手入力"
         }
     }
+
+    public func menuTitle(coefficients: StatureCoefficients) -> String {
+        switch self {
+        case .elbow:
+            return "肘より上（身長×\(StatureMath.factorText(coefficients.elbowFactor))）"
+        case .chest:
+            return "胸の前（身長×\(StatureMath.factorText(coefficients.chestFactor))）"
+        case .eye:
+            return "目の高さ（身長−\(StatureMath.factorText(coefficients.eyeDropMeters))m）"
+        case .ground:
+            return "地面に置く"
+        case .cab:
+            return "重機運転席（\(StatureMath.factorText(coefficients.cabMeters))m）"
+        case .manual:
+            return "手入力"
+        }
+    }
 }
 
-/// 胸の前は身長×係数、目の高さは身長から一定を引く、運転席は既存の 2m。
+/// 肘より上は身長×0.70、胸の前は身長×0.72、目の高さは身長から一定を引く、運転席は既存の 2m。
 public struct StatureCoefficients: Codable, Sendable, Equatable {
-    public static let standard = StatureCoefficients(chestFactor: 0.72, eyeDropMeters: 0.10, cabMeters: 2)
+    public static let standard = StatureCoefficients(elbowFactor: 0.70, chestFactor: 0.72, eyeDropMeters: 0.10, cabMeters: 2)
 
+    public var elbowFactor: Double
     public var chestFactor: Double
     public var eyeDropMeters: Double
     public var cabMeters: Double
 
-    public init(chestFactor: Double, eyeDropMeters: Double, cabMeters: Double) {
+    public init(elbowFactor: Double = 0.70, chestFactor: Double, eyeDropMeters: Double, cabMeters: Double) {
+        self.elbowFactor = elbowFactor
         self.chestFactor = chestFactor
         self.eyeDropMeters = eyeDropMeters
         self.cabMeters = cabMeters
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        elbowFactor = try container.decodeIfPresent(Double.self, forKey: .elbowFactor) ?? 0.70
+        chestFactor = try container.decode(Double.self, forKey: .chestFactor)
+        eyeDropMeters = try container.decode(Double.self, forKey: .eyeDropMeters)
+        cabMeters = try container.decode(Double.self, forKey: .cabMeters)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elbowFactor, forKey: .elbowFactor)
+        try container.encode(chestFactor, forKey: .chestFactor)
+        try container.encode(eyeDropMeters, forKey: .eyeDropMeters)
+        try container.encode(cabMeters, forKey: .cabMeters)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case elbowFactor, chestFactor, eyeDropMeters, cabMeters
     }
 }
 
@@ -45,7 +86,7 @@ public struct StatureProfile: Codable, Sendable, Equatable {
 
     public init(
         statureMeters: Double? = nil,
-        style: HoldStyle = .chest,
+        style: HoldStyle = .elbow,
         manualMeters: Double = 1.2,
         coefficients: StatureCoefficients = .standard
     ) {
@@ -98,6 +139,7 @@ public struct StatureRecord: Codable, Sendable, Equatable {
     public var offsetMeters: Double
     public var holdMeters: Double
     public var statureMeters: Double?
+    public var elbowFactor: Double
     public var chestFactor: Double
     public var eyeDropMeters: Double
     public var cabMeters: Double
@@ -108,6 +150,7 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         offsetMeters: Double,
         holdMeters: Double,
         statureMeters: Double?,
+        elbowFactor: Double = 0.70,
         chestFactor: Double,
         eyeDropMeters: Double,
         cabMeters: Double,
@@ -117,13 +160,60 @@ public struct StatureRecord: Codable, Sendable, Equatable {
         self.offsetMeters = offsetMeters
         self.holdMeters = holdMeters
         self.statureMeters = statureMeters
+        self.elbowFactor = elbowFactor
         self.chestFactor = chestFactor
         self.eyeDropMeters = eyeDropMeters
         self.cabMeters = cabMeters
         self.groundHeightMeters = groundHeightMeters
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        style = try container.decode(HoldStyle.self, forKey: .style)
+        offsetMeters = try container.decode(Double.self, forKey: .offsetMeters)
+        holdMeters = try container.decode(Double.self, forKey: .holdMeters)
+        statureMeters = try container.decodeIfPresent(Double.self, forKey: .statureMeters)
+        elbowFactor = try container.decodeIfPresent(Double.self, forKey: .elbowFactor) ?? 0.70
+        chestFactor = try container.decode(Double.self, forKey: .chestFactor)
+        eyeDropMeters = try container.decode(Double.self, forKey: .eyeDropMeters)
+        cabMeters = try container.decode(Double.self, forKey: .cabMeters)
+        groundHeightMeters = try container.decodeIfPresent(Double.self, forKey: .groundHeightMeters)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(style, forKey: .style)
+        try container.encode(offsetMeters, forKey: .offsetMeters)
+        try container.encode(holdMeters, forKey: .holdMeters)
+        try container.encodeIfPresent(statureMeters, forKey: .statureMeters)
+        try container.encode(elbowFactor, forKey: .elbowFactor)
+        try container.encode(chestFactor, forKey: .chestFactor)
+        try container.encode(eyeDropMeters, forKey: .eyeDropMeters)
+        try container.encode(cabMeters, forKey: .cabMeters)
+        try container.encodeIfPresent(groundHeightMeters, forKey: .groundHeightMeters)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case style, offsetMeters, holdMeters, statureMeters
+        case elbowFactor, chestFactor, eyeDropMeters, cabMeters, groundHeightMeters
+    }
+
     public var screenLabel: String { StatureMath.screenLabel(offsetMeters: offsetMeters) }
+}
+
+/// 既知の楕円体高で1回観測した、その人の持ち高さ。
+public struct HoldCalibration: Equatable, Sendable {
+    public var deviceHeightMeters: Double
+    public var knownGroundMeters: Double
+    public var holdMeters: Double
+    public var elbowFactor: Double
+
+    public init(deviceHeightMeters: Double, knownGroundMeters: Double, holdMeters: Double, elbowFactor: Double) {
+        self.deviceHeightMeters = deviceHeightMeters
+        self.knownGroundMeters = knownGroundMeters
+        self.holdMeters = holdMeters
+        self.elbowFactor = elbowFactor
+    }
 }
 
 public enum StatureMath {
@@ -134,13 +224,19 @@ public enum StatureMath {
 
     /// 画面の「身長補正 −1.23m」。符号は常に引き算。
     public static func screenLabel(offsetMeters: Double) -> String {
-        let body = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), abs(offsetMeters))
-        return "身長補正 −\(body)m"
+        "身長補正 −\(factorText(abs(offsetMeters)))m"
+    }
+
+    public static func factorText(_ value: Double) -> String {
+        String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     /// 端末を地面からどれだけ上げているか。身長が要る持ち方で未登録なら nil。
     public static func holdMeters(profile: StatureProfile) -> Double? {
         switch profile.style {
+        case .elbow:
+            guard let stature = usableStature(profile.statureMeters) else { return nil }
+            return max(0, stature * profile.coefficients.elbowFactor)
         case .chest:
             guard let stature = usableStature(profile.statureMeters) else { return nil }
             return max(0, stature * profile.coefficients.chestFactor)
@@ -174,6 +270,7 @@ public enum StatureMath {
             offsetMeters: offset,
             holdMeters: hold,
             statureMeters: profile.statureMeters,
+            elbowFactor: profile.coefficients.elbowFactor,
             chestFactor: profile.coefficients.chestFactor,
             eyeDropMeters: profile.coefficients.eyeDropMeters,
             cabMeters: profile.coefficients.cabMeters,
@@ -187,6 +284,29 @@ public enum StatureMath {
             return record.screenLabel
         }
         return "身長が未登録です"
+    }
+
+    /// 既知の楕円体高で1回観測し、肘より上の係数をその人の持ち高さに合わせる。
+    public static func calibrate(deviceHeight: Double, knownGround: Double, stature: Double) -> HoldCalibration? {
+        guard deviceHeight.isFinite, knownGround.isFinite else { return nil }
+        guard let stature = usableStature(stature), stature <= 3 else { return nil }
+        let hold = deviceHeight - knownGround
+        guard hold.isFinite, hold >= 0, hold <= 3 else { return nil }
+        let factor = hold / stature
+        guard factor.isFinite, factor >= 0, factor <= 1.5 else { return nil }
+        return HoldCalibration(
+            deviceHeightMeters: deviceHeight,
+            knownGroundMeters: knownGround,
+            holdMeters: hold,
+            elbowFactor: factor
+        )
+    }
+
+    public static func applying(_ calibration: HoldCalibration, to profile: StatureProfile) -> StatureProfile {
+        var copy = profile
+        copy.style = .elbow
+        copy.coefficients.elbowFactor = calibration.elbowFactor
+        return copy
     }
 
     private static func usableStature(_ meters: Double?) -> Double? {
