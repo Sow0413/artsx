@@ -21,6 +21,17 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var zone: Int?
     public var axis: DrawingAxis
     public var drawings: [ProjectDrawing]
+    /// 先に選んだ都道府県。無い古いプロジェクトは nil。
+    public var prefecture: String?
+    /// 作業半径の機種。手入力のときは nil。
+    public var machinePreset: String?
+    /// 作業半径。メートル。無い古いプロジェクトは nil。
+    public var machineRadiusMeters: Double?
+    /// 地盤または機体から目までの高さ。既定は画面側で 2.0m。
+    public var eyeHeightMeters: Double?
+    public var sightDatum: SightDatum?
+    /// 端末を目の高さで持つ。false のとき、端末の高さに視線高を足す。
+    public var phoneAtEyes: Bool?
 
     public init(
         id: String = UUID().uuidString,
@@ -28,7 +39,13 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         createdAt: Date,
         zone: Int? = nil,
         axis: DrawingAxis = .cadEastNorth,
-        drawings: [ProjectDrawing] = []
+        drawings: [ProjectDrawing] = [],
+        prefecture: String? = nil,
+        machinePreset: String? = nil,
+        machineRadiusMeters: Double? = nil,
+        eyeHeightMeters: Double? = nil,
+        sightDatum: SightDatum? = nil,
+        phoneAtEyes: Bool? = nil
     ) {
         self.id = id
         self.name = name
@@ -36,6 +53,49 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.zone = zone
         self.axis = axis
         self.drawings = drawings
+        self.prefecture = prefecture
+        self.machinePreset = machinePreset
+        self.machineRadiusMeters = machineRadiusMeters
+        self.eyeHeightMeters = eyeHeightMeters
+        self.sightDatum = sightDatum
+        self.phoneAtEyes = phoneAtEyes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, createdAt, zone, axis, drawings, prefecture
+        case machinePreset, machineRadiusMeters, eyeHeightMeters, sightDatum, phoneAtEyes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        zone = try container.decodeIfPresent(Int.self, forKey: .zone)
+        axis = try container.decodeIfPresent(DrawingAxis.self, forKey: .axis) ?? .cadEastNorth
+        drawings = try container.decodeIfPresent([ProjectDrawing].self, forKey: .drawings) ?? []
+        prefecture = try container.decodeIfPresent(String.self, forKey: .prefecture)
+        machinePreset = try container.decodeIfPresent(String.self, forKey: .machinePreset)
+        machineRadiusMeters = try container.decodeIfPresent(Double.self, forKey: .machineRadiusMeters)
+        eyeHeightMeters = try container.decodeIfPresent(Double.self, forKey: .eyeHeightMeters)
+        sightDatum = try container.decodeIfPresent(SightDatum.self, forKey: .sightDatum)
+        phoneAtEyes = try container.decodeIfPresent(Bool.self, forKey: .phoneAtEyes)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(zone, forKey: .zone)
+        try container.encode(axis, forKey: .axis)
+        try container.encode(drawings, forKey: .drawings)
+        try container.encodeIfPresent(prefecture, forKey: .prefecture)
+        try container.encodeIfPresent(machinePreset, forKey: .machinePreset)
+        try container.encodeIfPresent(machineRadiusMeters, forKey: .machineRadiusMeters)
+        try container.encodeIfPresent(eyeHeightMeters, forKey: .eyeHeightMeters)
+        try container.encodeIfPresent(sightDatum, forKey: .sightDatum)
+        try container.encodeIfPresent(phoneAtEyes, forKey: .phoneAtEyes)
     }
 }
 

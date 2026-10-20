@@ -10,6 +10,8 @@ final class CoreLocationPositionSource: NSObject, PositionSource, CLLocationMana
     private let continuation: AsyncStream<PositionReading>.Continuation
     private let manager = CLLocationManager()
     private var lastPosition: GeodeticPosition?
+    private var lastCourse: Double?
+    private var lastHeading: Double?
     private var didRequestAuthorization = false
 
     override init() {
@@ -32,6 +34,7 @@ final class CoreLocationPositionSource: NSObject, PositionSource, CLLocationMana
 
     func stop() {
         manager.stopUpdatingLocation()
+        manager.stopUpdatingHeading()
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -42,14 +45,34 @@ final class CoreLocationPositionSource: NSObject, PositionSource, CLLocationMana
         guard let location = locations.last else { return }
         let height: Double? = location.verticalAccuracy >= 0 ? location.ellipsoidalAltitude : nil
         let vertical: Double? = location.verticalAccuracy >= 0 ? location.verticalAccuracy : nil
+        lastCourse = location.course >= 0 ? location.course : nil
         let position = IPhonePosition.make(
             latitudeDegrees: location.coordinate.latitude,
             longitudeDegrees: location.coordinate.longitude,
             ellipsoidalHeightMeters: height,
             horizontalAccuracyMeters: location.horizontalAccuracy,
             verticalAccuracyMeters: vertical,
-            timestamp: location.timestamp
+            timestamp: location.timestamp,
+            courseDegrees: lastCourse,
+            headingDegrees: lastHeading
         )
+        lastPosition = position
+        continuation.yield(PositionReading(position: position, availability: .available))
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
+        let trueHeading = newHeading.trueHeading
+        let magnetic = newHeading.magneticHeading
+        if trueHeading >= 0 {
+            lastHeading = trueHeading
+        } else if magnetic >= 0 {
+            lastHeading = magnetic
+        } else {
+            lastHeading = nil
+        }
+        guard var position = lastPosition else { return }
+        position.headingDegrees = lastHeading
+        position.courseDegrees = lastCourse
         lastPosition = position
         continuation.yield(PositionReading(position: position, availability: .available))
     }
@@ -70,6 +93,7 @@ final class CoreLocationPositionSource: NSObject, PositionSource, CLLocationMana
         switch status {
         case .authorizedAlways, .authorizedWhenInUse:
             manager.startUpdatingLocation()
+            manager.startUpdatingHeading()
         case .notDetermined:
             continuation.yield(PositionReading(position: lastPosition, availability: .waiting))
             if !didRequestAuthorization {
@@ -78,6 +102,7 @@ final class CoreLocationPositionSource: NSObject, PositionSource, CLLocationMana
             }
         case .denied, .restricted:
             manager.stopUpdatingLocation()
+            manager.stopUpdatingHeading()
             continuation.yield(PositionReading(position: lastPosition, availability: .denied))
         @unknown default:
             continuation.yield(PositionReading(position: lastPosition, availability: .waiting))

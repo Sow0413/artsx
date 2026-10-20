@@ -8,6 +8,8 @@ struct DrawingTabView: View {
     @State private var importing = false
     @State private var projectName = ""
     @State private var recordName = "起点"
+    @State private var radiusDraft = ""
+    @State private var eyeDraft = ""
 
     var body: some View {
         GeometryReader { geo in
@@ -31,7 +33,13 @@ struct DrawingTabView: View {
                     drawing.report("ファイルを読めませんでした。")
                     return
                 }
-                drawing.importFile(data: data, fileName: url.lastPathComponent)
+                let here = field.workingReading.position
+                drawing.importFile(
+                    data: data,
+                    fileName: url.lastPathComponent,
+                    latitude: here?.latitudeDegrees,
+                    longitude: here?.longitudeDegrees
+                )
             case .failure:
                 drawing.report("ファイルを読めませんでした。")
             }
@@ -47,6 +55,9 @@ struct DrawingTabView: View {
                 tone: field.badge.tone,
                 accuracyText: accuracyText,
                 highlight: highlight,
+                reachCenter: reachGraphics?.center,
+                reachRadius: reachGraphics?.radius,
+                reachRanges: reachGraphics?.ranges ?? [],
                 onTap: { point, tolerance in
                     drawing.takeDrawingTap(point, tolerance: tolerance)
                 },
@@ -87,6 +98,71 @@ struct DrawingTabView: View {
             .padding(12)
         }
         .background(SurveyColor.bar)
+        .onAppear { syncCabDrafts() }
+        .onChange(of: drawing.machineRadiusMeters) { _, _ in syncCabDrafts() }
+        .onChange(of: drawing.eyeHeightMeters) { _, _ in syncCabDrafts() }
+        .onChange(of: drawing.project?.id) { _, _ in syncCabDrafts() }
+    }
+
+    private var machineSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("作業半径（腕の長さの目安）")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            Picker("機種", selection: presetBinding) {
+                Text("手入力").tag(Optional<String>.none)
+                ForEach(MachineCatalog.presets) { preset in
+                    Text("\(preset.label) 約 \(String(format: "%.0f", preset.radiusMeters))m").tag(Optional(preset.id))
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(SurveyColor.text)
+            HStack {
+                TextField("作業半径 m", text: $radiusDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                Button("保存") { drawing.setMachineRadius(radiusDraft) }
+                    .buttonStyle(SurveyPlainButton())
+            }
+            Text("地図と図面に、現在地を中心にした円を描きます。")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(SurveyColor.muted)
+        }
+    }
+
+    private var eyeSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("視線高")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            HStack {
+                TextField("視線高 m", text: $eyeDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .keyboardType(.decimalPad)
+                Button("保存") { drawing.setEyeHeight(eyeDraft) }
+                    .buttonStyle(SurveyPlainButton())
+            }
+            Picker("基準", selection: datumBinding) {
+                ForEach(SightDatum.allCases, id: \.self) { datum in
+                    Text(datum.label).tag(datum)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(SurveyColor.text)
+            Toggle("端末を目の高さで持つ", isOn: phoneAtEyesBinding)
+                .font(.system(size: 15, weight: .semibold))
+                .tint(SurveyColor.amber)
+            Text(drawing.phoneAtEyes
+                ? "下がりは、今の高さから計画高を引いた値です。0.1m。"
+                : "端末を\(drawing.sightDatum.label)に置いた高さへ、視線高を足してから計画高を引きます。")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(SurveyColor.muted)
+        }
+    }
+
+    private func syncCabDrafts() {
+        radiusDraft = String(format: "%g", drawing.machineRadiusMeters)
+        eyeDraft = String(format: "%g", drawing.eyeHeightMeters)
     }
 
     private var projectSection: some View {
@@ -156,8 +232,27 @@ struct DrawingTabView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
+            if let note = drawing.placementNote {
+                Text(note)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SurveyColor.yellow)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            TextField("計画高 m（床掘底。空なら高さそのもの）", text: designHeightBinding)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numbersAndPunctuation)
+            machineSection
+            eyeSection
+            Picker("都道府県", selection: prefectureBinding) {
+                Text("未選択").tag(Optional<String>.none)
+                ForEach(PlaneZoneCatalog.prefectures) { prefecture in
+                    Text(prefecture.name).tag(Optional(prefecture.name))
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(SurveyColor.text)
             Picker("系", selection: zoneBinding) {
-                ForEach(1...19, id: \.self) { number in
+                ForEach(drawing.zoneChoices, id: \.self) { number in
                     Text("\(number)系").tag(number)
                 }
             }
@@ -359,6 +454,13 @@ struct DrawingTabView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
+                Button("オペの基準線にする") {
+                    drawing.adoptOperatorLine()
+                }
+                .buttonStyle(SurveyPlainButton())
+                Text("この点がオペの目標です。作業半径の内と外を色で出します。")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(SurveyColor.muted)
                 if let distance = inspection.distanceMeters, let azimuth = inspection.azimuthDegrees {
                     Text("現在地から \(StakeoutText.meters(distance, precision: stakeoutPrecision))、北から時計回り \(String(format: "%.1f°", azimuth))")
                         .font(.system(size: 15, weight: .heavy))
@@ -418,6 +520,26 @@ struct DrawingTabView: View {
         )
     }
 
+    private var designHeightBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let meters = drawing.designHeightMeters else { return "" }
+                return String(format: "%g", meters)
+            },
+            set: { drawing.setDesignHeight($0) }
+        )
+    }
+
+    private var prefectureBinding: Binding<String?> {
+        Binding(
+            get: { drawing.project?.prefecture },
+            set: { name in
+                let here = field.workingReading.position
+                drawing.setPrefecture(name, latitude: here?.latitudeDegrees, longitude: here?.longitudeDegrees)
+            }
+        )
+    }
+
     private var zoneBinding: Binding<Int> {
         Binding(get: { drawing.zone }, set: { drawing.setZone($0) })
     }
@@ -450,6 +572,26 @@ struct DrawingTabView: View {
             get: { drawing.document?.layers.first { $0.name == layer.name }?.isVisible ?? layer.isVisible },
             set: { drawing.toggleLayer(layer.name, visible: $0) }
         )
+    }
+
+    private var reachGraphics: (center: PlanarPoint, radius: Double, ranges: [ReachRange], rings: [ReachRing])? {
+        guard let position = field.workingReading.position, position.isPlottable else { return nil }
+        return drawing.reachGraphics(latitude: position.latitudeDegrees, longitude: position.longitudeDegrees)
+    }
+
+    private var presetBinding: Binding<String?> {
+        Binding(
+            get: { drawing.machinePresetID },
+            set: { drawing.selectMachinePreset($0) }
+        )
+    }
+
+    private var datumBinding: Binding<SightDatum> {
+        Binding(get: { drawing.sightDatum }, set: { drawing.setSightDatum($0) })
+    }
+
+    private var phoneAtEyesBinding: Binding<Bool> {
+        Binding(get: { drawing.phoneAtEyes }, set: { drawing.setPhoneAtEyes($0) })
     }
 
     private var userOnDrawing: UserOnDrawing? {

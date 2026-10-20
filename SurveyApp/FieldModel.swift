@@ -7,6 +7,7 @@ enum FieldTab: String, CaseIterable, Identifiable {
     case drawing
     case measure
     case export
+    case seat
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum FieldTab: String, CaseIterable, Identifiable {
         case .drawing: return "図面"
         case .measure: return "測る"
         case .export: return "出す"
+        case .seat: return "オペ"
         }
     }
 
@@ -25,6 +27,7 @@ enum FieldTab: String, CaseIterable, Identifiable {
         case .drawing: return "ruler"
         case .measure: return "mappin"
         case .export: return "square.and.arrow.up"
+        case .seat: return "steeringwheel"
         }
     }
 }

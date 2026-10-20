@@ -101,6 +101,10 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
     public var correctionAgeSeconds: Double?
     /// VRS、基地局名など、補正の出どころ。
     public var correctionSource: String?
+    /// 進行方向。北から時計回り。止まっている、または不明なときは nil。
+    public var courseDegrees: Double?
+    /// 端末の方位。北から時計回り。コンパスが無いときは nil。
+    public var headingDegrees: Double?
 
     public init(
         latitudeDegrees: Double,
@@ -117,7 +121,9 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         satellites: [SatelliteCount]? = nil,
         pdop: Double? = nil,
         correctionAgeSeconds: Double? = nil,
-        correctionSource: String? = nil
+        correctionSource: String? = nil,
+        courseDegrees: Double? = nil,
+        headingDegrees: Double? = nil
     ) {
         self.latitudeDegrees = latitudeDegrees
         self.longitudeDegrees = longitudeDegrees
@@ -134,6 +140,8 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         self.pdop = pdop
         self.correctionAgeSeconds = correctionAgeSeconds
         self.correctionSource = correctionSource
+        self.courseDegrees = courseDegrees
+        self.headingDegrees = headingDegrees
     }
 
     /// バッジに常時出す解の文字。iPhone が Fix と名乗っても単独。

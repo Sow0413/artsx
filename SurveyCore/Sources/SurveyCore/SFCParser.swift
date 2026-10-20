@@ -47,21 +47,12 @@ public enum SFCParser {
     }
 
     static func version(in text: String) -> String {
-        guard let marker = text.range(of: "$$") else { return "不明" }
-        var digits = ""
-        var index = marker.upperBound
-        while index < text.endIndex {
-            let character = text[index]
-            if character.isNumber || character == "." {
-                digits.append(character)
-                index = text.index(after: index)
-            } else {
-                break
-            }
-        }
-        if digits.hasPrefix("2") { return "2" }
-        if digits.hasPrefix("3") { return "3" }
-        return digits.isEmpty ? "不明" : digits
+        let headEnd = text.range(of: "DATA;")?.lowerBound ?? text.endIndex
+        let head = String(text[..<headEnd])
+        if head.contains("SCADEC_API_Ver3") || head.contains("$$3") { return "3" }
+        if head.contains("SCADEC_API_Ver2") || head.contains("$$2") { return "2" }
+        if head.contains("level2") { return "3" }
+        return "不明"
     }
 
     private static func assemble(_ calls: [FeatureCall], codePage: String, version: String) -> DrawingDocument {
@@ -104,21 +95,76 @@ public enum SFCParser {
             }
             entities.append(entity)
         }
+        let rawBounds = entities.reduce(DrawingBounds.empty) { $0.union($1.bounds) }
+        let divisor = fileUnitsPerMeter(rawBounds)
+        if divisor != 1 {
+            let factor = 1 / divisor
+            entities = entities.map { scaled($0, by: factor) }
+        }
         let bounds = entities.reduce(DrawingBounds.empty) { $0.union($1.bounds) }
         let label = "SFC Ver\(version) \(codePage)"
+        let unit = divisor == 1000
+            ? "座標はミリメートルだったので、メートルに直しました。公共座標として読みました。系を選ぶと、そのまま地図に載ります。"
+            : "公共座標として読みました。系を選ぶと、そのまま地図に載ります。"
         return DrawingDocument(
             layers: layers,
             entities: entities,
             bounds: bounds,
             unsupportedCounts: unsupported,
             codePage: label,
-            unitWarning: "公共座標として読みました。系を選ぶと、そのまま地図に載ります。",
+            unitWarning: unit,
             index: DrawingSpatialIndex(entities: entities)
         )
     }
 
+    /// 平面直角のメートルなら、絶対値はおおむね 40 万より小さい。それを超える地図はミリメートル。
+    static func fileUnitsPerMeter(_ bounds: DrawingBounds) -> Double {
+        guard !bounds.isEmpty else { return 1 }
+        let span = max(bounds.width, bounds.height)
+        let magnitude = max(abs(bounds.minX), abs(bounds.maxX), abs(bounds.minY), abs(bounds.maxY))
+        guard magnitude >= 1_000_000, span >= 1_000 else { return 1 }
+        let meters = span / 1000
+        guard meters >= 1, meters <= 300_000 else { return 1 }
+        return 1000
+    }
+
+    private static func scaled(_ entity: DrawingEntity, by factor: Double) -> DrawingEntity {
+        func point(_ value: PlanarPoint) -> PlanarPoint {
+            PlanarPoint(x: value.x * factor, y: value.y * factor)
+        }
+        let primitive: DrawingPrimitive
+        switch entity.primitive {
+        case let .line(start, end):
+            primitive = .line(point(start), point(end))
+        case let .polyline(vertices, closed, display):
+            primitive = .polyline(vertices: vertices.map(point), closed: closed, display: display.map(point))
+        case let .circle(center, radius):
+            primitive = .circle(center: point(center), radius: radius * factor)
+        case let .arc(center, radius, startDegrees, endDegrees, display):
+            primitive = .arc(
+                center: point(center),
+                radius: radius * factor,
+                startDegrees: startDegrees,
+                endDegrees: endDegrees,
+                display: display.map(point)
+            )
+        case let .text(origin, string, height, rotation):
+            primitive = .text(origin: point(origin), string: string, height: height * factor, rotationDegrees: rotation)
+        case let .point(value):
+            primitive = .point(point(value))
+        }
+        let bounds = DrawingBounds(
+            minX: entity.bounds.minX * factor,
+            minY: entity.bounds.minY * factor,
+            maxX: entity.bounds.maxX * factor,
+            maxY: entity.bounds.maxY * factor
+        )
+        return DrawingEntity(id: entity.id, layer: entity.layer, color: entity.color, primitive: primitive, bounds: bounds)
+    }
+
     private static let supported: Set<String> = [
-        "line_feature", "polyline_feature", "circle_feature", "arc_feature", "text_string_feature", "point_feature"
+        "line_feature", "polyline_feature", "circle_feature", "arc_feature",
+        "text_string_feature", "point_feature", "point_marker_feature"
     ]
 
     private static func entity(from call: FeatureCall, id: Int, layers: [DrawingLayer]) -> DrawingEntity? {
@@ -186,6 +232,14 @@ public enum SFCParser {
             )
         case "point_feature":
             guard call.args.count >= 6, let x = call.args[4].number, let y = call.args[5].number else { return nil }
+            let marker = PlanarPoint(x: x, y: y)
+            return DrawingEntity(
+                id: id, layer: layer, color: color,
+                primitive: .point(marker),
+                bounds: DrawingBounds(enclosing: [marker])
+            )
+        case "point_marker_feature":
+            guard call.args.count >= 4, let x = call.args[2].number, let y = call.args[3].number else { return nil }
             let point = PlanarPoint(x: x, y: y)
             return DrawingEntity(
                 id: id, layer: layer, color: color,
@@ -301,6 +355,10 @@ public enum SFCParser {
         return cursor
     }
 
+    private static func isEscape(_ character: Character) -> Bool {
+        character == "\\" || character == "\u{00A5}"
+    }
+
     private static func parseArguments(in text: String, open: String.Index) -> (values: [SFCValue], end: String.Index) {
         var values: [SFCValue] = []
         var cursor = text.index(after: open)
@@ -308,33 +366,36 @@ public enum SFCParser {
         func flush() {
             let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
             token = ""
-            if !trimmed.isEmpty { values.append(SFCValue(trimmed)) }
+            if !trimmed.isEmpty { values.append(SFCValue(decodeStep(trimmed))) }
         }
         while cursor < text.endIndex {
             let character = text[cursor]
-            if character == "'" {
-                var string = ""
-                cursor = text.index(after: cursor)
-                while cursor < text.endIndex {
-                    if text[cursor] == "'" {
-                        let next = text.index(after: cursor)
-                        if next < text.endIndex, text[next] == "'" {
-                            string.append("'")
-                            cursor = text.index(after: next)
-                            continue
-                        }
-                        cursor = next
-                        break
-                    }
-                    string.append(text[cursor])
-                    cursor = text.index(after: cursor)
+            if isEscape(character) {
+                let next = text.index(after: cursor)
+                if next < text.endIndex, text[next] == "'" {
+                    flush()
+                    let read = readDelimited(in: text, from: text.index(after: next), closingEscape: true)
+                    values.append(SFCValue(decodeStep(read.string), quoted: true))
+                    cursor = read.end
+                    continue
                 }
-                values.append(SFCValue(string, quoted: true))
+                if let step = readStepCode(in: text, from: cursor) {
+                    token.append(step.string)
+                    cursor = step.end
+                    continue
+                }
+            }
+            if character == "'" {
+                flush()
+                let read = readDelimited(in: text, from: text.index(after: cursor), closingEscape: false)
+                values.append(SFCValue(decodeStep(read.string), quoted: true))
+                cursor = read.end
                 continue
             }
             if character == "(" {
+                flush()
                 let grouped = readGroup(in: text, open: cursor)
-                values.append(SFCValue(grouped.text, grouped: true))
+                values.append(SFCValue(decodeStep(grouped.text), grouped: true))
                 cursor = grouped.end
                 continue
             }
@@ -352,6 +413,100 @@ public enum SFCParser {
         }
         flush()
         return (values, cursor)
+    }
+
+    /// `'` で囲む普通の文字列と、SCADEC が書く `\'...\'`。中の `\'` と `''` は引用符一つ。
+    private static func readDelimited(
+        in text: String,
+        from start: String.Index,
+        closingEscape: Bool
+    ) -> (string: String, end: String.Index) {
+        var string = ""
+        var cursor = start
+        while cursor < text.endIndex {
+            let character = text[cursor]
+            if isEscape(character) {
+                let next = text.index(after: cursor)
+                if next < text.endIndex, text[next] == "'" {
+                    if closingEscape {
+                        return (string, text.index(after: next))
+                    }
+                    string.append("'")
+                    cursor = text.index(after: next)
+                    continue
+                }
+            }
+            if character == "'" {
+                let next = text.index(after: cursor)
+                if next < text.endIndex, text[next] == "'" {
+                    string.append("'")
+                    cursor = text.index(after: next)
+                    continue
+                }
+                if !closingEscape {
+                    return (string, next)
+                }
+            }
+            string.append(character)
+            cursor = text.index(after: cursor)
+        }
+        return (string, cursor)
+    }
+
+    /// ISO-10303-21 の `\X2\hhhh\X0\`。ファイル名の『基盤地図プロジェクト』がこれ。
+    private static func readStepCode(in text: String, from start: String.Index) -> (string: String, end: String.Index)? {
+        let rest = text[start...]
+        guard rest.hasPrefix("\\X2\\") || rest.hasPrefix("\u{00A5}X2\\") || rest.hasPrefix("\\X2\u{00A5}") || rest.hasPrefix("\u{00A5}X2\u{00A5}") else {
+            return nil
+        }
+        var cursor = start
+        var skips = 0
+        while skips < 4, cursor < text.endIndex {
+            cursor = text.index(after: cursor)
+            skips += 1
+        }
+        var hex = ""
+        while cursor < text.endIndex, text[cursor].isHexDigit {
+            hex.append(text[cursor])
+            cursor = text.index(after: cursor)
+        }
+        guard hex.count >= 4, hex.count.isMultiple(of: 4) else { return nil }
+        guard cursor < text.endIndex, isEscape(text[cursor]) else { return nil }
+        let afterSlash = text.index(after: cursor)
+        guard text[afterSlash...].hasPrefix("X0") else { return nil }
+        var end = afterSlash
+        var left = 2
+        while left > 0, end < text.endIndex {
+            end = text.index(after: end)
+            left -= 1
+        }
+        if end < text.endIndex, isEscape(text[end]) {
+            end = text.index(after: end)
+        }
+        var units: [UInt16] = []
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 4)
+            guard let unit = UInt16(hex[index..<next], radix: 16) else { return nil }
+            units.append(unit)
+            index = next
+        }
+        return (String(utf16CodeUnits: units, count: units.count), end)
+    }
+
+    static func decodeStep(_ raw: String) -> String {
+        var result = ""
+        var index = raw.startIndex
+        while index < raw.endIndex {
+            if isEscape(raw[index]), let step = readStepCode(in: raw, from: index) {
+                result.append(step.string)
+                index = step.end
+                continue
+            }
+            result.append(raw[index])
+            index = raw.index(after: index)
+        }
+        return result
     }
 
     private static func readGroup(in text: String, open: String.Index) -> (text: String, end: String.Index) {

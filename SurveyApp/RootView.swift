@@ -25,14 +25,16 @@ struct RootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-            if let correction = field.correctionStore.active {
+            if field.tab != .seat {
+                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
+            }
+            if field.tab != .seat, let correction = field.correctionStore.active {
                 CorrectionStatusBar(correction: correction)
             }
-            if let progress = field.benchmarkProgressLabel {
+            if field.tab != .seat, let progress = field.benchmarkProgressLabel {
                 Text(progress)
                     .font(.system(size: 16, weight: .heavy))
                     .foregroundStyle(SurveyColor.amber)
@@ -51,10 +53,14 @@ struct RootView: View {
                     MeasureLogView(field: field)
                 } else if field.tab == .export {
                     ExportTabView(field: field)
+                } else if field.tab == .seat {
+                    OperatorView(field: field, drawing: field.drawing)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            SurveyTabBar(selection: $field.tab)
+            if field.tab != .seat {
+                SurveyTabBar(selection: $field.tab)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SurveyColor.background.ignoresSafeArea())

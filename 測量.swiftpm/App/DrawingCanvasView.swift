@@ -8,6 +8,9 @@ struct DrawingCanvasView: View {
     let tone: AccuracyTone
     let accuracyText: String
     let highlight: PlanarPoint?
+    let reachCenter: PlanarPoint?
+    let reachRadius: Double?
+    let reachRanges: [ReachRange]
     var onTap: (PlanarPoint, Double) -> Void
     var onFit: (CGSize) -> Void
 
@@ -123,6 +126,21 @@ struct DrawingCanvasView: View {
                 )
             }
         }
+        for range in reachRanges where range.points.count >= 2 {
+            var path = Path()
+            path.move(to: screen(range.points[0], size: size))
+            for point in range.points.dropFirst() {
+                path.addLine(to: screen(point, size: size))
+            }
+            context.stroke(path, with: .color(reachColor(range.coverage)), lineWidth: 3)
+        }
+        if let reachCenter, let reachRadius, reachRadius > 0 {
+            let center = screen(reachCenter, size: size)
+            let pixels = CGFloat(reachRadius * camera.pointsPerUnit)
+            let circle = Path(ellipseIn: CGRect(x: center.x - pixels, y: center.y - pixels, width: pixels * 2, height: pixels * 2))
+            let coverage = MachineReach.worst(reachRanges.map(\.coverage))
+            context.stroke(circle, with: .color(reachColor(coverage).opacity(0.95)), lineWidth: 2.5)
+        }
         if let user {
             let center = screen(user.point, size: size)
             let radius = max(8, CGFloat(user.accuracyRadius * camera.pointsPerUnit))
@@ -140,7 +158,21 @@ struct DrawingCanvasView: View {
         if let highlight {
             let center = screen(highlight, size: size)
             let mark = Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16))
-            context.stroke(mark, with: .color(SurveyColor.amber), lineWidth: 3)
+            context.stroke(mark, with: .color(reachColor(coverageOfHighlight(highlight))), lineWidth: 3)
+        }
+    }
+
+    private func coverageOfHighlight(_ point: PlanarPoint) -> ReachCoverage? {
+        guard let reachCenter, let reachRadius, reachRadius > 0 else { return nil }
+        return MachineReach.call(distanceMeters: point.distance(to: reachCenter), radiusMeters: reachRadius)?.coverage
+    }
+
+    private func reachColor(_ coverage: ReachCoverage?) -> Color {
+        switch coverage {
+        case .inside, .onRadius: return SurveyColor.green
+        case .partial: return SurveyColor.yellow
+        case .outside: return SurveyColor.red
+        case nil: return SurveyColor.amber
         }
     }
 

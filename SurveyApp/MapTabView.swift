@@ -8,6 +8,18 @@ struct MapTabView: View {
             SurveyMapView(field: field)
             VStack(spacing: 0) {
                 WorkBar(field: field)
+                HStack {
+                    Spacer()
+                    Text(reachCaption)
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(SurveyColor.card.opacity(0.92))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                .padding(.trailing, 12)
+                .padding(.top, 6)
                 if field.enclosingBook {
                     enclosureBanner
                 } else if field.drawing.pick == .mapPoint {
@@ -18,6 +30,14 @@ struct MapTabView: View {
             }
         }
         .background(SurveyColor.mapBackdrop)
+    }
+
+    private var reachCaption: String {
+        let meters = String(format: field.drawing.machinePresetID == nil ? "%.1f" : "%.0f", field.drawing.machineRadiusMeters)
+        if let id = field.drawing.machinePresetID, let preset = MachineCatalog.named(id) {
+            return "作業半径 \(meters)m（\(preset.label)・目安）"
+        }
+        return "作業半径 \(meters)m"
     }
 
     private var bottomChrome: some View {

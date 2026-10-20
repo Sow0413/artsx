@@ -60,7 +60,13 @@ public struct DrawingBounds: Sendable, Equatable {
     public var maxX: Double
     public var maxY: Double
 
-    public static let empty = DrawingBounds(minX: 0, minY: 0, maxX: 0, maxY: 0)
+    /// 点が一つも無い範囲。0,0 は図面の原点なので、空の印には使わない。
+    public static let empty = DrawingBounds(
+        minX: .infinity,
+        minY: .infinity,
+        maxX: -.infinity,
+        maxY: -.infinity
+    )
 
     public var isEmpty: Bool { minX > maxX || minY > maxY }
 
@@ -193,7 +199,10 @@ public enum DrawingLayerRole: String, Codable, Sendable, Equatable {
     /// SFC の地形図レイヤに多い名前。DXF は既定で設計のまま。
     public static func classify(layerName: String) -> DrawingLayerRole {
         let folded = layerName.uppercased()
-        let markers = ["BGD", "TOPO", "地形図", "地形", "背景", "現況", "2500", "基盤", "等高", "DM"]
+        let markers = [
+            "BGD", "TOPO", "地形図", "地形", "背景", "現況", "2500", "基盤", "等高", "DM",
+            "建築物", "水涯", "道路縁", "道路構成", "標高", "軌道", "行政界", "海岸線"
+        ]
         for marker in markers where folded.contains(marker.uppercased()) {
             return .background
         }
@@ -317,7 +326,7 @@ public struct DrawingSpatialIndex: Sendable, Equatable {
 
     public init(entities: [DrawingEntity]) {
         let bounds = entities.reduce(DrawingBounds.empty) { $0.union($1.bounds) }
-        let span = max(bounds.width, bounds.height, 1)
+        let span = bounds.isEmpty ? 1 : max(bounds.width, bounds.height, 1)
         cell = max(span / 32, 1e-6)
         buckets = [:]
         for entity in entities {

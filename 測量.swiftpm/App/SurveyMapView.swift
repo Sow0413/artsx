@@ -41,6 +41,7 @@ struct SurveyMapView: UIViewRepresentable {
             paths: field.drawing.mapPaths,
             revision: field.drawing.mapRevision
         )
+        context.coordinator.syncReach(on: map, field: field)
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
         }
@@ -65,6 +66,8 @@ struct SurveyMapView: UIViewRepresentable {
         private var wasFollowing = true
         private var drawingLines: [MKPolyline] = []
         private var drawingRevision = -1
+        private var reachOverlays: [MKOverlay] = []
+        private var reachKey = ""
         private var mapPick = false
         private var onMapTap: (Double, Double) -> Void = { _, _ in }
 
@@ -90,6 +93,92 @@ struct SurveyMapView: UIViewRepresentable {
         func setMapPick(_ enabled: Bool, handler: @escaping (Double, Double) -> Void) {
             mapPick = enabled
             onMapTap = handler
+        }
+
+        func syncReach(on map: MKMapView, field: FieldModel) {
+            let position = field.workingReading.position
+            let radius = field.drawing.machineRadiusMeters
+            let target = field.drawing.operatorTarget(control: field.selectedControlPoint)
+            let graphics: (center: PlanarPoint, radius: Double, ranges: [ReachRange], rings: [ReachRing])?
+            if let position, position.isPlottable {
+                graphics = field.drawing.reachGraphics(latitude: position.latitudeDegrees, longitude: position.longitudeDegrees)
+            } else {
+                graphics = nil
+            }
+            var call: ReachCall?
+            if let position, position.isPlottable, let target {
+                call = MachineReach.geodesic(
+                    fromLatitude: position.latitudeDegrees,
+                    fromLongitude: position.longitudeDegrees,
+                    toLatitude: target.latitude,
+                    toLongitude: target.longitude,
+                    radiusMeters: radius
+                )
+            }
+            let ringToken = graphics?.rings.map { "\($0.coverage.rawValue):\($0.coordinates.count)" }.joined(separator: ",") ?? ""
+            let key = [
+                position.map { String(format: "%.5f,%.5f", $0.latitudeDegrees, $0.longitudeDegrees) } ?? "-",
+                String(format: "%.1f", radius),
+                target.map { String(format: "%.5f,%.5f", $0.latitude, $0.longitude) } ?? "-",
+                call?.coverage.rawValue ?? "-",
+                ringToken,
+                "\(field.drawing.mapRevision)"
+            ].joined(separator: "|")
+            if key == reachKey { return }
+            reachKey = key
+            if !reachOverlays.isEmpty {
+                map.removeOverlays(reachOverlays)
+                reachOverlays = []
+            }
+            guard let position, position.isPlottable, radius > 0 else { return }
+            var judged: [ReachCoverage] = graphics?.rings.map(\.coverage) ?? []
+            if let call { judged.append(call.coverage) }
+            let diskColor = Self.reachColor(MachineReach.worst(judged))
+            let disk = ReachCircleOverlay(
+                center: CLLocationCoordinate2D(latitude: position.latitudeDegrees, longitude: position.longitudeDegrees),
+                radius: radius
+            )
+            disk.stroke = diskColor
+            disk.fill = diskColor.withAlphaComponent(0.08)
+            disk.lineWidth = 3
+            reachOverlays.append(disk)
+            if let target, let call {
+                let mark = ReachCircleOverlay(
+                    center: CLLocationCoordinate2D(latitude: target.latitude, longitude: target.longitude),
+                    radius: 3
+                )
+                let color = Self.reachColor(call.coverage)
+                mark.stroke = color
+                mark.fill = color.withAlphaComponent(0.55)
+                mark.lineWidth = 2
+                reachOverlays.append(mark)
+            }
+            for ring in graphics?.rings ?? [] {
+                var coordinates = ring.coordinates.map {
+                    CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
+                }
+                let color = Self.reachColor(ring.coverage)
+                if ring.closed, coordinates.count >= 3 {
+                    let area = ReachAreaOverlay(coordinates: &coordinates, count: coordinates.count)
+                    area.stroke = color
+                    area.fill = color.withAlphaComponent(0.22)
+                    reachOverlays.append(area)
+                } else if coordinates.count >= 2 {
+                    let line = ReachLineOverlay(coordinates: &coordinates, count: coordinates.count)
+                    line.stroke = color
+                    reachOverlays.append(line)
+                }
+            }
+            map.addOverlays(reachOverlays, level: .aboveLabels)
+        }
+
+        private static func reachColor(_ coverage: ReachCoverage?) -> UIColor {
+            switch coverage {
+            case .inside, .onRadius: return SurveyUIColor.green
+            case .partial: return SurveyUIColor.yellow
+            case .outside: return SurveyUIColor.red
+            case nil: return SurveyUIColor.amber
+            }
         }
 
         func syncDrawing(on map: MKMapView, paths: [GeographicPath], revision: Int) {
@@ -162,6 +251,26 @@ struct SurveyMapView: UIViewRepresentable {
             if let tiles = overlay as? MKTileOverlay {
                 return MKTileOverlayRenderer(tileOverlay: tiles)
             }
+            if let disk = overlay as? ReachCircleOverlay {
+                let renderer = MKCircleRenderer(circle: disk)
+                renderer.fillColor = disk.fill
+                renderer.strokeColor = disk.stroke
+                renderer.lineWidth = disk.lineWidth
+                return renderer
+            }
+            if let area = overlay as? ReachAreaOverlay {
+                let renderer = MKPolygonRenderer(polygon: area)
+                renderer.fillColor = area.fill
+                renderer.strokeColor = area.stroke
+                renderer.lineWidth = 2
+                return renderer
+            }
+            if let reachLine = overlay as? ReachLineOverlay {
+                let renderer = MKPolylineRenderer(polyline: reachLine)
+                renderer.strokeColor = reachLine.stroke
+                renderer.lineWidth = 3
+                return renderer
+            }
             if let line = overlay as? MKPolyline {
                 let renderer = MKPolylineRenderer(polyline: line)
                 renderer.strokeColor = SurveyUIColor.amber
@@ -218,6 +327,10 @@ struct SurveyMapView: UIViewRepresentable {
             if !drawingLines.isEmpty {
                 map.removeOverlays(drawingLines)
                 map.addOverlays(drawingLines, level: .aboveLabels)
+            }
+            if !reachOverlays.isEmpty {
+                map.removeOverlays(reachOverlays)
+                map.addOverlays(reachOverlays, level: .aboveLabels)
             }
         }
 
@@ -408,6 +521,21 @@ final class ControlMarkerView: MKAnnotationView {
             path.stroke()
         }
     }
+}
+
+final class ReachCircleOverlay: MKCircle {
+    var stroke: UIColor = SurveyUIColor.amber
+    var fill: UIColor = SurveyUIColor.amber.withAlphaComponent(0.08)
+    var lineWidth: CGFloat = 3
+}
+
+final class ReachAreaOverlay: MKPolygon {
+    var stroke: UIColor = SurveyUIColor.red
+    var fill: UIColor = SurveyUIColor.red.withAlphaComponent(0.22)
+}
+
+final class ReachLineOverlay: MKPolyline {
+    var stroke: UIColor = SurveyUIColor.red
 }
 
 final class UserDotAnnotation: NSObject, MKAnnotation {

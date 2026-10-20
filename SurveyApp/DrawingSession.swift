@@ -24,6 +24,8 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var fileName: String?
     @Published var zone = 9
     @Published var axis: DrawingAxis = .cadEastNorth
+    @Published private(set) var zoneChoices: [Int] = Array(1...19)
+    @Published private(set) var placementNote: String?
     @Published private(set) var warning: ZoneWarning?
     @Published private(set) var suggestion: ZoneSuggestion?
     @Published private(set) var pairs: [AlignmentPair] = []
@@ -43,6 +45,16 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var backgroundVerdict: BackgroundVerdict?
     @Published private(set) var backgroundBusy = false
     @Published private(set) var activeRecordFolder: String?
+    @Published private(set) var operatorEntityID: Int?
+    /// この現場の計画高（床掘底）。無いときはオペ画面に楕円体高を出す。
+    @Published var designHeightMeters: Double?
+    /// 作業半径。既定は 20t の目安 9m。project.json に保存する。
+    @Published private(set) var machineRadiusMeters = MachineCatalog.twentyTon.radiusMeters
+    @Published private(set) var machinePresetID: String? = MachineCatalog.twentyTon.id
+    /// 地盤または機体から目まで。端末を目の高さで持つときは下がりに足さない。
+    @Published private(set) var eyeHeightMeters = 2.0
+    @Published private(set) var sightDatum: SightDatum = .ground
+    @Published private(set) var phoneAtEyes = true
 
     let projectsRoot: URL
     private var reference: (latitude: Double, longitude: Double, name: String)?
@@ -117,10 +129,17 @@ final class DrawingSession: ObservableObject {
             fileName = nil
             camera.fittedID = nil
         }
+        applyCab(from: selected)
         refresh()
+        refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
     }
 
-    func importFile(data: Data, fileName rawName: String) {
+    func importFile(
+        data: Data,
+        fileName rawName: String,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) {
         guard var current = project else {
             message = "先にプロジェクトを作ってください。"
             return
@@ -155,6 +174,10 @@ final class DrawingSession: ObservableObject {
             if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
             if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
             message = note
+            refreshPlacement(latitude: latitude, longitude: longitude, overrideZone: ext == "sfc")
+            if let placementNote {
+                message = [message, placementNote].compactMap { $0 }.joined(separator: " ")
+            }
             refresh()
         } catch let error as DXFError {
             message = error.description
@@ -165,10 +188,51 @@ final class DrawingSession: ObservableObject {
         }
     }
 
+    func setPrefecture(_ raw: String?, latitude: Double?, longitude: Double?) {
+        let name = raw.flatMap { PlaneZoneCatalog.named($0)?.name }
+        project?.prefecture = name
+        persistProject()
+        refreshPlacement(latitude: latitude, longitude: longitude, overrideZone: true)
+    }
+
     func setZone(_ number: Int) {
         guard PlaneRectangular.zone(number) != nil else { return }
         zone = number
         project?.zone = number
+        persistProject()
+        refresh()
+    }
+
+    func refreshPlacement(latitude: Double?, longitude: Double?, overrideZone: Bool) {
+        guard let document, !document.bounds.isEmpty else {
+            if let name = project?.prefecture, let record = PlaneZoneCatalog.named(name) {
+                zoneChoices = record.zones
+                placementNote = record.decidesZone
+                    ? "\(record.name)は\(record.zones[0])系です。"
+                    : "\(record.name)は\(record.zones.map { "\($0)系" }.joined(separator: "・"))です。"
+            }
+            return
+        }
+        let placement = PlanePlacementChooser.choose(
+            x: document.bounds.midX,
+            y: document.bounds.midY,
+            prefecture: project?.prefecture,
+            latitude: latitude,
+            longitude: longitude
+        )
+        var choices = placement.zones
+        if !choices.contains(zone) { choices.append(zone) }
+        zoneChoices = choices.sorted()
+        placementNote = placement.note
+        guard overrideZone else { return }
+        if let decided = placement.decidedZone, PlaneRectangular.zone(decided) != nil {
+            zone = decided
+            project?.zone = decided
+        }
+        if let decided = placement.decidedAxis {
+            axis = decided
+            project?.axis = decided
+        }
         persistProject()
         refresh()
     }
@@ -188,6 +252,230 @@ final class DrawingSession: ObservableObject {
     func setRole(_ role: DrawingLayerRole, visible: Bool) {
         document = document?.settingRole(role, visible: visible)
         refreshMap()
+    }
+
+    func operatorGuide(at position: GeodeticPosition?) -> OperatorGuide? {
+        guard let position, position.isPlottable else { return nil }
+        guard let alignment = operatorPlaneLine(), alignment.count >= 2 else { return nil }
+        guard let plane = PlaneRectangular.forward(
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            zone: zone
+        ) else { return nil }
+        let here = PlanarPoint(x: plane.eastingMeters, y: plane.northingMeters)
+        return OperatorStation.guide(point: here, alignment: alignment)
+    }
+
+    func setDesignHeight(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        designHeightMeters = trimmed.isEmpty ? nil : Double(trimmed)
+    }
+
+    func setMachineRadius(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value >= 0.5, value <= 200 else {
+            message = "作業半径は 0.5m から 200m です。"
+            return
+        }
+        let rounded = MachineReach.roundTenths(value)
+        machineRadiusMeters = rounded
+        machinePresetID = MachineCatalog.presets.first { abs($0.radiusMeters - rounded) < 0.05 }?.id
+        storeCab()
+        message = "作業半径を \(String(format: "%.1f", rounded))m にしました。"
+    }
+
+    func selectMachinePreset(_ id: String?) {
+        if let id, let preset = MachineCatalog.named(id) {
+            machinePresetID = preset.id
+            machineRadiusMeters = preset.radiusMeters
+            message = "\(preset.label) の作業半径 \(String(format: "%.0f", preset.radiusMeters))m（目安）にしました。"
+        } else {
+            machinePresetID = nil
+            message = "作業半径は手入力です。"
+        }
+        storeCab()
+    }
+
+    func setEyeHeight(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard let value = Double(trimmed), value >= 0, value <= 20 else {
+            message = "視線高は 0m から 20m です。"
+            return
+        }
+        eyeHeightMeters = MachineReach.roundTenths(value)
+        storeCab()
+    }
+
+    func setSightDatum(_ datum: SightDatum) {
+        sightDatum = datum
+        storeCab()
+    }
+
+    func setPhoneAtEyes(_ atEyes: Bool) {
+        phoneAtEyes = atEyes
+        storeCab()
+    }
+
+    /// 図面のタップ、無ければ選んだ基準点を目標にする。
+    func operatorTarget(control: ControlPoint?) -> (latitude: Double, longitude: Double)? {
+        if let inspection, let latitude = inspection.latitudeDegrees, let longitude = inspection.longitudeDegrees {
+            return (latitude, longitude)
+        }
+        if let control {
+            return (control.latitudeDegrees, control.longitudeDegrees)
+        }
+        return nil
+    }
+
+    func reachGraphics(latitude: Double, longitude: Double) -> (center: PlanarPoint, radius: Double, ranges: [ReachRange], rings: [ReachRing])? {
+        guard let placed = DrawingPlacement.user(
+            latitudeDegrees: latitude,
+            longitudeDegrees: longitude,
+            horizontalAccuracyMeters: 1,
+            zone: zone,
+            axis: axis,
+            transform: activeTransform,
+            composesAxis: activeComposesAxis
+        ) else { return nil }
+        let scale = abs(activeTransform?.scale ?? 1)
+        let radius = machineRadiusMeters / max(scale, 1e-9)
+        let ranges = excavationRanges(center: placed.point, radius: radius)
+        let rings = ranges.compactMap { range -> ReachRing? in
+            let coordinates = range.points.compactMap {
+                DrawingPlacement.geographic($0, zone: zone, axis: axis, transform: activeTransform, composesAxis: activeComposesAxis)
+            }
+            guard coordinates.count >= 2, coordinates.count == range.points.count else { return nil }
+            let closed = coordinates.count >= 3
+            return ReachRing(coordinates: coordinates, coverage: range.coverage, closed: closed)
+        }
+        return (placed.point, radius, ranges, rings)
+    }
+
+    private func excavationRanges(center: PlanarPoint, radius: Double) -> [ReachRange] {
+        guard let document else { return [] }
+        return document.entities.compactMap { entity in
+            guard isExcavation(entity, in: document) else { return nil }
+            let points = entity.stroke
+            guard points.count >= 2 else { return nil }
+            let coverage = MachineReach.coverage(of: points, closed: false, center: center, radius: radius)
+            return ReachRange(points: points, coverage: coverage)
+        }
+    }
+
+    private func isExcavation(_ entity: DrawingEntity, in document: DrawingDocument) -> Bool {
+        guard entity.stroke.count >= 2 else { return false }
+        let name = entity.layer
+        if name.contains("掘削") || name.contains("床掘") || name.contains("法面") { return true }
+        let role = document.layers.first { $0.name == entity.layer }?.role
+        guard role == .design else { return false }
+        switch entity.primitive {
+        case let .polyline(_, closed, _):
+            return closed
+        case .circle:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func applyCab(from project: SurveyProject) {
+        if let radius = project.machineRadiusMeters, radius > 0 {
+            machineRadiusMeters = radius
+        } else {
+            machineRadiusMeters = MachineCatalog.twentyTon.radiusMeters
+        }
+        if let preset = project.machinePreset, MachineCatalog.named(preset) != nil {
+            machinePresetID = preset
+        } else if project.machineRadiusMeters == nil {
+            machinePresetID = MachineCatalog.twentyTon.id
+        } else {
+            machinePresetID = nil
+        }
+        if let eye = project.eyeHeightMeters, eye >= 0 {
+            eyeHeightMeters = eye
+        } else {
+            eyeHeightMeters = 2
+        }
+        sightDatum = project.sightDatum ?? .ground
+        phoneAtEyes = project.phoneAtEyes ?? true
+    }
+
+    private func storeCab() {
+        guard var current = project else { return }
+        current.machineRadiusMeters = machineRadiusMeters
+        current.machinePreset = machinePresetID
+        current.eyeHeightMeters = eyeHeightMeters
+        current.sightDatum = sightDatum
+        current.phoneAtEyes = phoneAtEyes
+        project = current
+        persistProject()
+    }
+
+    private func operatorPlaneLine() -> [PlanarPoint]? {
+        guard let document else { return nil }
+        let lines = document.entities.filter { $0.stroke.count >= 2 }
+        let chosen: DrawingEntity?
+        if let operatorEntityID, let found = lines.first(where: { $0.id == operatorEntityID }) {
+            chosen = found
+        } else {
+            let designNames = Set(document.layers.filter { $0.role == .design }.map(\.name))
+            let design = lines.filter { designNames.contains($0.layer) }
+            let pool = design.isEmpty ? lines : design
+            chosen = pool.max { strokeLength($0) < strokeLength($1) }
+        }
+        guard let chosen else { return nil }
+        let plane = chosen.stroke.compactMap { vertex -> PlanarPoint? in
+            guard let geo = DrawingPlacement.geographic(
+                vertex,
+                zone: zone,
+                axis: axis,
+                transform: activeTransform,
+                composesAxis: activeComposesAxis
+            ), let projected = PlaneRectangular.forward(
+                latitudeDegrees: geo.latitudeDegrees,
+                longitudeDegrees: geo.longitudeDegrees,
+                zone: zone
+            ) else { return nil }
+            return PlanarPoint(x: projected.eastingMeters, y: projected.northingMeters)
+        }
+        return plane.count >= 2 ? plane : nil
+    }
+
+    private func nearestLineID(to point: PlanarPoint) -> Int? {
+        guard let document else { return nil }
+        var best: (id: Int, distance: Double)?
+        for entity in document.entities {
+            let stroke = entity.stroke
+            guard stroke.count >= 2 else { continue }
+            for index in 0..<(stroke.count - 1) {
+                let distance = distanceToSegment(point, stroke[index], stroke[index + 1])
+                if best == nil || distance < best!.distance {
+                    best = (entity.id, distance)
+                }
+            }
+        }
+        return best?.id
+    }
+
+    private func strokeLength(_ entity: DrawingEntity) -> Double {
+        let stroke = entity.stroke
+        guard stroke.count >= 2 else { return 0 }
+        var total = 0.0
+        for index in 0..<(stroke.count - 1) {
+            total += stroke[index].distance(to: stroke[index + 1])
+        }
+        return total
+    }
+
+    private func distanceToSegment(_ point: PlanarPoint, _ start: PlanarPoint, _ end: PlanarPoint) -> Double {
+        let vx = end.x - start.x
+        let vy = end.y - start.y
+        let lengthSquared = vx * vx + vy * vy
+        if lengthSquared < 1e-12 { return point.distance(to: start) }
+        var t = ((point.x - start.x) * vx + (point.y - start.y) * vy) / lengthSquared
+        if t < 0 { t = 0 }
+        if t > 1 { t = 1 }
+        return point.distance(to: PlanarPoint(x: start.x + t * vx, y: start.y + t * vy))
     }
 
     func report(_ text: String) {
@@ -236,6 +524,15 @@ final class DrawingSession: ObservableObject {
             composesAxis: activeComposesAxis,
             snapLabel: hit.kind.label
         )
+    }
+
+    func adoptOperatorLine() {
+        guard let inspection else {
+            message = "先に図面の線をタップしてください。"
+            return
+        }
+        operatorEntityID = nearestLineID(to: PlanarPoint(x: inspection.drawingX, y: inspection.drawingY))
+        message = operatorEntityID == nil ? "線が見つかりません。" : "オペの基準線にしました。オペ画面は、この線からの測点だけを出します。"
     }
 
     func addTarget(kind: AlignmentTargetKind, latitude: Double, longitude: Double, label: String) {
