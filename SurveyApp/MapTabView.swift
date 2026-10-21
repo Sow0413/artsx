@@ -122,11 +122,11 @@ struct MapTabView: View {
     @ViewBuilder
     private var coordinateChip: some View {
         if let position = field.reading.position ?? field.navigationReading.position, position.isPlottable {
-            let height = field.liveSurveyHeight(position)
+            let height = Self.mapHeightLine(field.liveSurveyHeight(position))
             VStack(alignment: .leading, spacing: 0) {
+                Text(height)
                 Text(CoordinateText.latitude(position.latitudeDegrees))
                 Text(CoordinateText.longitude(position.longitudeDegrees))
-                Text(height.primaryLine)
             }
             .font(SurveyType(14, .heavy, mono: true))
             .foregroundStyle(Color.black)
@@ -134,9 +134,14 @@ struct MapTabView: View {
             .padding(.vertical, 4)
             .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))、\(height.primaryLine)")
+            .accessibilityLabel("\(height)、緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))")
             .allowsHitTesting(false)
         }
+    }
+
+    private static func mapHeightLine(_ height: SurveyHeight) -> String {
+        guard let meters = height.orthometricMeters else { return "標高 —" }
+        return "標高 \(FixedNumber.string(meters, fractionDigits: 1))m"
     }
 
     private var mapButtons: some View {
