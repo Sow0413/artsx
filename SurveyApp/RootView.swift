@@ -48,10 +48,10 @@ struct RootView: View {
                     .padding(.top, 6)
             }
             if field.tab != .seat {
-                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: field.tab == .map)
                     .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 8)
+                    .padding(.top, 4)
+                    .padding(.bottom, 4)
             }
             if field.tab != .seat, let correction = field.correctionStore.active {
                 CorrectionStatusBar(correction: correction)
@@ -166,8 +166,8 @@ struct RootView: View {
     private var themeButton: some View {
         Button(action: appearance.cycle) {
             Text(appearance.label)
-                .font(SurveyType(18, .heavy))
-                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
+                .font(SurveyType(15, .heavy))
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background(appearance.outdoor ? SurveyColor.color(OutdoorContrast.yellow) : SurveyColor.card)
                 .foregroundStyle(appearance.outdoor ? SurveyColor.color(OutdoorContrast.black) : SurveyColor.text)
                 .overlay(

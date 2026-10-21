@@ -4,46 +4,47 @@ import SurveyCore
 struct AccuracyBadgeView: View {
     let badge: AccuracyBadgeModel
     var stage: PositionStage?
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: compact ? 8 : 10) {
             Circle()
                 .fill(badge.tone.mark)
-                .frame(width: 16, height: 16)
+                .frame(width: compact ? 12 : 16, height: compact ? 12 : 16)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(badge.solutionLabel)
-                        .font(SurveyType(15, .heavy))
+                        .font(SurveyType(compact ? 13 : 15, .heavy))
                         .foregroundStyle(chipInk)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, compact ? 2 : 3)
                         .background(badge.tone.mark, in: Capsule())
                     if let stage {
                         Text("段階\(stage.rawValue)")
-                            .font(SurveyType(13, .heavy))
+                            .font(SurveyType(compact ? 12 : 13, .heavy))
                             .foregroundStyle(SurveyColor.muted)
                     }
                 }
                 Text(badge.text)
-                    .font(SurveyType(20, .heavy))
+                    .font(SurveyType(compact ? 16 : 20, .heavy))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 if !badge.caution.isEmpty {
                     Text(badge.caution)
-                        .font(SurveyType(13, .semibold))
+                        .font(SurveyType(compact ? 12 : 13, .semibold))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if !badge.guidance.isEmpty {
                     Text(badge.guidance)
-                        .font(SurveyType(14, .heavy))
+                        .font(SurveyType(compact ? 13 : 14, .heavy))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
+        .padding(.horizontal, compact ? 10 : 14)
+        .padding(.vertical, compact ? 6 : 12)
+        .frame(maxWidth: .infinity, minHeight: compact ? 44 : OutdoorContrast.primaryPoints, alignment: .leading)
         .foregroundStyle(badge.tone.tint)
         .background(badge.tone.badgeBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -121,46 +122,46 @@ struct LocationPanel: View {
     var levelTilt: Double? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text("現在地")
-                .font(SurveyType(15, .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             if let position = reading.position, position.isPlottable {
                 Text(CoordinateText.latitude(position.latitudeDegrees))
-                    .font(SurveyType(32, .heavy, mono: true))
+                    .font(SurveyType(20, .heavy, mono: true))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 Text(CoordinateText.longitude(position.longitudeDegrees))
-                    .font(SurveyType(32, .heavy, mono: true))
+                    .font(SurveyType(20, .heavy, mono: true))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
                     Text(accuracyText(position))
                 }
-                .font(SurveyType(18, .bold))
+                .font(SurveyType(15, .bold))
                 if let statureNotice {
                     Button(action: { onStature?() }) {
                         Text(statureNotice)
-                            .font(SurveyType(22, .heavy))
-                            .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
+                            .font(SurveyType(16, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     .buttonStyle(.plain)
                     .disabled(onStature == nil)
                 }
                 if showsLevel {
-                    LevelBubble(tiltRadians: levelTilt)
+                    LevelBubble(tiltRadians: levelTilt, compact: true)
                 }
                 if let note {
                     Text(note)
-                        .font(SurveyType(15, .heavy))
+                        .font(SurveyType(14, .heavy))
                         .foregroundStyle(SurveyColor.blue)
                 }
                 Text(CoordinateText.previewNote)
-                    .font(SurveyType(14, .bold))
+                    .font(SurveyType(12, .bold))
                     .foregroundStyle(SurveyColor.muted)
                 Text(CoordinateText.storageNote)
-                    .font(SurveyType(13, .medium))
+                    .font(SurveyType(12, .medium))
                     .foregroundStyle(SurveyColor.muted)
                 if let warning = warningText {
                     Text(warning)
@@ -169,22 +170,22 @@ struct LocationPanel: View {
                 }
             } else {
                 Text(emptyTitle)
-                    .font(SurveyType(22, .heavy))
+                    .font(SurveyType(18, .heavy))
                 Text(emptyDetail)
-                    .font(SurveyType(16, .semibold))
+                    .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
                 if showsLevel {
-                    LevelBubble(tiltRadians: levelTilt)
+                    LevelBubble(tiltRadians: levelTilt, compact: true)
                 }
             }
         }
         .foregroundStyle(SurveyColor.text)
-        .padding(16)
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
         .accessibilityElement(children: .combine)
@@ -242,10 +243,10 @@ struct DownloadBar: View {
             HStack(spacing: 8) {
                 Button(action: onSave) {
                     Text(isDownloading ? message : "この範囲を保存")
-                        .font(SurveyType(18, .heavy))
+                        .font(SurveyType(15, .heavy))
                         .minimumScaleFactor(0.7)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, minHeight: 64)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .padding(.horizontal, 12)
                         .background(isDownloading ? SurveyColor.card : SurveyColor.blue)
                         .foregroundStyle(SurveyColor.text)
@@ -257,8 +258,8 @@ struct DownloadBar: View {
                 if isDownloading {
                     Button(action: onCancel) {
                         Text("中止")
-                            .font(SurveyType(18, .heavy))
-                            .frame(minWidth: 88, minHeight: 64)
+                            .font(SurveyType(15, .heavy))
+                            .frame(minWidth: 72, minHeight: 44)
                             .background(SurveyColor.card)
                             .foregroundStyle(SurveyColor.text)
                             .overlay(
@@ -307,8 +308,8 @@ struct RecenterButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: following ? "location.fill" : "location")
-                .font(SurveyType(22, .bold))
-                .frame(width: 60, height: 60)
+                .font(SurveyType(18, .bold))
+                .frame(width: 44, height: 44)
                 .background(Color.white, in: Circle())
                 .foregroundStyle(Color.black)
         }

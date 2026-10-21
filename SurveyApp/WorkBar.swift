@@ -14,7 +14,7 @@ struct WorkBar: View {
                         Text(work.shortTitle)
                             .font(SurveyType(16, .heavy))
                             .padding(.horizontal, 14)
-                            .frame(minHeight: OutdoorContrast.primaryPoints)
+                            .frame(minHeight: 44)
                             .foregroundStyle(field.workCatalog.selectedID == work.id ? SurveyColor.onAccent : SurveyColor.muted)
                             .background(
                                 field.workCatalog.selectedID == work.id ? SurveyColor.blue : SurveyColor.card,
@@ -31,7 +31,7 @@ struct WorkBar: View {
                     Text("数値")
                         .font(SurveyType(16, .heavy))
                         .padding(.horizontal, 14)
-                        .frame(minHeight: OutdoorContrast.primaryPoints)
+                        .frame(minHeight: 44)
                         .foregroundStyle(SurveyColor.text)
                         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
@@ -39,7 +39,7 @@ struct WorkBar: View {
                 .accessibilityLabel("要求精度を編集")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
         }
         .background(SurveyColor.background)
             .overlay(alignment: .top) {

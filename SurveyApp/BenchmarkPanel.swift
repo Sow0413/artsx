@@ -11,8 +11,8 @@ struct BenchmarkHint: View {
             .font(SurveyType(14, .semibold))
             .foregroundStyle(notice == nil ? SurveyColor.muted : SurveyColor.amber)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
