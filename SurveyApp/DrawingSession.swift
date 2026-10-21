@@ -1903,6 +1903,55 @@ final class DrawingSession: ObservableObject {
         mapRevision += 1
     }
 
+    /// 緯度経度、度分秒、または現場の系の X Y。保存した点は取り込みと同じく地図と丁張に出る。
+    @discardableResult
+    func saveEnteredPoint(name rawName: String, coordinate: String, heightText: String) -> String? {
+        guard project != nil else { return "先にプロジェクトを作ってください。" }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return "点名を入れてください。" }
+        guard let fix = ManualPoint.parse(coordinate, zone: zone) else {
+            return "緯度経度か、平面直角の X Y にしてください。"
+        }
+        let heightTrimmed = heightText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let height: Double?
+        if heightTrimmed.isEmpty {
+            height = nil
+        } else if let parsed = ManualPoint.height(heightTrimmed) {
+            height = parsed
+        } else {
+            return "標高の数値が読めません。"
+        }
+        let point = FieldPoint(
+            id: UUID().uuidString,
+            name: name,
+            northingMeters: fix.northingMeters,
+            eastingMeters: fix.eastingMeters,
+            zone: zone,
+            latitudeDegrees: fix.latitudeDegrees,
+            longitudeDegrees: fix.longitudeDegrees,
+            groundLevelMeters: height,
+            heightMeters: height,
+            origin: .manual,
+            anchor: fix.kind == .plane ? .grid : .geographic,
+            snapLabel: "手入力"
+        )
+        storePoints([point])
+        if let saved = fieldPoints.first(where: { $0.name == name && $0.origin == .manual }) {
+            selectedPointID = saved.id
+        }
+        message = "\(name) を保存しました。"
+        return nil
+    }
+
+    private func bookSource(_ origin: FieldPointOrigin) -> String {
+        switch origin {
+        case .sima: return "SIMA"
+        case .list: return "一覧"
+        case .manual: return "手入力"
+        case .arbitrary: return "任意点"
+        }
+    }
+
     private func publishBook(_ points: [FieldPoint]) {
         guard let project, let directory = try? ProjectStore.projectDirectory(project.name, at: projectsRoot) else { return }
         let now = Date()
@@ -1918,7 +1967,8 @@ final class DrawingSession: ObservableObject {
                 fixDurationSeconds: 0,
                 recordedAt: now,
                 kind: point.origin == .arbitrary ? "任意点" : "座標",
-                source: point.origin == .sima ? "SIMA" : (point.origin == .list ? "一覧" : "任意点")
+                source: bookSource(point.origin),
+                orthometricHeightMeters: point.origin == .manual ? point.heightMeters : nil
             )
         }
         try? CoordinateBookStore.upsert(entries, projectDirectory: directory)

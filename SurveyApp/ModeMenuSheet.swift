@@ -382,6 +382,10 @@ struct ModeMenuSheet: View {
             field.showsKnownShift = true
             field.modeMenu = nil
         }
+        flowRow("点を登録", icon: "mappin.and.ellipse") {
+            field.modeMenu = nil
+            field.beginManualPoint()
+        }
         flowRow("水準器", icon: "level") {
             handoff = .crosshair
             field.modeMenu = nil

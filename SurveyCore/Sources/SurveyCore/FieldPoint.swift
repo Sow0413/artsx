@@ -4,6 +4,8 @@ public enum FieldPointOrigin: String, Codable, Sendable, Equatable {
     case sima
     case list
     case arbitrary
+    /// 緯度経度か平面直角を手で入れた点。
+    case manual
 }
 
 /// grid は SIMA の北・東を、選んだ系で読み直す。geographic は緯度経度を動かさない。

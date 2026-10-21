@@ -214,6 +214,10 @@ struct RootView: View {
         .sheet(isPresented: $field.showsKnownShift) {
             KnownShiftSheet(field: field)
         }
+        .sheet(isPresented: $field.showsManualPoint) {
+            ManualPointSheet(field: field)
+                .id(field.manualPointToken)
+        }
         .sheet(isPresented: Binding(
             get: { field.selectedControlPoint != nil },
             set: { if !$0 { field.dismissBenchmark() } }

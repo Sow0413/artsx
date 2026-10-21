@@ -123,6 +123,10 @@ final class FieldModel: ObservableObject {
     @Published var showsARStakeout = false
     @Published var showsPhoneAverage = false
     @Published var showsKnownShift = false
+    @Published var showsManualPoint = false
+    @Published var manualPointName = ""
+    @Published var manualPointCoordinate = ""
+    @Published var manualPointToken = UUID()
     @Published var averageSpan = PhoneAverageSpan(rawValue: UserDefaults.standard.string(forKey: "survey.averageSpan") ?? "") ?? .halfMinute
     @Published private(set) var phoneRun: PhoneAverageRun?
     @Published private(set) var knownShift: KnownPointShift?
@@ -2090,6 +2094,18 @@ final class FieldModel: ObservableObject {
             showRecordBanner(RecordBanner(text: "記録 #\(number) ・\(place)/\(day)", folderURL: nil), success: true)
         }
         return true
+    }
+
+    func beginManualPoint(name: String = "", coordinate: String = "") {
+        guard drawing.project != nil else {
+            drawing.report("先にプロジェクトを作ってください。")
+            showsProjects = true
+            return
+        }
+        manualPointName = name
+        manualPointCoordinate = coordinate
+        manualPointToken = UUID()
+        showsManualPoint = true
     }
 
     func showRecordList() {

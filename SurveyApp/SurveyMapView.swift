@@ -76,6 +76,9 @@ struct SurveyMapView: UIViewRepresentable {
             field.drawing.placeOnMap(latitude: latitude, longitude: longitude)
             field.tab = .drawing
         }
+        context.coordinator.setHere { latitude, longitude in
+            field.beginManualPoint(name: "ここ", coordinate: ManualPoint.decimalPair(latitude: latitude, longitude: longitude))
+        }
         context.coordinator.syncReach(on: map, field: field)
         context.coordinator.syncCrew(on: map, field: field)
         context.coordinator.syncAid(on: map, field: field)
@@ -129,6 +132,7 @@ struct SurveyMapView: UIViewRepresentable {
         private var onSelectFieldPoint: (String) -> Void = { _ in }
         private var arbitraryPick = false
         private var onArbitrary: (Double, Double) -> Void = { _, _ in }
+        private var onHere: (Double, Double) -> Void = { _, _ in }
         private var pendingViewport: MapViewport?
         private var pendingFollow = true
         private var pendingReading: PositionReading?
@@ -166,6 +170,10 @@ struct SurveyMapView: UIViewRepresentable {
         func setArbitrary(_ enabled: Bool, handler: @escaping (Double, Double) -> Void) {
             arbitraryPick = enabled
             onArbitrary = handler
+        }
+
+        func setHere(_ handler: @escaping (Double, Double) -> Void) {
+            onHere = handler
         }
 
         func setMapPick(_ enabled: Bool, handler: @escaping (Double, Double) -> Void) {
@@ -433,9 +441,13 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-            guard gesture.state == .began, arbitraryPick, let map = gesture.view as? MKMapView else { return }
+            guard gesture.state == .began, let map = gesture.view as? MKMapView else { return }
             let coordinate = map.convert(gesture.location(in: map), toCoordinateFrom: map)
-            onArbitrary(coordinate.latitude, coordinate.longitude)
+            if arbitraryPick {
+                onArbitrary(coordinate.latitude, coordinate.longitude)
+            } else {
+                onHere(coordinate.latitude, coordinate.longitude)
+            }
         }
 
         func syncFieldPoints(on map: MKMapView, points: [FieldPoint]) {
