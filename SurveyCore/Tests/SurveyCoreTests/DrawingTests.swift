@@ -260,6 +260,9 @@ final class DrawingTests: XCTestCase {
             unsupported: ["SPLINE": 2]
         )
         XCTAssertEqual(try ProjectStore.originalDXF(fileName: stored, projectName: project.name, at: root), original)
+        let drawingFile = directory.appendingPathComponent("図面").appendingPathComponent(stored)
+        XCTAssertEqual(try Data(contentsOf: drawingFile), original)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("設計").path))
         XCTAssertEqual(project.drawings.first?.unsupported["SPLINE"], 2)
 
         let record = AlignmentRecord(
@@ -316,6 +319,7 @@ final class DrawingTests: XCTestCase {
         try ProjectStore.save(project, at: root)
 
         let drawingTrash = try ProjectStore.trashDrawing(fileName: stored, in: &project, at: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(".Trash/\(drawingTrash.id)/meta.json").path))
         XCTAssertTrue(project.drawings.isEmpty)
         XCTAssertEqual(try ProjectStore.listTrash(at: root).map(\.id), [drawingTrash.id])
         XCTAssertThrowsError(try ProjectStore.originalDXF(fileName: stored, projectName: project.name, at: root))
@@ -342,6 +346,39 @@ final class DrawingTests: XCTestCase {
         XCTAssertGreaterThan(fresh.daysLeft(at: Date()), 29)
         _ = try ProjectStore.restoreTrash(id: fresh.id, at: root)
         XCTAssertEqual(try ProjectStore.list(at: root).map(\.name), ["小川"])
+    }
+
+    func testSimaOriginalAndLegacyFoldersFollowTheProject() throws {
+        let legacy = try TestFiles.directory()
+        let documents = try TestFiles.directory()
+        defer {
+            TestFiles.remove(legacy)
+            TestFiles.remove(documents)
+        }
+        var project = try ProjectStore.create(name: "亀山", at: legacy)
+        let old = try ProjectStore.projectDirectory(project.name, at: legacy)
+        let bytes = Data("G00\nA01,1,10,20\n".utf8)
+        try FileManager.default.createDirectory(at: old.appendingPathComponent("設計"), withIntermediateDirectories: true)
+        try bytes.write(to: old.appendingPathComponent("設計/旧図.sfc"))
+        try FileManager.default.createDirectory(at: old.appendingPathComponent("出す"), withIntermediateDirectories: true)
+        try Data("csv".utf8).write(to: old.appendingPathComponent("出す/記録点.csv"))
+        ProjectStore.migrateProjects(from: legacy, to: documents)
+        let moved = try ProjectStore.projectDirectory("亀山", at: documents)
+        XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("図面/旧図.sfc")), bytes)
+        XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("出力/記録点.csv")), Data("csv".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.appendingPathComponent("亀山").path))
+
+        let sima = Data("SIMA-ORIGINAL".utf8)
+        let stored = try ProjectStore.importSIMA(data: sima, fileName: "基準.sim", projectName: project.name, at: documents)
+        XCTAssertEqual(try Data(contentsOf: moved.appendingPathComponent("SIMA").appendingPathComponent(stored)), sima)
+
+        try ProjectStore.rename(&project, to: "関", at: documents)
+        let renamed = try ProjectStore.projectDirectory(project.name, at: documents)
+        XCTAssertEqual(try Data(contentsOf: renamed.appendingPathComponent("図面/旧図.sfc")), bytes)
+        XCTAssertEqual(try Data(contentsOf: renamed.appendingPathComponent("SIMA").appendingPathComponent(stored)), sima)
+        let export = try ProjectStore.exportDirectory(projectName: project.name, at: documents)
+        XCTAssertEqual(export.lastPathComponent, "出力")
+        XCTAssertTrue(export.path.contains("/関/"))
     }
 
     private func square(origin: PlanarPoint, size: Double) -> [Segment2D] {

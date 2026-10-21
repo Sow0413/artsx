@@ -288,7 +288,11 @@ public enum FieldRecordStore {
     }
 
     private static func trashFolder(id: UUID, root: URL) -> URL {
-        root.appendingPathComponent(".trash", isDirectory: true).appendingPathComponent(id.uuidString, isDirectory: true)
+        for name in [".Trash", ".trash"] {
+            let existing = root.appendingPathComponent(name, isDirectory: true).appendingPathComponent(id.uuidString, isDirectory: true)
+            if FileManager.default.fileExists(atPath: existing.path) { return existing }
+        }
+        return root.appendingPathComponent(".Trash", isDirectory: true).appendingPathComponent(id.uuidString, isDirectory: true)
     }
 
     /// macOS の一時ディレクトリは `/var` から `/private/var` へのリンクになる。比べる前に両方を解く。

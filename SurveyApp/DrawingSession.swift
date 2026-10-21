@@ -13,6 +13,7 @@ struct PendingIntake: Identifiable, Equatable {
     var kind: IntakeKind
     var text: String
     var columnCount: Int
+    var original: Data
     var id: String { fileName }
 }
 
@@ -24,7 +25,7 @@ struct DrawingCamera: Equatable {
     var fittedID: String?
 }
 
-/// 図面タブの状態。DXF の原本は設計フォルダに置き、合わせは別の版として足す。
+/// 図面タブの状態。原本は図面フォルダに置き、合わせは別の版として足す。
 final class DrawingSession: ObservableObject {
     @Published private(set) var projects: [SurveyProject] = []
     @Published private(set) var trashed: [ProjectTrashItem] = []
@@ -1799,7 +1800,7 @@ final class DrawingSession: ObservableObject {
     func applyHeightMap(groundColumn: Int?, formationColumn: Int?) {
         guard let pending = pendingIntake else { return }
         importCoordinates(
-            data: Data(pending.text.utf8),
+            data: pending.original,
             fileName: pending.fileName,
             heightMap: HeightColumnMap(groundColumn: groundColumn, formationColumn: formationColumn)
         )
@@ -1813,12 +1814,16 @@ final class DrawingSession: ObservableObject {
                 fileName: fileName,
                 kind: result.kind,
                 text: result.text,
-                columnCount: result.columnCount
+                columnCount: result.columnCount,
+                original: data
             )
             message = result.note
             return
         }
         pendingIntake = nil
+        if result.kind == .sima, let name = project?.name {
+            try? ProjectStore.importSIMA(data: data, fileName: fileName, projectName: name, at: projectsRoot)
+        }
         storePoints(result.points)
         message = result.note
     }

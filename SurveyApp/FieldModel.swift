@@ -309,7 +309,13 @@ final class FieldModel: ObservableObject {
         let prefixes = PointPrefixStore.load(from: siteDirectory)
         self.prefixStore = prefixes
         self.pointPrefix = prefixes.prefix(for: prefixes.activeKey)
-        self.drawing = DrawingSession(projectsRoot: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true))
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let projectsRoot = documents.appendingPathComponent("projects", isDirectory: true)
+        ProjectStore.migrateProjects(
+            from: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true),
+            to: projectsRoot
+        )
+        self.drawing = DrawingSession(projectsRoot: projectsRoot)
         self.extras = ExtraSwitchStore.load(from: siteDirectory)
         let nearby = NearbyLink()
         self.nearby = nearby
@@ -2016,7 +2022,7 @@ final class FieldModel: ObservableObject {
         considerPlaceName(force: true)
     }
 
-    /// 今の位置を1点残す。座標簿と Documents/records/<場所>/<日付>/ の両方へ書く。
+    /// 今の位置を1点残す。座標簿と、開いているプロジェクトの 記録/<場所>/<日付>/ へ書く。
     @discardableResult
     func recordHere() -> Bool {
         guard let position = reading.position, position.isPlottable else {
@@ -2294,8 +2300,15 @@ final class FieldModel: ObservableObject {
         return folder
     }
 
+    /// プロジェクトがあるときはそのフォルダの記録。無いときは Documents/records。
     private var recordsRoot: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let name = drawing.project?.name,
+           let directory = try? ProjectStore.projectDirectory(name, at: drawing.projectsRoot) {
+            let folder = directory.appendingPathComponent("記録", isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            return folder
+        }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("records", isDirectory: true)
     }
 
@@ -2748,7 +2761,6 @@ final class FieldModel: ObservableObject {
         let zone = drawing.zone
         let projectName = drawing.project?.name
         let root = drawing.projectsRoot
-        let site = siteDirectory
         let known = controlPoints
         let journal = journal
         exportMessage = "書き出しています。"
@@ -2781,7 +2793,7 @@ final class FieldModel: ObservableObject {
             }
             let bytes = CoordinateDelivery.data(entries, format: format, zone: zone)
             do {
-                let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
+                let folder = try Self.deliveryFolder(projectName: projectName, root: root)
                 let url = folder.appendingPathComponent(format.filename)
                 try bytes.write(to: url, options: .atomic)
                 DispatchQueue.main.async {
@@ -2798,9 +2810,8 @@ final class FieldModel: ObservableObject {
     func writeExport(name: String, body: String) {
         let projectName = drawing.project?.name
         let root = drawing.projectsRoot
-        let site = siteDirectory
         do {
-            let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
+            let folder = try Self.deliveryFolder(projectName: projectName, root: root)
             let url = folder.appendingPathComponent(name)
             try Data(body.utf8).write(to: url, options: .atomic)
             showExportNotice(name, fileURL: url)
@@ -2937,11 +2948,12 @@ final class FieldModel: ObservableObject {
         String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
-    private static func deliveryFolder(projectName: String?, root: URL, site: URL) throws -> URL {
+    private static func deliveryFolder(projectName: String?, root: URL) throws -> URL {
         if let projectName {
             return try ProjectStore.exportDirectory(projectName: projectName, at: root)
         }
-        let folder = site.appendingPathComponent("出す", isDirectory: true)
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(ProjectStore.exportFolderName, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }

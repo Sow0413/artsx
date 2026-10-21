@@ -77,6 +77,27 @@ final class FieldRecordStoreTests: XCTestCase {
             timestamp: date
         )
     }
+
+    func testRecordTrashUsesDotTrash() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("records-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let point = FieldPointFile(
+            name: "T1",
+            latitude: 35,
+            longitude: 136,
+            ellipsoidalHeightMeters: 1,
+            horizontalAccuracyMeters: 2,
+            verticalAccuracyMeters: nil,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let url = try FieldRecordStore.write(point, root: root, place: "亀山")
+        let id = UUID()
+        try FieldRecordStore.moveToTrash(url, id: id, index: 0, root: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(".Trash/\(id.uuidString)/0.json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        try FieldRecordStore.restoreTrashFile(id: id, index: 0, root: root, relativePath: FieldRecordStore.relativePath(of: url, root: root))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
 }
 
 private extension JSONDecoder {

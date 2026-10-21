@@ -81,7 +81,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var siteFence: SiteFence?
     /// 位置を共有してよい時間。無いプロジェクトは共有しない。
     public var workHours: WorkHours?
-    /// 記録フォルダの場所。Documents/records/<place>/<date>/ と揃える。
+    /// 記録の場所名。プロジェクトがあるときは projects/<名前>/記録/ の下に置く。
     public var place: String?
     /// 現場の日付。YYYY-MM-DD。無いときは作成日。
     public var workDate: String?
@@ -436,9 +436,14 @@ public struct ProjectTrashItem: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// `ルート/プロジェクト名/` の下に、座標簿・記録・点群・設計・下敷き・出す を作る。
+/// `Documents/projects/プロジェクト名/` の下に、図面・SIMA・出力・記録を置く。
 public enum ProjectStore {
-    public static let childFolders = ["座標簿", "記録", "点群", "設計", "下敷き", "出す"]
+    public static let drawingFolder = "図面"
+    public static let simaFolder = "SIMA"
+    public static let exportFolderName = "出力"
+    public static let legacyDrawingFolder = "設計"
+    public static let legacyExportFolder = "出す"
+    public static let childFolders = ["座標簿", "記録", "点群", "図面", "SIMA", "下敷き", "出力"]
 
     public static func create(name: String, at root: URL, now: Date = Date()) throws -> SurveyProject {
         guard let safe = safeComponent(name) else { throw ProjectStoreError.emptyName }
@@ -489,7 +494,8 @@ public enum ProjectStore {
         try write(project, to: directory.appendingPathComponent("project.json"))
     }
 
-    public static let trashFolderName = ".trash"
+    public static let trashFolderName = ".Trash"
+    public static let legacyTrashFolderName = ".trash"
 
     /// 現場のフォルダごとゴミ箱へ移す。30日で消える。
     public static func trashProject(_ project: SurveyProject, at root: URL, now: Date = Date()) throws -> ProjectTrashItem {
@@ -530,7 +536,7 @@ public enum ProjectStore {
         }
         let drawing = project.drawings[index]
         let directory = try projectDirectory(project.name, at: root)
-        let design = directory.appendingPathComponent("設計", isDirectory: true)
+        let design = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
         let source = design.appendingPathComponent(fileName)
         guard FileManager.default.fileExists(atPath: source.path) else { throw ProjectStoreError.unreadable }
         let item = ProjectTrashItem(
@@ -572,12 +578,20 @@ public enum ProjectStore {
     }
 
     public static func listTrash(at root: URL) throws -> [ProjectTrashItem] {
-        let folder = root.appendingPathComponent(trashFolderName, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
-        let urls = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-        return urls.compactMap { url in
-            try? read(ProjectTrashItem.self, from: url.appendingPathComponent("meta.json"))
-        }.sorted { $0.deletedAt > $1.deletedAt }
+        var items: [ProjectTrashItem] = []
+        var seen: Set<String> = []
+        for name in [trashFolderName, legacyTrashFolderName] {
+            let folder = root.appendingPathComponent(name, isDirectory: true)
+            guard FileManager.default.fileExists(atPath: folder.path) else { continue }
+            let urls = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            for url in urls {
+                guard let item = try? read(ProjectTrashItem.self, from: url.appendingPathComponent("meta.json")) else { continue }
+                if seen.insert(item.id).inserted {
+                    items.append(item)
+                }
+            }
+        }
+        return items.sorted { $0.deletedAt > $1.deletedAt }
     }
 
     public static func purgeTrash(at root: URL, now: Date = Date()) {
@@ -607,8 +621,7 @@ public enum ProjectStore {
                 throw ProjectStoreError.missingProject
             }
             let directory = try projectDirectory(project.name, at: root)
-            let design = directory.appendingPathComponent("設計", isDirectory: true)
-            try FileManager.default.createDirectory(at: design, withIntermediateDirectories: true)
+            let design = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
             let dest = design.appendingPathComponent(fileName)
             if FileManager.default.fileExists(atPath: resolved(dest)) {
                 throw ProjectStoreError.drawingExists
@@ -633,7 +646,7 @@ public enum ProjectStore {
         return item
     }
 
-    /// 受け取ったバイト列を設計フォルダへそのまま置く。中身は書き換えない。
+    /// 受け取ったバイト列を図面フォルダへそのまま置く。中身は書き換えない。
     public static func importDXF(
         data: Data,
         fileName: String,
@@ -644,7 +657,7 @@ public enum ProjectStore {
         now: Date = Date()
     ) throws -> String {
         let directory = try projectDirectory(project.name, at: root)
-        let design = directory.appendingPathComponent("設計", isDirectory: true)
+        let design = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
         let stored = uniqueFileName(preferred: fileName, in: design)
         try data.write(to: design.appendingPathComponent(stored))
         project.drawings.append(ProjectDrawing(
@@ -658,9 +671,21 @@ public enum ProjectStore {
         return stored
     }
 
+    /// SIMA の原本を SIMA フォルダへそのまま置く。中身は書き換えない。
+    @discardableResult
+    public static func importSIMA(
+        data: Data,
+        fileName: String,
+        projectName: String,
+        at root: URL
+    ) throws -> String {
+        try importOriginal(data: data, fileName: fileName, folder: simaFolder, projectName: projectName, at: root)
+    }
+
     public static func originalDXF(fileName: String, projectName: String, at root: URL) throws -> Data {
         let directory = try projectDirectory(projectName, at: root)
-        let url = directory.appendingPathComponent("設計", isDirectory: true).appendingPathComponent(fileName)
+        let folder = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
+        let url = folder.appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: url) else { throw ProjectStoreError.unreadable }
         return data
     }
@@ -669,8 +694,7 @@ public enum ProjectStore {
         let directory = try projectDirectory(projectName, at: root)
         let tag = ConversionTag(fileName: fileName, zone: zone, axis: axis, note: ConversionTag.keptOriginal)
         let base = (fileName as NSString).deletingPathExtension
-        let url = directory
-            .appendingPathComponent("設計", isDirectory: true)
+        let url = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
             .appendingPathComponent("\(safeComponent(base) ?? "図面").変換.json")
         try write(tag, to: url)
     }
@@ -678,8 +702,7 @@ public enum ProjectStore {
     public static func saveAlignment(_ record: AlignmentRecord, projectName: String, at root: URL) throws -> AlignmentRecord {
         guard let safe = safeComponent(record.name) else { throw ProjectStoreError.emptyName }
         let directory = try projectDirectory(projectName, at: root)
-        let folder = directory
-            .appendingPathComponent("設計", isDirectory: true)
+        let folder = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
             .appendingPathComponent("合わせ", isDirectory: true)
             .appendingPathComponent(safe, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -693,8 +716,7 @@ public enum ProjectStore {
 
     public static func alignments(projectName: String, at root: URL) throws -> [AlignmentRecord] {
         let directory = try projectDirectory(projectName, at: root)
-        let folder = directory
-            .appendingPathComponent("設計", isDirectory: true)
+        let folder = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
             .appendingPathComponent("合わせ", isDirectory: true)
         guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
         let names = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
@@ -874,13 +896,38 @@ public enum ProjectStore {
 
     public static func exportDirectory(projectName: String, at root: URL) throws -> URL {
         let directory = try projectDirectory(projectName, at: root)
-        let folder = directory.appendingPathComponent("出す", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
+        return preparedFolder(exportFolderName, legacy: legacyExportFolder, in: directory)
+    }
+
+    /// Application Support の旧 `プロジェクト` を Documents/projects へ移す。図面と出力のフォルダ名も揃える。
+    public static func migrateProjects(from legacyRoot: URL, to root: URL) {
+        let manager = FileManager.default
+        try? manager.createDirectory(at: root, withIntermediateDirectories: true)
+        if manager.fileExists(atPath: legacyRoot.path),
+           let children = try? manager.contentsOfDirectory(at: legacyRoot, includingPropertiesForKeys: nil) {
+            for child in children {
+                let name = child.lastPathComponent
+                if name == trashFolderName || name == legacyTrashFolderName || name.hasPrefix(".") { continue }
+                guard manager.fileExists(atPath: child.appendingPathComponent("project.json").path) else { continue }
+                let dest = root.appendingPathComponent(name, isDirectory: true)
+                if manager.fileExists(atPath: dest.path) { continue }
+                try? manager.moveItem(at: child, to: dest)
+            }
+            moveTrashContents(from: legacyRoot, to: root)
+        }
+        if let children = try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
+            for child in children where !child.lastPathComponent.hasPrefix(".") {
+                adoptLegacyFolders(in: child)
+            }
+        }
     }
 
     private static func trashDirectory(_ id: String, at root: URL) -> URL {
-        root.appendingPathComponent(trashFolderName, isDirectory: true).appendingPathComponent(id, isDirectory: true)
+        for name in [trashFolderName, legacyTrashFolderName] {
+            let existing = root.appendingPathComponent(name, isDirectory: true).appendingPathComponent(id, isDirectory: true)
+            if FileManager.default.fileExists(atPath: existing.path) { return existing }
+        }
+        return root.appendingPathComponent(trashFolderName, isDirectory: true).appendingPathComponent(id, isDirectory: true)
     }
 
     private static func conversionTagName(for fileName: String) -> String {
@@ -944,7 +991,77 @@ public enum ProjectStore {
         guard let safe = safeComponent(name) else { throw ProjectStoreError.emptyName }
         let directory = root.appendingPathComponent(safe, isDirectory: true)
         guard FileManager.default.fileExists(atPath: directory.path) else { throw ProjectStoreError.missingProject }
+        adoptLegacyFolders(in: directory)
         return directory
+    }
+
+    @discardableResult
+    private static func importOriginal(
+        data: Data,
+        fileName: String,
+        folder folderName: String,
+        projectName: String,
+        at root: URL
+    ) throws -> String {
+        let directory = try projectDirectory(projectName, at: root)
+        let folder = preparedFolder(folderName, legacy: nil, in: directory)
+        let stored = uniqueFileName(preferred: fileName, in: folder)
+        try data.write(to: folder.appendingPathComponent(stored))
+        return stored
+    }
+
+    private static func preparedFolder(_ name: String, legacy: String?, in directory: URL) -> URL {
+        if let legacy {
+            let old = directory.appendingPathComponent(legacy, isDirectory: true)
+            let current = directory.appendingPathComponent(name, isDirectory: true)
+            moveContents(from: old, to: current)
+        }
+        let folder = directory.appendingPathComponent(name, isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    private static func adoptLegacyFolders(in directory: URL) {
+        moveContents(
+            from: directory.appendingPathComponent(legacyDrawingFolder, isDirectory: true),
+            to: directory.appendingPathComponent(drawingFolder, isDirectory: true)
+        )
+        moveContents(
+            from: directory.appendingPathComponent(legacyExportFolder, isDirectory: true),
+            to: directory.appendingPathComponent(exportFolderName, isDirectory: true)
+        )
+        try? FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(simaFolder, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try? FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(exportFolderName, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+    }
+
+    private static func moveContents(from source: URL, to destination: URL) {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: source.path) else { return }
+        try? manager.createDirectory(at: destination, withIntermediateDirectories: true)
+        guard let items = try? manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) else { return }
+        for item in items {
+            let dest = destination.appendingPathComponent(item.lastPathComponent)
+            if manager.fileExists(atPath: dest.path) { continue }
+            try? manager.moveItem(at: item, to: dest)
+        }
+        if let left = try? manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil), left.isEmpty {
+            try? manager.removeItem(at: source)
+        }
+    }
+
+    private static func moveTrashContents(from legacyRoot: URL, to root: URL) {
+        for name in [trashFolderName, legacyTrashFolderName] {
+            let source = legacyRoot.appendingPathComponent(name, isDirectory: true)
+            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            let destination = root.appendingPathComponent(trashFolderName, isDirectory: true)
+            moveContents(from: source, to: destination)
+        }
     }
 
     private static func alignmentVersions(in folder: URL) throws -> [Int] {
