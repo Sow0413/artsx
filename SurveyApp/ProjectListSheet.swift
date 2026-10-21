@@ -273,89 +273,9 @@ private struct ProjectEditor: View {
     var body: some View {
         List {
             if let project {
-                Section {
-                    labeledField("名前", text: $name) {
-                        drawing.renameProject(id: projectID, to: name)
-                    }
-                    NavigationLink {
-                        ZoneLocationPicker(
-                            prefecture: project.prefecture,
-                            area: project.area,
-                            zone: project.zone,
-                            manual: project.manualZone == true,
-                            onChange: { prefecture, area, zone, manual in
-                                drawing.setProjectLocation(
-                                    id: projectID,
-                                    prefecture: prefecture,
-                                    area: area,
-                                    zone: zone,
-                                    manual: manual
-                                )
-                            }
-                        )
-                    } label: {
-                        valueRow("場所", value: locationLine(project))
-                    }
-                    labeledField("日付", text: $date) {
-                        drawing.setProjectDate(id: projectID, raw: date)
-                    }
-                    Button("開く") {
-                        if let fresh = self.project { drawing.select(fresh) }
-                    }
-                    .font(SurveyType(18, .heavy))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .listRowBackground(SurveyColor.card)
-                } header: {
-                    sectionTitle("現場")
-                }
-                if let place = project.place, !place.isEmpty {
-                    let days = field.recordDays(for: place)
-                    if !days.isEmpty {
-                        Section {
-                            Text(days.joined(separator: "  "))
-                                .font(SurveyType(14, .semibold))
-                                .foregroundStyle(SurveyColor.muted)
-                                .frame(minHeight: 44, alignment: .leading)
-                                .listRowBackground(SurveyColor.card)
-                        } header: {
-                            sectionTitle("記録")
-                        }
-                    }
-                }
-                Section {
-                    if project.drawings.isEmpty {
-                        Text("図面はまだありません。")
-                            .font(SurveyType(16, .semibold))
-                            .foregroundStyle(SurveyColor.muted)
-                            .frame(minHeight: 44)
-                            .listRowBackground(SurveyColor.card)
-                    }
-                    ForEach(project.drawings, id: \.fileName) { item in
-                        NavigationLink {
-                            DrawingEditor(drawing: drawing, projectID: projectID, fileName: item.fileName)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title)
-                                    .font(SurveyType(18, .heavy))
-                                    .foregroundStyle(SurveyColor.text)
-                                    .lineLimit(1)
-                                Text(drawingLine(item, project: project))
-                                    .font(SurveyType(14, .semibold))
-                                    .foregroundStyle(SurveyColor.muted)
-                                    .lineLimit(2)
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }
-                        .listRowBackground(SurveyColor.card)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button("削除", role: .destructive) {
-                                pending = .drawing(projectID: projectID, fileName: item.fileName)
-                            }
-                        }
-                    }
-                } header: {
-                    sectionTitle("図面")
-                }
+                identitySection(project)
+                recordSection(project)
+                drawingSection(project)
             } else {
                 Text("この現場はゴミ箱にあります。")
                     .font(SurveyType(16, .semibold))
@@ -383,6 +303,103 @@ private struct ProjectEditor: View {
         }
     }
 
+    private func identitySection(_ project: SurveyProject) -> some View {
+        Section {
+            labeledField("名前", text: $name) {
+                drawing.renameProject(id: projectID, to: name)
+            }
+            NavigationLink {
+                ZoneLocationPicker(
+                    prefecture: project.prefecture,
+                    area: project.area,
+                    zone: project.zone,
+                    manual: project.manualZone == true,
+                    onChange: { prefecture, area, zone, manual in
+                        drawing.setProjectLocation(
+                            id: projectID,
+                            prefecture: prefecture,
+                            area: area,
+                            zone: zone,
+                            manual: manual
+                        )
+                    }
+                )
+            } label: {
+                valueRow("場所", value: locationLine(project))
+            }
+            labeledField("日付", text: $date) {
+                drawing.setProjectDate(id: projectID, to: date)
+            }
+            Button("開く") {
+                if let fresh = self.project { drawing.select(fresh) }
+            }
+            .font(SurveyType(18, .heavy))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .listRowBackground(SurveyColor.card)
+        } header: {
+            sectionTitle("現場")
+        }
+    }
+
+    @ViewBuilder
+    private func recordSection(_ project: SurveyProject) -> some View {
+        if let place = project.place, !place.isEmpty {
+            let days = field.recordDays(for: place)
+            if !days.isEmpty {
+                Section {
+                    Text(days.joined(separator: "  "))
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .frame(minHeight: 44, alignment: .leading)
+                        .listRowBackground(SurveyColor.card)
+                } header: {
+                    sectionTitle("記録")
+                }
+            }
+        }
+    }
+
+    private func drawingSection(_ project: SurveyProject) -> some View {
+        Section {
+            if project.drawings.isEmpty {
+                Text("図面はまだありません。")
+                    .font(SurveyType(16, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .frame(minHeight: 44)
+                    .listRowBackground(SurveyColor.card)
+            }
+            ForEach(project.drawings, id: \.fileName) { item in
+                drawingLink(item, project: project)
+            }
+        } header: {
+            sectionTitle("図面")
+        }
+    }
+
+    private func drawingLink(_ item: ProjectDrawing, project: SurveyProject) -> some View {
+        NavigationLink {
+            DrawingEditor(drawing: drawing, projectID: projectID, fileName: item.fileName)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(SurveyType(18, .heavy))
+                    .foregroundStyle(SurveyColor.text)
+                    .lineLimit(1)
+                Text(drawingLine(item, project: project))
+                    .font(SurveyType(14, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        }
+        .listRowBackground(SurveyColor.card)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button("削除", role: .destructive) {
+                pending = .drawing(projectID: projectID, fileName: item.fileName)
+            }
+        }
+    }
+
     private var pendingPresented: Binding<Bool> {
         Binding(get: { pending != nil }, set: { if !$0 { pending = nil } })
     }
@@ -399,7 +416,7 @@ private struct ProjectEditor: View {
         }
         let stored = project?.workDate ?? project?.listDate ?? ""
         if date != stored {
-            drawing.setProjectDate(id: projectID, raw: date)
+            drawing.setProjectDate(id: projectID, to: date)
         }
     }
 }

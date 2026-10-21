@@ -489,7 +489,7 @@ final class DrawingSession: ObservableObject {
         }
     }
 
-    func setProjectDate(id: String, _ raw: String) {
+    func setProjectDate(id: String, to raw: String) {
         if project?.id == id {
             setProjectDate(raw)
             return
