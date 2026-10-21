@@ -89,7 +89,9 @@ struct RootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             if field.tab != .seat {
-                SurveyTabBar(selection: $field.tab)
+                SurveyTabBar(selection: $field.tab) {
+                    field.recordHere()
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -161,6 +163,24 @@ struct RootView: View {
         .sheet(isPresented: $field.showsARStakeout) {
             ARStakeoutSheet(field: field)
         }
+        .sheet(isPresented: Binding(
+            get: { field.selectedControlPoint != nil },
+            set: { if !$0 { field.dismissBenchmark() } }
+        )) {
+            NavigationStack {
+                BenchmarkCard(field: field)
+                    .background(SurveyColor.background)
+                    .navigationTitle("三角点")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("閉じる") { field.dismissBenchmark() }
+                                .font(SurveyType(17, .heavy))
+                        }
+                    }
+            }
+            .modifier(SurveyScheme())
+        }
     }
 
     private func openMenuNext() {
@@ -175,6 +195,16 @@ struct RootView: View {
             field.showsToolOrder = true
         case .privacy:
             field.showsPrivacy = true
+        case .crosshair:
+            field.showsCrosshair = true
+        case .batter:
+            field.showsBatter = true
+        case .ar:
+            field.showsARStakeout = true
+        case .pace:
+            field.showsPace = true
+        case .download:
+            field.downloadVisibleArea()
         case nil:
             break
         }

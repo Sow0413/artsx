@@ -5,112 +5,155 @@ struct MapTabView: View {
     @ObservedObject var field: FieldModel
 
     var body: some View {
-        GeometryReader { geo in
-            let mapHeight = max(180, geo.size.height * 0.40)
-            VStack(spacing: 0) {
-                WorkBar(field: field)
-                mapBand(height: mapHeight)
-                ScrollView {
-                    VStack(spacing: 8) {
-                        alertStack
-                        bottomChrome
-                    }
-                    .padding(.top, 8)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .background(SurveyColor.mapBackdrop)
-        .overlay {
-            ZStack {
-                if field.extras.proximity {
-                    SafetyWash(level: field.crew.worst)
-                }
-                if field.extras.fall {
-                    ThreatRim(cues: [], fall: field.crew.fallCue)
-                }
-                if field.extras.pushToTalk {
-                    TalkRim(pointer: field.talkPointer)
-                }
-                if field.extras.sos {
-                    SOSRim(pointer: field.sosPointer)
-                }
-            }
-        }
-        .sheet(isPresented: $field.showsIncidentStats) {
-            IncidentStatsSheet(field: field)
-        }
-        .sheet(isPresented: $field.showsDisaster) {
-            DisasterSheet(field: field)
-        }
-    }
-
-    private var reachCaption: String {
-        let meters = String(format: field.drawing.machinePresetID == nil ? "%.1f" : "%.0f", field.drawing.machineRadiusMeters)
-        if let id = field.drawing.machinePresetID, let preset = MachineCatalog.named(id) {
-            return "作業半径 \(meters)m（\(preset.label)・目安）"
-        }
-        return "作業半径 \(meters)m"
-    }
-
-    private func mapBand(height: CGFloat) -> some View {
         SurveyMapView(field: field)
-            .frame(maxWidth: .infinity)
-            .frame(height: height)
-            .overlay(alignment: .top) {
-                VStack(spacing: 0) {
-                    if let guide = field.stakeoutGuide {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(guide.speech)
-                                .font(SurveyType(34, .heavy))
-                                .minimumScaleFactor(0.5)
-                                .lineLimit(2)
-                            if let detail = guide.detail {
-                                Text(detail)
-                                    .font(SurveyType(20, .heavy))
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.6)
-                            }
-                        }
-                        .foregroundStyle(SurveyColor.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(SurveyColor.card.opacity(0.94))
-                        .accessibilityElement(children: .combine)
-                    }
-                    if let station = field.drawing.operatorGuide(at: field.navigationReading.position)?.line,
-                       field.drawing.stationLine != nil {
-                        Text(station)
-                            .font(SurveyType(34, .heavy))
-                            .minimumScaleFactor(0.4)
-                            .lineLimit(1)
-                            .foregroundStyle(SurveyColor.text)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 12)
-                            .background(SurveyColor.card.opacity(0.94))
-                    }
-                    if field.enclosingBook {
-                        enclosureBanner
-                    } else if field.drawing.pick == .mapPoint {
-                        mapPickBanner
-                    }
-                }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .top) { topStack }
+            .overlay(alignment: .bottomLeading) { coordinateStack }
+            .overlay(alignment: .bottomTrailing) { mapButtons }
+            .overlay { recordFlash }
+            .background(SurveyColor.mapBackdrop)
+            .overlay { safetyWash }
+            .sheet(isPresented: $field.showsIncidentStats) {
+                IncidentStatsSheet(field: field)
             }
-            .overlay(alignment: .bottomLeading) {
-                AttributionLabel()
-                    .padding(8)
+            .sheet(isPresented: $field.showsDisaster) {
+                DisasterSheet(field: field)
             }
-            .overlay(alignment: .bottomTrailing) {
-                RecenterButton(following: field.followUser) {
-                    field.recenter()
-                }
-                .padding(8)
-            }
-            .clipped()
     }
 
+    private var topStack: some View {
+        VStack(spacing: 0) {
+            if let guide = field.stakeoutGuide {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(guide.speech)
+                        .font(SurveyType(34, .heavy))
+                        .minimumScaleFactor(0.5)
+                        .lineLimit(2)
+                    if let detail = guide.detail {
+                        Text(detail)
+                            .font(SurveyType(20, .heavy))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                }
+                .foregroundStyle(SurveyColor.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(SurveyColor.card.opacity(0.94))
+                .accessibilityElement(children: .combine)
+            }
+            if let station = field.drawing.operatorGuide(at: field.navigationReading.position)?.line,
+               field.drawing.stationLine != nil {
+                Text(station)
+                    .font(SurveyType(34, .heavy))
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(1)
+                    .foregroundStyle(SurveyColor.text)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 12)
+                    .background(SurveyColor.card.opacity(0.94))
+            }
+            if field.enclosingBook {
+                enclosureBanner
+            } else if field.drawing.pick == .mapPoint {
+                mapPickBanner
+            }
+            alertStack
+        }
+    }
+
+    private var coordinateStack: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if field.isDownloading {
+                HStack(spacing: 8) {
+                    Text("保存中")
+                        .font(SurveyType(14, .heavy))
+                    Button("中止") { field.cancelDownload() }
+                        .font(SurveyType(14, .heavy))
+                        .frame(minHeight: 44)
+                }
+                .foregroundStyle(Color.black)
+                .padding(.horizontal, 8)
+                .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            coordinateChip
+            AttributionLabel()
+        }
+        .padding(8)
+    }
+
+    @ViewBuilder
+    private var coordinateChip: some View {
+        if let position = field.reading.position ?? field.navigationReading.position, position.isPlottable {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(CoordinateText.latitude(position.latitudeDegrees))
+                Text(CoordinateText.longitude(position.longitudeDegrees))
+            }
+            .font(SurveyType(14, .heavy, mono: true))
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))")
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var mapButtons: some View {
+        VStack(spacing: 8) {
+            Button {
+                field.toggleMapHeading()
+            } label: {
+                Text(field.mapHeadingUp ? "進行" : "北")
+                    .font(SurveyType(15, .heavy))
+                    .frame(width: 44, height: 44)
+                    .background(Color.white, in: Circle())
+                    .foregroundStyle(Color.black)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(field.mapHeadingUp ? "進行を上" : "北を上")
+            RecenterButton(following: field.followUser) {
+                field.recenter()
+            }
+        }
+        .padding(8)
+    }
+
+    @ViewBuilder
+    private var recordFlash: some View {
+        if let flash = field.recordFlash {
+            Text(flash)
+                .font(SurveyType(28, .heavy))
+                .foregroundStyle(Color.black)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var safetyWash: some View {
+        ZStack {
+            if field.extras.proximity {
+                SafetyWash(level: field.crew.worst)
+            }
+            if field.extras.fall {
+                ThreatRim(cues: [], fall: field.crew.fallCue)
+            }
+            if field.extras.pushToTalk {
+                TalkRim(pointer: field.talkPointer)
+            }
+            if field.extras.sos {
+                SOSRim(pointer: field.sosPointer)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
     private var alertStack: some View {
         VStack(spacing: 6) {
             if field.extras.proximity {
@@ -132,36 +175,8 @@ struct MapTabView: View {
             if field.extras.recordsIncidents {
                 IncidentTray(field: field)
             }
-            HStack {
-                if field.extras.pushToTalk {
-                    chipButton(field.radio.spaceAudio ? "定位オン" : "定位", tint: field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.text) {
-                        field.radio.setSpaceAudio(!field.radio.spaceAudio)
-                    }
-                    .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
-                }
-                if field.extras.disaster {
-                    chipButton("災害", tint: field.disasterMode ? Color.white : SurveyColor.text, fill: field.disasterMode ? SurveyColor.red : SurveyColor.card) {
-                        field.showsDisaster = true
-                    }
-                }
-                if field.extras.stats || field.extras.accidentReport {
-                    chipButton(field.extras.stats ? "統計" : "事故報告", fill: field.showIncidentHeat ? SurveyColor.red : SurveyColor.card) {
-                        field.showsIncidentStats = true
-                    }
-                }
-                Spacer(minLength: 0)
-                Text(reachCaption)
-                    .font(SurveyType(12, .heavy))
-                    .foregroundStyle(SurveyColor.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                    .padding(.horizontal, 8)
-                    .frame(minHeight: 44)
-                    .background(SurveyColor.card)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            }
             if field.extras.disaster, field.disasterMode {
-                Text("災害派遣。圏外のまま、近くの端末へ中継します。")
+                Text("災害派遣")
                     .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.onAccent)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -169,91 +184,15 @@ struct MapTabView: View {
                     .padding(.vertical, 6)
                     .background(SurveyColor.redBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(.horizontal, 12)
             }
         }
-        .padding(.horizontal, 12)
-    }
-
-    private var bottomChrome: some View {
-        VStack(spacing: 8) {
-            if field.selectedControlPoint != nil || field.benchmark != nil {
-                BenchmarkCard(field: field)
-                    .frame(maxHeight: 320)
-            } else {
-                BenchmarkHint(
-                    notice: field.controlPointNotice,
-                    loadedCount: field.controlPoints.count,
-                    visibleCount: field.visibleControlPoints.count
-                )
-                LocationPanel(
-                    reading: field.navigationReading,
-                    note: field.navigationNote,
-                    statureNotice: field.statureNotice,
-                    onStature: { field.showsStature = true },
-                    showsLevel: field.stature.style == .sight,
-                    levelTilt: field.sightTiltRadians
-                )
-                toolGrid
-                if !field.isDownloading {
-                    Text(field.downloadMessage)
-                        .font(SurveyType(13, .semibold))
-                        .foregroundStyle(field.downloadMessage.contains("広すぎ") || field.downloadMessage.contains("できません") ? SurveyColor.amber : SurveyColor.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                captureButton
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-    }
-
-    private var toolGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-            toolButton("水準器") { field.showsCrosshair = true }
-            toolButton("丁張") { field.showsBatter = true }
-            toolButton("AR位置出し") { field.showsARStakeout = true }
-            toolButton("歩測") { field.showsPace = true }
-            toolButton(field.isDownloading ? field.downloadMessage : "この範囲を保存", enabled: !field.isDownloading) {
-                field.downloadVisibleArea()
-            }
-            if field.isDownloading {
-                toolButton("中止", filled: false) { field.cancelDownload() }
-            }
-        }
-    }
-
-    private func toolButton(_ title: String, filled: Bool = true, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(SurveyType(15, .heavy))
-                .minimumScaleFactor(0.65)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .padding(.horizontal, 6)
-                .background(filled && enabled ? SurveyColor.blue : SurveyColor.card)
-                .foregroundStyle(filled && enabled ? SurveyColor.onAccent : SurveyColor.text)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-    }
-
-    private func chipButton(_ title: String, tint: Color = SurveyColor.text, fill: Color = SurveyColor.card, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .font(SurveyType(14, .heavy))
-            .foregroundStyle(tint)
-            .padding(.horizontal, 10)
-            .frame(minHeight: 44)
-            .background(fill)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .buttonStyle(.plain)
+        .padding(.top, 6)
     }
 
     private var enclosureBanner: some View {
         HStack(spacing: 12) {
-            Text("見えている範囲で座標簿を絞る")
+            Text("この範囲で絞る")
                 .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -279,7 +218,7 @@ struct MapTabView: View {
 
     private var mapPickBanner: some View {
         HStack(spacing: 12) {
-            Text("図面の点に対応する場所をタップ")
+            Text("地図をタップ")
                 .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -295,9 +234,5 @@ struct MapTabView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 12)
         .padding(.top, 8)
-    }
-
-    private var captureButton: some View {
-        OperationBar(field: field, showsSkill: false, compact: true)
     }
 }

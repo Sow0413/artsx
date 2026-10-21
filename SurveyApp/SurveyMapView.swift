@@ -46,7 +46,9 @@ struct SurveyMapView: UIViewRepresentable {
             viewport: field.viewport,
             followUser: field.followUser,
             tone: field.badge.tone,
-            offlineRevision: field.offlineRevision
+            offlineRevision: field.offlineRevision,
+            headingUp: field.mapHeadingUp,
+            headingToken: field.mapHeadingToken
         )
         context.coordinator.syncControls(
             on: map,
@@ -103,6 +105,11 @@ struct SurveyMapView: UIViewRepresentable {
         private var onMapTap: (Double, Double) -> Void = { _, _ in }
         private var pendingViewport: MapViewport?
         private var pendingFollow = true
+        private var pendingReading: PositionReading?
+        private var pendingHeadingUp = false
+        private var pendingHeadingToken = 0
+        private var appliedHeadingToken = -1
+        private var headingLockUntil = Date.distantPast
 
         func attach(field: FieldModel, map: MKMapView) {
             store = field.tiles
@@ -384,7 +391,9 @@ struct SurveyMapView: UIViewRepresentable {
             viewport: MapViewport,
             followUser: Bool,
             tone: AccuracyTone,
-            offlineRevision: Int
+            offlineRevision: Int,
+            headingUp: Bool,
+            headingToken: Int
         ) {
             self.tone = tone
             if offlineRevision != self.offlineRevision {
@@ -395,20 +404,25 @@ struct SurveyMapView: UIViewRepresentable {
             syncCircle(on: map, reading: reading, tone: tone)
             pendingViewport = viewport
             pendingFollow = followUser
+            pendingReading = reading
+            pendingHeadingUp = headingUp
+            pendingHeadingToken = headingToken
             if followUser, !wasFollowing {
                 appliedViewport = nil
             }
             wasFollowing = followUser
-            applyRegionIfNeeded(on: map)
+            let moved = applyRegionIfNeeded(on: map)
+            applyHeading(on: map, regionJustSet: moved)
         }
 
         func noteBounds(of map: MKMapView) {
-            applyRegionIfNeeded(on: map)
+            let moved = applyRegionIfNeeded(on: map)
+            applyHeading(on: map, regionJustSet: moved)
         }
 
-        private func applyRegionIfNeeded(on map: MKMapView) {
-            guard map.bounds.width > 1, map.bounds.height > 1 else { return }
-            guard pendingFollow, let viewport = pendingViewport, appliedViewport != viewport else { return }
+        private func applyRegionIfNeeded(on map: MKMapView) -> Bool {
+            guard map.bounds.width > 1, map.bounds.height > 1 else { return false }
+            guard pendingFollow, let viewport = pendingViewport, appliedViewport != viewport else { return false }
             appliedViewport = viewport
             let region = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: viewport.centerLatitude, longitude: viewport.centerLongitude),
@@ -418,10 +432,59 @@ struct SurveyMapView: UIViewRepresentable {
             map.setRegion(region, animated: didSetInitialRegion)
             applyingProgrammaticRegion = false
             didSetInitialRegion = true
+            headingLockUntil = Date().addingTimeInterval(0.7)
             reportVisible(map)
             if let tileOverlay, let renderer = map.renderer(for: tileOverlay) as? MKTileOverlayRenderer {
                 renderer.reloadData()
             }
+            return true
+        }
+
+        /// setRegion は方位を北に戻す。追随中の進行方向は、その直後にもう一度載せる。
+        private func applyHeading(on map: MKMapView, regionJustSet: Bool) {
+            guard map.bounds.width > 1, map.camera.centerCoordinateDistance > 1 else { return }
+            let tokenChanged = appliedHeadingToken != pendingHeadingToken
+            guard let target = desiredHeading() else { return }
+            if !pendingHeadingUp, !tokenChanged, !pendingFollow {
+                return
+            }
+            if pendingHeadingUp, !tokenChanged, !pendingFollow, !regionJustSet {
+                return
+            }
+            let delta = Self.headingDelta(map.camera.heading, target)
+            if delta <= 1 {
+                appliedHeadingToken = pendingHeadingToken
+                return
+            }
+            if !tokenChanged, !regionJustSet, delta <= 4 {
+                return
+            }
+            let camera = MKMapCamera()
+            camera.centerCoordinate = map.camera.centerCoordinate
+            camera.centerCoordinateDistance = map.camera.centerCoordinateDistance
+            camera.heading = target
+            camera.pitch = 0
+            let animate = !regionJustSet && !tokenChanged && didSetInitialRegion
+            applyingProgrammaticRegion = true
+            map.setCamera(camera, animated: animate)
+            applyingProgrammaticRegion = false
+            appliedHeadingToken = pendingHeadingToken
+        }
+
+        private func desiredHeading() -> CLLocationDirection? {
+            guard pendingHeadingUp else { return 0 }
+            guard let position = pendingReading?.position else { return nil }
+            for candidate in [position.headingDegrees, position.courseDegrees] {
+                if let candidate, candidate.isFinite, (0...360).contains(candidate) {
+                    return candidate
+                }
+            }
+            return nil
+        }
+
+        private static func headingDelta(_ current: CLLocationDirection, _ target: CLLocationDirection) -> CLLocationDirection {
+            let raw = abs(current - target).truncatingRemainder(dividingBy: 360)
+            return min(raw, 360 - raw)
         }
 
         func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
@@ -432,6 +495,8 @@ struct SurveyMapView: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
             reportVisible(mapView)
+            guard Date() < headingLockUntil else { return }
+            applyHeading(on: mapView, regionJustSet: true)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {

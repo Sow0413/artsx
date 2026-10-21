@@ -100,30 +100,51 @@ struct AccuracyDetailSheet: View {
 
 struct SurveyTabBar: View {
     @Binding var selection: FieldTab
+    var onRecord: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(FieldTab.allCases) { tab in
-                Button {
-                    selection = tab
-                } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: tab.symbol)
-                            .font(SurveyType(24, .semibold))
-                        Text(tab.title)
-                            .font(SurveyType(14, .bold))
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 68)
-                    .foregroundStyle(selection == tab ? SurveyColor.text : SurveyColor.muted)
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selection == tab ? .isSelected : [])
-            }
+            tabButton(.map)
+            tabButton(.drawing)
+            Color.clear
+                .frame(width: 76, height: 68)
+                .accessibilityHidden(true)
+            tabButton(.export)
+            tabButton(.seat)
         }
         .background(SurveyColor.bar)
         .overlay(alignment: .top) {
             Rectangle().fill(SurveyColor.line).frame(height: SurveyColor.stroke)
         }
+        .overlay {
+            Button(action: onRecord) {
+                Text("記録")
+                    .font(SurveyType(18, .heavy))
+                    .foregroundStyle(SurveyColor.onAccent)
+                    .frame(width: 76, height: 76)
+                    .background(SurveyColor.blue, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .offset(y: -18)
+            .accessibilityLabel("記録")
+        }
+    }
+
+    private func tabButton(_ tab: FieldTab) -> some View {
+        Button {
+            selection = tab
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: tab.symbol)
+                    .font(SurveyType(24, .semibold))
+                Text(tab.title)
+                    .font(SurveyType(14, .bold))
+            }
+            .frame(maxWidth: .infinity, minHeight: 68)
+            .foregroundStyle(selection == tab ? SurveyColor.text : SurveyColor.muted)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selection == tab ? .isSelected : [])
     }
 }
 

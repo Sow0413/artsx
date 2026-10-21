@@ -62,7 +62,7 @@ enum FieldHelp: String, CaseIterable, Identifiable {
         case .delivery:
             return "受取手が今受け取れる形だけ出します。\(CoordinateDelivery.pointCloudNote) 平面直角座標で書きます。JGD2024 の元期補正は、まだ掛けていません。絞り込みの条件はすべて同時に効きます。空欄は無視します。"
         case .points:
-            return "今の作業で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。基準点は段階2の RTK FIX のあいだだけ残せます。解が落ちて段階が下がると記録は止まり、測位は続きます。iPhone の GPS では衛星数・PDOP・補正の遅れは出ません。"
+            return "下の記録は、今の緯度・経度・楕円体高・精度・時刻を残します。場所と日付のフォルダと、出す画面の座標簿に入ります。場所は設定で直せます。測る画面の点名は、頭のアルファベットと連番です。"
         case .stakeout:
             return "追加距離を張り、現在地を No.23+5.0m 左 3.2m のように出します。座標簿で合わせてある図面は cm で出します。この点がオペの目標です。作業半径の内と外を色で出します。声は画面の上を前にし、方向が変わったときだけです。"
         }
@@ -136,6 +136,11 @@ enum FieldMenuNext {
     case extras
     case tools
     case privacy
+    case crosshair
+    case batter
+    case ar
+    case pace
+    case download
 }
 
 struct FieldMenuSheet: View {
@@ -148,8 +153,50 @@ struct FieldMenuSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
+                    placeEditor
+                    WorkBar(field: field)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let position = field.reading.position, position.isPlottable {
+                        Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
+                            .font(SurveyType(16, .heavy))
+                            .foregroundStyle(SurveyColor.text)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 12)
+                    }
+                    menuButton(field.statureNotice ?? "身長") { handoff(.stature) }
+                    menuButton("記録一覧") {
+                        field.tab = .measure
+                        dismiss()
+                    }
+                    menuButton("水準器") { handoff(.crosshair) }
+                    menuButton("丁張") { handoff(.batter) }
+                    menuButton("AR位置出し") { handoff(.ar) }
+                    menuButton("歩測") { handoff(.pace) }
+                    menuButton(field.isDownloading ? "保存を中止" : "この範囲を保存") {
+                        if field.isDownloading {
+                            field.cancelDownload()
+                        } else {
+                            handoff(.download)
+                        }
+                    }
+                    if field.extras.disaster {
+                        menuButton("災害") {
+                            field.showsDisaster = true
+                            dismiss()
+                        }
+                    }
+                    if field.extras.stats || field.extras.accidentReport {
+                        menuButton(field.extras.stats ? "統計" : "事故報告") {
+                            field.showsIncidentStats = true
+                            dismiss()
+                        }
+                    }
+                    if field.extras.pushToTalk {
+                        menuButton(field.radio.spaceAudio ? "定位オン" : "定位") {
+                            field.radio.setSpaceAudio(!field.radio.spaceAudio)
+                        }
+                    }
                     menuButton(appearance.label) { appearance.cycle() }
-                    menuButton("身長") { handoff(.stature) }
                     menuButton("追加機能") { handoff(.extras) }
                     menuButton("ボタンの並び") { handoff(.tools) }
                     menuButton("位置の共有") { handoff(.privacy) }
@@ -186,11 +233,35 @@ struct FieldMenuSheet: View {
         .modifier(SurveyScheme())
     }
 
+    private var placeEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("場所")
+                .font(SurveyType(15, .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            TextField("未設定なら座標", text: Binding(
+                get: { field.recordPlace },
+                set: { field.setRecordPlace($0) }
+            ))
+            .font(SurveyType(18, .heavy))
+            .padding(10)
+            .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Button("現在地") { field.useNearbyPlaceName() }
+                .font(SurveyType(16, .heavy))
+                .foregroundStyle(SurveyColor.text)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .padding(.horizontal, 12)
+                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .buttonStyle(.plain)
+        }
+    }
+
     private func menuButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(SurveyType(18, .heavy))
                 .foregroundStyle(SurveyColor.text)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 12)
                 .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
