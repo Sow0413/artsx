@@ -7,6 +7,7 @@ struct MapTabView: View {
     var body: some View {
         ZStack {
             SurveyMapView(field: field)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             VStack(spacing: 0) {
                 WorkBar(field: field)
                 if let guide = field.stakeoutGuide {

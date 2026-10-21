@@ -10,7 +10,7 @@ struct SurveyMapView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView(frame: .zero)
+        let map = SurveyMapCanvas(frame: .zero)
         map.delegate = context.coordinator
         map.showsUserLocation = false
         map.pointOfInterestFilter = .excludingAll
@@ -19,9 +19,19 @@ struct SurveyMapView: UIViewRepresentable {
         map.isScrollEnabled = true
         map.isRotateEnabled = true
         map.showsTraffic = false
+        let configuration = MKStandardMapConfiguration(elevationStyle: .flat, emphasisStyle: .muted)
+        configuration.pointOfInterestFilter = .excludingAll
+        map.preferredConfiguration = configuration
         map.backgroundColor = SurveyUIColor.mapBackdrop
+        map.onBounds = { [weak coordinator = context.coordinator] map in
+            coordinator?.noteBounds(of: map)
+        }
         context.coordinator.attach(field: field, map: map)
         return map
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: MKMapView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
@@ -91,6 +101,8 @@ struct SurveyMapView: UIViewRepresentable {
         private var heatKey = ""
         private var mapPick = false
         private var onMapTap: (Double, Double) -> Void = { _, _ in }
+        private var pendingViewport: MapViewport?
+        private var pendingFollow = true
 
         func attach(field: FieldModel, map: MKMapView) {
             store = field.tiles
@@ -381,11 +393,22 @@ struct SurveyMapView: UIViewRepresentable {
             }
             syncAnnotation(on: map, reading: reading)
             syncCircle(on: map, reading: reading, tone: tone)
+            pendingViewport = viewport
+            pendingFollow = followUser
             if followUser, !wasFollowing {
                 appliedViewport = nil
             }
             wasFollowing = followUser
-            guard followUser, appliedViewport != viewport else { return }
+            applyRegionIfNeeded(on: map)
+        }
+
+        func noteBounds(of map: MKMapView) {
+            applyRegionIfNeeded(on: map)
+        }
+
+        private func applyRegionIfNeeded(on map: MKMapView) {
+            guard map.bounds.width > 1, map.bounds.height > 1 else { return }
+            guard pendingFollow, let viewport = pendingViewport, appliedViewport != viewport else { return }
             appliedViewport = viewport
             let region = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: viewport.centerLatitude, longitude: viewport.centerLongitude),
@@ -396,6 +419,9 @@ struct SurveyMapView: UIViewRepresentable {
             applyingProgrammaticRegion = false
             didSetInitialRegion = true
             reportVisible(map)
+            if let tileOverlay, let renderer = map.renderer(for: tileOverlay) as? MKTileOverlayRenderer {
+                renderer.reloadData()
+            }
         }
 
         func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
@@ -546,7 +572,8 @@ struct SurveyMapView: UIViewRepresentable {
             }
             let overlay = GSITileOverlay(store: store)
             tileOverlay = overlay
-            map.addOverlay(overlay, level: .aboveLabels)
+            // ラベルより上に置くと、地物を消したあとにタイルが合成されず画面が黒のままになる。
+            map.addOverlay(overlay, level: .aboveRoads)
             if let circle {
                 map.removeOverlay(circle)
                 map.addOverlay(circle, level: .aboveLabels)
@@ -856,5 +883,19 @@ final class UserDotAnnotation: NSObject, MKAnnotation {
     init(coordinate: CLLocationCoordinate2D) {
         self.coordinate = coordinate
         super.init()
+    }
+}
+
+/// 最初の update は bounds が 0 のことがある。サイズが付いてから領域を置く。
+final class SurveyMapCanvas: MKMapView {
+    var onBounds: ((MKMapView) -> Void)?
+    private var lastSize: CGSize = .zero
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let size = bounds.size
+        guard size.width > 1, size.height > 1, size != lastSize else { return }
+        lastSize = size
+        onBounds?(self)
     }
 }
