@@ -24,6 +24,10 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
     public var projectID: String?
     /// 水準器の簡易ターゲットは level。測量の一覧には出さない。
     public var origin: String?
+    /// iPhone の平均。RTK ではない。
+    public var phoneAverage: PhoneAverageStamp?
+    /// この点に引いた iPhone の既知点合わせ。
+    public var knownShift: KnownShiftStamp?
 
     public init(
         id: UUID = UUID(),
@@ -38,7 +42,9 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         fixDurationSeconds: TimeInterval? = nil,
         condition: ObservationCondition? = nil,
         projectID: String? = nil,
-        origin: String? = nil
+        origin: String? = nil,
+        phoneAverage: PhoneAverageStamp? = nil,
+        knownShift: KnownShiftStamp? = nil
     ) {
         self.id = id
         self.name = name
@@ -53,10 +59,12 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         self.condition = condition
         self.projectID = projectID
         self.origin = origin
+        self.phoneAverage = phoneAverage
+        self.knownShift = knownShift
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, workID, captured, adopted, corrected, appliedCorrectionID, closureAdjustment, needsResurvey, fixDurationSeconds, condition, projectID, origin
+        case id, name, workID, captured, adopted, corrected, appliedCorrectionID, closureAdjustment, needsResurvey, fixDurationSeconds, condition, projectID, origin, phoneAverage, knownShift
     }
 
     public init(from decoder: Decoder) throws {
@@ -74,6 +82,8 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         condition = try container.decodeIfPresent(ObservationCondition.self, forKey: .condition)
         projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
         origin = try container.decodeIfPresent(String.self, forKey: .origin)
+        phoneAverage = try container.decodeIfPresent(PhoneAverageStamp.self, forKey: .phoneAverage)
+        knownShift = try container.decodeIfPresent(KnownShiftStamp.self, forKey: .knownShift)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -91,6 +101,8 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(condition, forKey: .condition)
         try container.encodeIfPresent(projectID, forKey: .projectID)
         try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(phoneAverage, forKey: .phoneAverage)
+        try container.encodeIfPresent(knownShift, forKey: .knownShift)
     }
 
     public var horizontalAccuracyAtCapture: Double { captured.horizontalAccuracyMeters }

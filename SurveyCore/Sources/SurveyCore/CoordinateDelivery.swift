@@ -189,7 +189,7 @@ public enum CoordinateDelivery {
     }
 
     public static func csv(_ entries: [CoordinateBookEntry], zone: Int) -> String {
-        var lines = ["点名,種類,出典,解,段階,北,東,緯度,経度,標高,水平精度m,高さ精度m,PDOP,衛星,補正遅れ秒,補正元,観測時刻,秒数,エポック,機器,楕円体高,ジオイドm,ジオイド"]
+        var lines = ["点名,種類,出典,解,段階,北,東,緯度,経度,標高,水平精度m,高さ精度m,PDOP,衛星,補正遅れ秒,補正元,観測時刻,秒数,エポック,機器,楕円体高,ジオイドm,ジオイド,平均点数,ばらつきm,平均秒,既知点,dE,dN,dH"]
         for entry in entries {
             lines.append(csvRow(entry, zone: zone))
         }
@@ -303,6 +303,12 @@ public enum CoordinateDelivery {
             if let condition = condition(from: entry) {
                 lines.append(contentsOf: condition.reportLines)
             }
+            if let average = entry.phoneAverage {
+                lines.append(average.line)
+            }
+            if let shift = entry.knownShift {
+                lines.append(shift.line)
+            }
         }
         return lines.joined(separator: "\n")
     }
@@ -358,6 +364,13 @@ public enum CoordinateDelivery {
         let satellites = entry.satelliteNote ?? entry.satelliteCount.map { "\($0)" } ?? ""
         let age = entry.correctionAgeSeconds.map { String(format: "%.1f", $0) } ?? ""
         let epochs = entry.epochCount.map { "\($0)" } ?? ""
+        let averageCount = entry.phoneAverage.map { "\($0.sampleCount)" } ?? ""
+        let averageSpread = entry.phoneAverage.map { String(format: "%.3f", $0.horizontalStdMeters) } ?? ""
+        let averageSeconds = entry.phoneAverage.map { String(format: "%.0f", $0.durationSeconds) } ?? ""
+        let shiftName = entry.knownShift?.sourceName ?? ""
+        let shiftEast = entry.knownShift.map { String(format: "%.3f", $0.eastMeters) } ?? ""
+        let shiftNorth = entry.knownShift.map { String(format: "%.3f", $0.northMeters) } ?? ""
+        let shiftHeight = entry.knownShift?.heightMeters.map { String(format: "%.3f", $0) } ?? ""
         let columns = [
             entry.name,
             entry.kind ?? "",
@@ -381,7 +394,14 @@ public enum CoordinateDelivery {
             entry.receiverLabel ?? "",
             ellipsoidal,
             geoid,
-            entry.geoidModel ?? ""
+            entry.geoidModel ?? "",
+            averageCount,
+            averageSpread,
+            averageSeconds,
+            shiftName,
+            shiftEast,
+            shiftNorth,
+            shiftHeight
         ]
         return columns.joined(separator: ",")
     }

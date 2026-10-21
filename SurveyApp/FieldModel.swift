@@ -15,6 +15,7 @@ struct RecordBanner: Equatable {
 enum FixOverrideAction {
     case record
     case capture
+    case average
 }
 
 struct ExportNotice: Equatable {
@@ -126,6 +127,12 @@ final class FieldModel: ObservableObject {
     @Published var showsBatter = false
     @Published var showsPace = false
     @Published var showsARStakeout = false
+    @Published var showsPhoneAverage = false
+    @Published var showsKnownShift = false
+    @Published var averageSpan = PhoneAverageSpan(rawValue: UserDefaults.standard.string(forKey: "survey.averageSpan") ?? "") ?? .halfMinute
+    @Published private(set) var phoneRun: PhoneAverageRun?
+    @Published private(set) var knownShift: KnownPointShift?
+    @Published private(set) var phoneClock = Date()
     @Published var pace = PaceProfile.load()
     @Published var stakeoutUnit = StakeoutPacePreference.load()
     @Published var stakeoutSpeechStyle = StakeoutSpeechPreference.load()
@@ -222,6 +229,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var statMessage: String?
     private let statsRelay = IncidentStatsRelayStub(reachable: false)
     private var incidentTimer: Timer?
+    private var phoneAccuracyTimer: Timer?
+    private var pendingAverage: (GeodeticPosition, PhoneAverageStamp)?
     private var restoredIncidentProject: String?
     let controlPoints: [ControlPoint]
     let journal: FieldJournal
@@ -360,6 +369,7 @@ final class FieldModel: ObservableObject {
         drawing.onProjectCommitted = { [weak self] in
             self?.rememberSession()
             self?.adoptProjectPlace()
+            self?.loadKnownShift()
         }
         $tab.dropFirst().sink { [weak self] _ in
             self?.rememberSession()
@@ -375,6 +385,7 @@ final class FieldModel: ObservableObject {
         if let name = saved.projectName, let project = drawing.projects.first(where: { $0.name == name }) {
             drawing.select(project)
         }
+        loadKnownShift()
         gnss.onState = { [weak self] state in
             self?.gnssState = state
         }
@@ -1236,9 +1247,11 @@ final class FieldModel: ObservableObject {
         }
         let work = workCatalog.selected
         let correction = correctionStore.active
-        let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let control = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let prepared = preparedPhonePoint(position)
+        let stored = prepared.position
         let condition = ObservationCondition.snapshot(
-            position: position,
+            position: stored,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
             epochCount: epochWatch.count,
@@ -1248,16 +1261,19 @@ final class FieldModel: ObservableObject {
         let observation = FieldObservation(
             name: name,
             workID: work.id,
-            captured: position,
-            corrected: shifted,
-            appliedCorrectionID: shifted == nil ? nil : correction?.id,
+            captured: stored,
+            corrected: control,
+            appliedCorrectionID: control == nil ? nil : correction?.id,
             condition: condition,
-            projectID: drawing.project?.id
+            projectID: drawing.project?.id,
+            knownShift: prepared.stamp
         )
         store(observation)
         noteRetakeSaved(name)
-        remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
-        captureMessage = shifted == nil
+        var entry = CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work))
+        entry.knownShift = prepared.stamp
+        remember(entry)
+        captureMessage = control == nil
             ? "\(observation.name)を残しました。下見の座標は捨てません。"
             : "\(observation.name)を残しました。補正を引いた座標も残し、取得時の位置は捨てません。"
         return true
@@ -1864,6 +1880,8 @@ final class FieldModel: ObservableObject {
         setSightForeground(false)
         pauseGNSS()
         source.stop()
+        phoneAccuracyTimer?.invalidate()
+        phoneAccuracyTimer = nil
     }
 
     private func syncSightSensors() {
@@ -1956,54 +1974,63 @@ final class FieldModel: ObservableObject {
             showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
             return false
         }
+        return writeRecord(position, average: nil)
+    }
+
+    /// 記録の本体。平均もここを通す。既知点合わせは iPhone の点だけに引く。
+    @discardableResult
+    func writeRecord(_ position: GeodeticPosition, average: PhoneAverageStamp?) -> Bool {
         let name = retakeName ?? nextPointName ?? "P\(observationCount + 1)"
         let work = workCatalog.selected
         let correction = correctionStore.active
-        let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let control = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let prepared = preparedPhonePoint(position)
+        let stored = prepared.position
         let condition = ObservationCondition.snapshot(
-            position: position,
-            stage: stageTransition.stage,
-            durationSeconds: epochWatch.duration(at: position.timestamp),
-            epochCount: epochWatch.count,
+            position: stored,
+            stage: average == nil ? stageTransition.stage : .iphone,
+            durationSeconds: average?.durationSeconds ?? epochWatch.duration(at: stored.timestamp),
+            epochCount: average?.sampleCount ?? epochWatch.count,
             stature: stature,
             sight: liveSight
         )
         let observation = FieldObservation(
             name: name,
             workID: work.id,
-            captured: position,
-            corrected: shifted,
-            appliedCorrectionID: shifted == nil ? nil : correction?.id,
+            captured: stored,
+            corrected: control,
+            appliedCorrectionID: control == nil ? nil : correction?.id,
             condition: condition,
-            projectID: drawing.project?.id
+            projectID: drawing.project?.id,
+            phoneAverage: average,
+            knownShift: prepared.stamp
         )
         store(observation)
         noteRetakeSaved(name)
-        remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
+        var entry = CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work))
+        entry.phoneAverage = average
+        entry.knownShift = prepared.stamp
+        remember(entry)
         let point = FieldPointFile(
             name: name,
-            latitude: position.latitudeDegrees,
-            longitude: position.longitudeDegrees,
-            ellipsoidalHeightMeters: position.ellipsoidalHeightMeters,
-            orthometricHeightMeters: SurveyHeight.resolve(
-                ellipsoidalMeters: condition.surveyEllipsoidalMeters ?? position.ellipsoidalHeightMeters,
-                latitudeDegrees: position.latitudeDegrees,
-                longitudeDegrees: position.longitudeDegrees,
-                meanSeaLevelMeters: position.meanSeaLevelMeters,
-                deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
-            ).orthometricMeters,
+            latitude: stored.latitudeDegrees,
+            longitude: stored.longitudeDegrees,
+            ellipsoidalHeightMeters: stored.ellipsoidalHeightMeters,
+            orthometricHeightMeters: condition.orthometricHeightMeters,
             geoidModel: condition.geoidModel,
-            horizontalAccuracyMeters: position.hasValidHorizontalAccuracy ? position.horizontalAccuracyMeters : nil,
-            verticalAccuracyMeters: position.verticalAccuracyMeters,
-            timestamp: position.timestamp
+            horizontalAccuracyMeters: stored.hasValidHorizontalAccuracy ? stored.horizontalAccuracyMeters : nil,
+            verticalAccuracyMeters: stored.verticalAccuracyMeters,
+            timestamp: stored.timestamp,
+            phoneAverage: average,
+            knownShift: prepared.stamp
         )
         let saved = try? FieldRecordStore.write(point, root: recordsRoot, place: recordPlace)
-        reloadRecordPins(on: position.timestamp)
+        reloadRecordPins(on: stored.timestamp)
         if let saved, let pin = recordPins.first(where: { $0.fileURL.path == saved.path }) {
             showRecordBanner(RecordBanner(text: pin.caption, folderURL: pin.folderURL), success: true)
         } else {
-            let place = FieldRecordStore.placeFolder(recordPlace, latitude: position.latitudeDegrees, longitude: position.longitudeDegrees)
-            let day = FieldRecordStore.dayFolder(position.timestamp)
+            let place = FieldRecordStore.placeFolder(recordPlace, latitude: stored.latitudeDegrees, longitude: stored.longitudeDegrees)
+            let day = FieldRecordStore.dayFolder(stored.timestamp)
             let number = recordPins.count + 1
             showRecordBanner(RecordBanner(text: "記録 #\(number) ・\(place)/\(day)", folderURL: nil), success: true)
         }
@@ -3008,20 +3035,27 @@ final class FieldModel: ObservableObject {
             _ = recordHere()
         case .capture:
             _ = captureObservation()
+        case .average:
+            if let pending = pendingAverage {
+                writeRecord(pending.0, average: pending.1)
+            }
         case nil:
             break
         }
+        pendingAverage = nil
         fixOverrideArmed = false
     }
 
     func declineFixOverride() {
         asksFixOverride = false
         pendingFixAction = nil
+        pendingAverage = nil
         fixOverrideArmed = false
     }
 
     private func notePhone(_ reading: PositionReading) {
         phoneReading = reading
+        capturePhoneAverage()
         publishExternalChoice()
     }
 
@@ -3539,6 +3573,170 @@ final class FieldModel: ObservableObject {
                 deadReckon = track
                 refreshBridge()
             }
+        }
+    }
+
+    func setAverageSpan(_ span: PhoneAverageSpan) {
+        averageSpan = span
+        UserDefaults.standard.set(span.rawValue, forKey: "survey.averageSpan")
+    }
+
+    func beginPhoneAverage(_ purpose: PhoneAveragePurpose) {
+        if case .knownPoint = purpose, drawing.project == nil {
+            showRecordBanner(RecordBanner(text: "現場を選んでください", folderURL: nil), success: false)
+            return
+        }
+        pendingAverage = nil
+        phoneRun = PhoneAverageRun(startedAt: Date(), limit: averageSpan.seconds, purpose: purpose)
+        phoneClock = Date()
+        showsPhoneAverage = false
+        showsKnownShift = false
+        modeMenu = nil
+        trackPhoneClock(true)
+    }
+
+    func stopPhoneAverage() {
+        finishPhoneAverage()
+    }
+
+    func setKnownShiftEnabled(_ enabled: Bool) {
+        guard var shift = knownShift, let project = drawing.project else { return }
+        shift.enabled = enabled
+        shift.projectID = project.id
+        knownShift = shift
+        try? KnownShiftFile.save(shift, projectName: project.name, root: drawing.projectsRoot)
+        trackPhoneClock(enabled || phoneRun != nil)
+    }
+
+    func loadKnownShift() {
+        guard let project = drawing.project else {
+            knownShift = nil
+            trackPhoneClock(phoneRun != nil)
+            return
+        }
+        var loaded = KnownShiftFile.load(projectName: project.name, root: drawing.projectsRoot)
+        loaded?.projectID = project.id
+        knownShift = loaded
+        trackPhoneClock(loaded?.enabled == true || phoneRun != nil)
+    }
+
+    private func preparedPhonePoint(_ position: GeodeticPosition, at now: Date = Date()) -> (position: GeodeticPosition, stamp: KnownShiftStamp?) {
+        guard let knownShift, knownShift.projectID == drawing.project?.id,
+              let applied = knownShift.applied(to: position, at: now) else {
+            return (position, nil)
+        }
+        return (applied.position, applied.stamp)
+    }
+
+    private func capturePhoneAverage() {
+        guard var run = phoneRun, let position = phoneReading.position, position.isPlottable else { return }
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: .iphone,
+            durationSeconds: nil,
+            epochCount: nil,
+            stature: stature,
+            sight: liveSight
+        )
+        let sample = PhoneFixSample(
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            ellipsoidalHeightMeters: position.ellipsoidalHeightMeters,
+            orthometricHeightMeters: condition.orthometricHeightMeters,
+            horizontalAccuracyMeters: position.horizontalAccuracyMeters,
+            verticalAccuracyMeters: position.verticalAccuracyMeters,
+            timestamp: position.timestamp
+        )
+        run = run.adding(sample)
+        phoneRun = run
+        if run.isFinished(at: Date()) {
+            finishPhoneAverage()
+        }
+    }
+
+    private func tickPhoneAccuracy() {
+        let now = Date()
+        phoneClock = now
+        guard let run = phoneRun else {
+            if knownShift?.enabled != true { trackPhoneClock(false) }
+            return
+        }
+        if run.isFinished(at: now) {
+            finishPhoneAverage()
+        }
+    }
+
+    private func finishPhoneAverage() {
+        guard let run = phoneRun else { return }
+        phoneRun = nil
+        trackPhoneClock(knownShift?.enabled == true)
+        let ended = Date()
+        guard let result = PhoneAverage.summarize(run.samples, startedAt: run.startedAt, endedAt: ended) else {
+            showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
+            return
+        }
+        switch run.purpose {
+        case .record:
+            commitAverage(result)
+        case .knownPoint(let anchor):
+            installKnownShift(anchor, mean: result, at: ended)
+        }
+    }
+
+    private func commitAverage(_ result: PhoneAverageResult) {
+        let position = averagedPosition(result)
+        if let warning = ExternalFix.warning(workID: workCatalog.selected.id, position: position) {
+            pendingAverage = (position, result.stamp)
+            fixWarning = warning
+            pendingFixAction = .average
+            asksFixOverride = true
+            return
+        }
+        writeRecord(position, average: result.stamp)
+    }
+
+    private func averagedPosition(_ result: PhoneAverageResult) -> GeodeticPosition {
+        let template = phoneReading.position
+        return GeodeticPosition(
+            latitudeDegrees: result.latitudeDegrees,
+            longitudeDegrees: result.longitudeDegrees,
+            ellipsoidalHeightMeters: result.ellipsoidalHeightMeters,
+            horizontalAccuracyMeters: result.meanHorizontalAccuracyMeters,
+            verticalAccuracyMeters: template?.verticalAccuracyMeters,
+            timestamp: Date(),
+            stage: .iphone,
+            fixQuality: .standalone,
+            receiver: .iphoneGPS,
+            satelliteCount: template?.satelliteCount,
+            pdop: template?.pdop
+        )
+    }
+
+    private func installKnownShift(_ anchor: KnownAnchor, mean: PhoneAverageResult, at date: Date) {
+        guard let project = drawing.project else {
+            showRecordBanner(RecordBanner(text: "現場を選んでください", folderURL: nil), success: false)
+            return
+        }
+        guard var shift = KnownPointShift.calibrate(projectID: project.id, anchor: anchor, mean: mean, at: date) else {
+            showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
+            return
+        }
+        shift.projectID = project.id
+        knownShift = shift
+        try? KnownShiftFile.save(shift, projectName: project.name, root: drawing.projectsRoot)
+        trackPhoneClock(true)
+        showRecordBanner(RecordBanner(text: "\(shift.sourceName)に合わせました \(shift.deltaText)", folderURL: nil), success: true)
+    }
+
+    private func trackPhoneClock(_ needed: Bool) {
+        if !needed {
+            phoneAccuracyTimer?.invalidate()
+            phoneAccuracyTimer = nil
+            return
+        }
+        guard phoneAccuracyTimer == nil else { return }
+        phoneAccuracyTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.tickPhoneAccuracy()
         }
     }
 

@@ -115,6 +115,20 @@ struct MeasureLogView: View {
             Text(accuracyLine(observation))
                 .font(SurveyType(14, .semibold))
                 .foregroundStyle(SurveyColor.muted)
+            if let average = observation.phoneAverage {
+                Text("平均 \(average.sampleCount)点  ばらつき \(PhoneAverage.spread(average.horizontalStdMeters))  \(Int(average.durationSeconds.rounded()))秒")
+                    .font(SurveyType(14, .heavy))
+                Text(average.label)
+                    .font(SurveyType(13, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+            }
+            if let shift = observation.knownShift {
+                Text("既知点 \(shift.sourceName)  \(shift.deltaText)")
+                    .font(SurveyType(14, .heavy))
+                Text(shift.label)
+                    .font(SurveyType(13, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+            }
             if let seconds = observation.fixDurationSeconds {
                 let satellites = observation.captured.satelliteCount.map { "衛星 \($0)" } ?? "衛星 —"
                 Text("基準点　FIX \(Int(seconds.rounded()))秒、\(satellites)")

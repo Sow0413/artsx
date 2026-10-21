@@ -271,6 +271,8 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
     public var orthometricHeightMeters: Double?
     public var geoidUndulationMeters: Double?
     public var geoidModel: String?
+    public var phoneAverage: PhoneAverageStamp?
+    public var knownShift: KnownShiftStamp?
 
     public var id: String { name }
 
@@ -301,7 +303,9 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         satelliteNote: String? = nil,
         orthometricHeightMeters: Double? = nil,
         geoidUndulationMeters: Double? = nil,
-        geoidModel: String? = nil
+        geoidModel: String? = nil,
+        phoneAverage: PhoneAverageStamp? = nil,
+        knownShift: KnownShiftStamp? = nil
     ) {
         self.name = name
         self.latitudeDegrees = latitudeDegrees
@@ -325,6 +329,8 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         self.orthometricHeightMeters = orthometricHeightMeters
         self.geoidUndulationMeters = geoidUndulationMeters
         self.geoidModel = geoidModel
+        self.phoneAverage = phoneAverage
+        self.knownShift = knownShift
     }
 }
 

@@ -71,6 +71,11 @@ struct RootView: View {
             if let correction = field.correctionStore.active {
                 CorrectionStatusBar(correction: correction)
             }
+            if field.phoneRun != nil || field.knownShift?.enabled == true {
+                PhoneAccuracyBar(field: field)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+            }
             if let progress = field.benchmarkProgressLabel {
                 Text(progress)
                     .font(SurveyType(16, .heavy))
@@ -206,6 +211,12 @@ struct RootView: View {
         }
         .sheet(isPresented: $field.showsARStakeout) {
             ARStakeoutSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsPhoneAverage) {
+            PhoneAverageSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsKnownShift) {
+            KnownShiftSheet(field: field)
         }
         .sheet(isPresented: Binding(
             get: { field.selectedControlPoint != nil },

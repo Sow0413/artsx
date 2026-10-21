@@ -13,6 +13,10 @@ public struct FieldPointFile: Codable, Equatable, Sendable {
     public var horizontalAccuracyMeters: Double?
     public var verticalAccuracyMeters: Double?
     public var timestamp: Date
+    /// iPhone の平均。RTK ではない。
+    public var phoneAverage: PhoneAverageStamp?
+    /// iPhone の既知点合わせ。受信機の点には付けない。
+    public var knownShift: KnownShiftStamp?
 
     public init(
         name: String,
@@ -23,7 +27,9 @@ public struct FieldPointFile: Codable, Equatable, Sendable {
         geoidModel: String? = nil,
         horizontalAccuracyMeters: Double?,
         verticalAccuracyMeters: Double?,
-        timestamp: Date
+        timestamp: Date,
+        phoneAverage: PhoneAverageStamp? = nil,
+        knownShift: KnownShiftStamp? = nil
     ) {
         self.name = name
         self.latitude = latitude
@@ -34,6 +40,8 @@ public struct FieldPointFile: Codable, Equatable, Sendable {
         self.horizontalAccuracyMeters = horizontalAccuracyMeters
         self.verticalAccuracyMeters = verticalAccuracyMeters
         self.timestamp = timestamp
+        self.phoneAverage = phoneAverage
+        self.knownShift = knownShift
     }
 }
 

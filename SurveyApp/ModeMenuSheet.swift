@@ -373,6 +373,14 @@ struct ModeMenuSheet: View {
     @ViewBuilder
     private var surveyRows: some View {
         WorkBar(field: field, ids: FieldFlow.surveyWorkIDs)
+        flowRow("平均", icon: "plus.forwardslash.minus") {
+            field.showsPhoneAverage = true
+            field.modeMenu = nil
+        }
+        flowRow("既知点合わせ", icon: "scope") {
+            field.showsKnownShift = true
+            field.modeMenu = nil
+        }
         flowRow("水準器", icon: "level") {
             handoff = .crosshair
             field.modeMenu = nil
