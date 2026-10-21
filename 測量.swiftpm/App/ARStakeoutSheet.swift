@@ -225,7 +225,7 @@ struct ARStakeoutSheet: View {
                 Text(handoffNote)
                     .font(SurveyType(14, .semibold))
             }
-            Text("RTK FIXのあいだは、向きを保って位置を足し続けます。切替の振動と音、実機のARは未確認です。")
+            Text("RTK FIXのあいだは、向きを保って位置を足し続けます。")
                 .font(SurveyType(13, .semibold))
                 .foregroundStyle(SurveyColor.muted)
         }
