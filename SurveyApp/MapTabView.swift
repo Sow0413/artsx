@@ -128,9 +128,14 @@ struct MapTabView: View {
             let terrain = field.gsiElevationMeters.flatMap {
                 GSIElevationText.line(demMeters: $0, gnssMeters: survey.orthometricMeters)
             }
+            let receiver = Self.receiverHeightLine(position)
             VStack(alignment: .leading, spacing: 0) {
                 Text(height)
                     .foregroundStyle(Color.black)
+                if let receiver {
+                    Text(receiver)
+                        .foregroundStyle(Color.black)
+                }
                 if let terrain {
                     terrainText(terrain)
                 }
@@ -144,7 +149,7 @@ struct MapTabView: View {
             .padding(.vertical, 4)
             .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(Self.coordinateLabel(height: height, terrain: terrain, position: position))
+            .accessibilityLabel(Self.coordinateLabel(height: height, receiver: receiver, terrain: terrain, position: position))
             .allowsHitTesting(false)
         }
     }
@@ -156,10 +161,23 @@ struct MapTabView: View {
         return prefix + Text(difference).foregroundColor(color)
     }
 
-    private static func coordinateLabel(height: String, terrain: GSIElevationLine?, position: GeodeticPosition) -> String {
-        let place = "\(height)、緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))"
-        guard let terrain else { return place }
-        return "\(height)、\(terrain.spoken)、緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))"
+    private static func receiverHeightLine(_ position: GeodeticPosition) -> String? {
+        guard position.receiver == .rtk, let orthometric = position.meanSeaLevelMeters else { return nil }
+        return NMEA.receiverHeightLine(
+            orthometricMeters: orthometric,
+            ellipsoidalMeters: position.ellipsoidalHeightMeters,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees
+        )
+    }
+
+    private static func coordinateLabel(height: String, receiver: String?, terrain: GSIElevationLine?, position: GeodeticPosition) -> String {
+        var parts = [height]
+        if let receiver { parts.append(receiver) }
+        if let terrain { parts.append(terrain.spoken) }
+        parts.append("緯度 \(CoordinateText.latitude(position.latitudeDegrees))")
+        parts.append("経度 \(CoordinateText.longitude(position.longitudeDegrees))")
+        return parts.joined(separator: "、")
     }
 
     /// 白地のチップの上で橙のまま残す。屋外表示の黒にはしない。

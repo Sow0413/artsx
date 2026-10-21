@@ -52,6 +52,14 @@ struct RootView: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
             }
+            if let notice = field.gnssNotice {
+                Text(notice)
+                    .font(SurveyType(14, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 4)
+            }
             HStack(spacing: 8) {
                 AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: true)
                     .frame(maxWidth: .infinity)
@@ -135,6 +143,10 @@ struct RootView: View {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
+        }
+        .confirmationDialog(field.fixWarning, isPresented: $field.asksFixOverride, titleVisibility: .visible) {
+            Button("記録する") { field.acceptFixOverride() }
+            Button("やめる", role: .cancel) { field.declineFixOverride() }
         }
         .onAppear {
             field.start()

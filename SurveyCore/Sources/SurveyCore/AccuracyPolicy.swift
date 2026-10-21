@@ -75,6 +75,20 @@ public enum AccuracyFormat {
         }
         return "±\(centimeters)cm"
     }
+
+    /// 常時の1行。外部受信機は補正の古さと衛星数も付ける。
+    public static func statusLine(for position: GeodeticPosition) -> String {
+        var parts = [position.solutionLabel, plusMinus(meters: position.horizontalAccuracyMeters)]
+        if position.receiver != .iphoneGPS {
+            if let age = position.correctionAgeSeconds, age.isFinite, age >= 0 {
+                parts.append("補正\(max(0, Int(age.rounded())))秒")
+            }
+            if let count = position.satelliteCount, count >= 0 {
+                parts.append("衛星\(count)")
+            }
+        }
+        return parts.joined(separator: " ")
+    }
 }
 
 public enum AccuracyPolicy {
@@ -136,7 +150,7 @@ public enum AccuracyPolicy {
                 guidance = [stageNotice, guidance].filter { !$0.isEmpty }.joined(separator: " ")
             }
             let text = "\(position.solutionLabel)　\(detail(for: position))"
-            let compactText = "\(position.solutionLabel) \(AccuracyFormat.plusMinus(meters: position.horizontalAccuracyMeters))"
+            let compactText = AccuracyFormat.statusLine(for: position)
             let stage = operatingStage ?? position.stage
             let accessibility = [
                 work.shortTitle,

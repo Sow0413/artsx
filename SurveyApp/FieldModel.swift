@@ -12,6 +12,11 @@ struct RecordBanner: Equatable {
     var folderURL: URL?
 }
 
+enum FixOverrideAction {
+    case record
+    case capture
+}
+
 struct ExportNotice: Equatable {
     var text: String
     var fileURL: URL?
@@ -204,7 +209,12 @@ final class FieldModel: ObservableObject {
     @Published var extras: ExtraSwitches
     @Published var showsExtras = false
     @Published private(set) var gnssState: GNSSLinkState = .idle
+    @Published private(set) var gnssNotice: String?
     @Published private(set) var gnssChoices: [GNSSChoice] = []
+    @Published private(set) var receiverChoices: [GNSSChoice] = []
+    @Published private(set) var receiverStatus = "未接続"
+    @Published var asksFixOverride = false
+    @Published var fixWarning = "FIXではありません。このまま記録しますか。"
     @Published private(set) var observationCount = 0
     @Published private(set) var incidentStatRows: [IncidentStatRow] = []
     @Published private(set) var sealedIncidents: [SealedIncidentRow] = []
@@ -222,6 +232,15 @@ final class FieldModel: ObservableObject {
     private let source: any PositionSource
     private var camera: MapCameraFollow
     private var readTask: Task<Void, Never>?
+    private let external = ExternalGNSS()
+    private var phoneReading = PositionReading.waiting
+    private var radioReading: PositionReading?
+    private var radioAt: Date?
+    private var correctionAt: Date?
+    private var usingRadio = false
+    private var gnssNoticeToken = UUID()
+    private var pendingFixAction: FixOverrideAction?
+    private var fixOverrideArmed = false
     private var downloadTask: Task<Void, Never>?
     private var benchmarkTask: Task<Void, Never>?
     private var visibleBounds: GeoBounds?
@@ -370,6 +389,7 @@ final class FieldModel: ObservableObject {
         paceSession.onSteps = { [weak self] slot, count in
             self?.ingestSteps(slot, count)
         }
+        external.attach(self)
     }
 
     func cancelFall() {
@@ -1201,6 +1221,7 @@ final class FieldModel: ObservableObject {
 
     @discardableResult
     func captureObservation() -> Bool {
+        if blockedByFix(.capture) { return false }
         guard StageGate.allowsRecording(workID: workCatalog.selected.id, stage: stageTransition.stage) else {
             captureMessage = Self.stageDroppedRecording
             return false
@@ -1807,15 +1828,19 @@ final class FieldModel: ObservableObject {
         incidentTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.crew.ageFall(now: Date())
             self?.closeIncidents(now: Date())
+            self?.publishExternalChoice()
         }
         source.start()
         resumeGNSS()
+        if NTRIPSettings.load().enabled {
+            external.start()
+        }
         if readTask == nil {
             let readings = source.readings
             readTask = Task { [weak self] in
                 for await reading in readings {
                     await MainActor.run {
-                        self?.apply(reading)
+                        self?.notePhone(reading)
                     }
                 }
             }
@@ -1926,6 +1951,7 @@ final class FieldModel: ObservableObject {
     /// 今の位置を1点残す。座標簿と Documents/records/<場所>/<日付>/ の両方へ書く。
     @discardableResult
     func recordHere() -> Bool {
+        if blockedByFix(.record) { return false }
         guard let position = reading.position, position.isPlottable else {
             showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
             return false
@@ -2899,6 +2925,147 @@ final class FieldModel: ObservableObject {
 
     func chooseGNSS(_ id: String) {
         gnss.choose(id)
+    }
+
+    func applyExternalReceiver() {
+        if NTRIPSettings.load().enabled {
+            external.start()
+            external.applySettings()
+        } else {
+            external.stop()
+            receiverStatus = "未接続"
+        }
+    }
+
+    func scanReceivers() {
+        external.scan()
+    }
+
+    func connectReceiver(_ id: String) {
+        external.connect(id)
+    }
+
+    func noteReceiverChoice(_ choice: GNSSChoice) {
+        if !receiverChoices.contains(where: { $0.id == choice.id }) {
+            receiverChoices.append(choice)
+        }
+    }
+
+    func noteReceiverLink(_ text: String) {
+        receiverStatus = text
+    }
+
+    func noteReceiver(_ position: GeodeticPosition) {
+        radioReading = PositionReading(position: position, availability: .available)
+        radioAt = Date()
+        let age = position.correctionAgeSeconds.map { "補正\(Int($0.rounded()))秒" } ?? "補正 —"
+        let sats = position.satelliteCount.map { "衛星\($0)" } ?? "衛星 —"
+        receiverStatus = "\(position.solutionLabel) \(age) \(sats)"
+        publishExternalChoice()
+    }
+
+    func noteCorrectionData() {
+        correctionAt = Date()
+        publishExternalChoice()
+    }
+
+    func receiverLost() {
+        radioReading = nil
+        radioAt = nil
+        receiverStatus = "受信機が切れました"
+        publishExternalChoice()
+    }
+
+    func correctionsLost() {
+        correctionAt = nil
+        publishExternalChoice()
+    }
+
+    func upstreamGGA(at date: Date = Date()) -> String? {
+        let position = radioReading?.position ?? phoneReading.position ?? reading.position
+        guard let position, position.isPlottable else { return nil }
+        return NMEA.gga(
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            quality: 1,
+            satellites: position.satelliteCount ?? 8,
+            hdop: position.pdop ?? 1,
+            orthometricMeters: position.meanSeaLevelMeters,
+            geoidSeparationMeters: nil,
+            ageSeconds: nil,
+            station: "",
+            at: date
+        )
+    }
+
+    func acceptFixOverride() {
+        let action = pendingFixAction
+        pendingFixAction = nil
+        asksFixOverride = false
+        fixOverrideArmed = true
+        switch action {
+        case .record:
+            _ = recordHere()
+        case .capture:
+            _ = captureObservation()
+        case nil:
+            break
+        }
+        fixOverrideArmed = false
+    }
+
+    func declineFixOverride() {
+        asksFixOverride = false
+        pendingFixAction = nil
+        fixOverrideArmed = false
+    }
+
+    private func notePhone(_ reading: PositionReading) {
+        phoneReading = reading
+        publishExternalChoice()
+    }
+
+    private func publishExternalChoice(now: Date = Date()) {
+        let choice = ExternalPosition.choose(
+            iphone: phoneReading,
+            receiver: radioReading,
+            receiverAt: radioAt,
+            correctionAt: correctionAt,
+            now: now,
+            wasUsingReceiver: usingRadio
+        )
+        if let drop = choice.drop {
+            switch drop {
+            case .receiver:
+                showGNSSNotice("受信機が切れました。iPhoneの測位に戻しました。")
+            case .corrections:
+                showGNSSNotice("補正が切れました。iPhoneの測位に戻しました。")
+            }
+        }
+        usingRadio = choice.usingReceiver
+        if choice.reading == reading, usingRadio == choice.usingReceiver, choice.drop == nil {
+            return
+        }
+        apply(choice.reading)
+    }
+
+    private func showGNSSNotice(_ text: String) {
+        let token = UUID()
+        gnssNoticeToken = token
+        gnssNotice = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.gnssNoticeToken == token else { return }
+            self.gnssNotice = nil
+        }
+    }
+
+    private func blockedByFix(_ action: FixOverrideAction) -> Bool {
+        guard !fixOverrideArmed else { return false }
+        guard let warning = ExternalFix.warning(workID: workCatalog.selected.id, position: reading.position) else { return false }
+        fixWarning = warning
+        pendingFixAction = action
+        asksFixOverride = true
+        return true
     }
 
     private func apply(_ reading: PositionReading) {

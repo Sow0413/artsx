@@ -195,6 +195,9 @@ struct FieldMenuSheet: View {
                     functionLink("場所名", icon: "mappin") {
                         PlaceSettings(field: field)
                     }
+                    functionLink("外部受信機", icon: "antenna.radiowaves.left.and.right") {
+                        ExternalReceiverSettings(field: field)
+                    }
                     functionRow("追加機能", icon: "switch.2") { handoff(.extras) }
                     functionRow("ボタンの並び", icon: "square.grid.2x2") { handoff(.tools) }
                     functionRow("位置の共有", icon: "location") { handoff(.privacy) }
@@ -321,6 +324,18 @@ private struct DisplaySettings: View {
                         .font(SurveyType(18, .heavy, mono: true))
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     ForEach(height.detailLines, id: \.self) { line in
+                        Text(line)
+                            .font(SurveyType(15, .semibold))
+                            .foregroundStyle(SurveyColor.muted)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    if let orthometric = position.meanSeaLevelMeters,
+                       let line = NMEA.receiverHeightLine(
+                           orthometricMeters: orthometric,
+                           ellipsoidalMeters: position.ellipsoidalHeightMeters,
+                           latitudeDegrees: position.latitudeDegrees,
+                           longitudeDegrees: position.longitudeDegrees
+                       ), position.receiver == .rtk {
                         Text(line)
                             .font(SurveyType(15, .semibold))
                             .foregroundStyle(SurveyColor.muted)
