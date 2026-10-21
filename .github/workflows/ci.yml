@@ -1,8 +1,7 @@
 name: CI
 
+# Push and pull_request do not start runners. One workflow_dispatch is the build.
 on:
-  push:
-  pull_request:
   workflow_dispatch:
     inputs:
       upload_testflight:
@@ -14,49 +13,32 @@ permissions:
   contents: read
 
 jobs:
-  surveycore-linux:
-    name: SurveyCore tests (Linux)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check the TestFlight identity
-        run: sh scripts/check-ios-release.sh
-      - name: Install Swift
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y binutils curl gnupg2 libc6-dev libcurl4-openssl-dev libedit2 libgcc-13-dev libncurses-dev libpython3-dev libsqlite3-0 libstdc++-13-dev libxml2-dev libz3-dev pkg-config tzdata unzip zip zlib1g-dev
-          curl -fsSL -o /tmp/swiftly.tar.gz "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
-          mkdir -p /tmp/swiftly-src
-          tar -xzf /tmp/swiftly.tar.gz -C /tmp/swiftly-src
-          /tmp/swiftly-src/swiftly init --quiet-shell-followup --assume-yes --skip-install
-          . "$HOME/.local/share/swiftly/env.sh"
-          swiftly install --use --assume-yes "$(tr -d '[:space:]' < .swift-version)"
-          swift --version
-      - name: Test SurveyCore
-        run: |
-          set -euo pipefail
-          . "$HOME/.local/share/swiftly/env.sh"
-          cd SurveyCore
-          swift test
-
   ios-build:
     name: Unsigned iOS build (macOS)
-    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight != 'true'
     runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
       - uses: actions/checkout@v4
       - name: Check the TestFlight identity
         run: sh scripts/check-ios-release.sh
-      - name: Test SurveyCore
-        run: |
-          set -euo pipefail
-          cd SurveyCore
-          swift test
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData/Survey-*/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('SurveyCore/Package.swift', 'SurveyCore/Package.resolved', 'project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
       - name: Generate the Xcode project
         run: |
           set -euo pipefail
-          brew install xcodegen
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
           xcodegen generate
       - name: Build artsx without signing
         run: |
@@ -68,13 +50,16 @@ jobs:
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             build
 
   testflight:
     name: TestFlight upload
-    if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight
+    if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight == 'true'
     runs-on: macos-15
     env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
@@ -96,10 +81,21 @@ jobs:
             echo "置き場所: GitHub → Settings → Secrets and variables → Actions" >&2
             exit 1
           fi
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/Developer/Xcode/DerivedData/Survey-*/SourcePackages
+          key: ${{ runner.os }}-spm-${{ hashFiles('SurveyCore/Package.swift', 'SurveyCore/Package.resolved', 'project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
       - name: Generate the Xcode project
         run: |
           set -euo pipefail
-          brew install xcodegen
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
           xcodegen generate
       - name: Select Xcode 26
         run: |

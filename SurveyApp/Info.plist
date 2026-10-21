@@ -51,10 +51,6 @@
 	<string>端末の傾きから、高さの補正、水準器の角度、丁張の高さの変化を出します。歩数と歩幅も見ます。おまけの転倒検知をオンにしたときは、加速度も見ます。緊急通報の代わりではありません。</string>
 	<key>NSNearbyInteractionUsageDescription</key>
 	<string>近くの端末との距離を、作業半径の警報に使います。UWB が無い端末では使いません。</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>bluetooth-central</string>
-	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
