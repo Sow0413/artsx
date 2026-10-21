@@ -63,7 +63,7 @@ struct CrosshairSheet: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if mode == .target, let badge = stageBadge, targetResult != nil {
-                            AccuracyBadgeView(badge: badge, stage: .iphone, compact: true)
+                            AccuracyBadgeView(badge: badge, compact: true)
                         }
                     }
                     .padding(20)

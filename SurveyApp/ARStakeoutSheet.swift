@@ -28,7 +28,10 @@ struct ARStakeoutSheet: View {
                 camera
                 staffCanvas(picture)
                 VStack(spacing: 8) {
-                    AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                    AccuracyBadgeView(
+                        badge: field.badge,
+                        knownOffsetMeters: field.knownShift?.horizontalOffsetMeters
+                    )
                         .padding(10)
                         .background(SurveyColor.card.opacity(0.94))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))

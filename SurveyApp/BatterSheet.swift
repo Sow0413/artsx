@@ -72,7 +72,10 @@ struct BatterSheet: View {
             if showsRelativeBadge {
                 RelativeStageBadge(badge: relativeBadge)
             } else {
-                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                AccuracyBadgeView(
+                    badge: field.badge,
+                    knownOffsetMeters: field.knownShift?.horizontalOffsetMeters
+                )
                 if guide {
                     Text(BatterMath.guideWord)
                         .font(SurveyType(22, .heavy))

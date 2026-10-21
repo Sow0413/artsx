@@ -45,7 +45,9 @@ final class ExternalGNSSTests: XCTestCase {
         XCTAssertEqual(AccuracyFormat.statusLine(for: dgps), "DGPS ±40cm 補正3秒 衛星14")
         let float = samplePosition(accuracy: 0.2, stage: .rtk, quality: .float, receiver: .rtk, satelliteCount: 20, correctionAgeSeconds: 1)
         XCTAssertEqual(AccuracyFormat.statusLine(for: float), "FLOAT ±20cm 補正1秒 衛星20")
-        XCTAssertEqual(AccuracyFormat.statusLine(for: samplePosition()), "単独 ±3m")
+        XCTAssertEqual(AccuracyFormat.statusLine(for: samplePosition()), "単独 推定±3m")
+        XCTAssertEqual(AccuracyFormat.statusLine(for: samplePosition(accuracy: 2)), "単独 推定±2m")
+        XCTAssertFalse(AccuracyFormat.statusLine(for: float).contains("推定"))
     }
 
     func testReceiverGapDoesNotUseTheReceiverHeightAsTheSurveyHeight() {

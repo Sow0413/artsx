@@ -414,6 +414,11 @@ public struct KnownPointShift: Codable, Equatable, Sendable {
         return distance >= Self.warnDistanceMeters
     }
 
+    /// 既知点から見た水平のずれ。東と北の合成。
+    public var horizontalOffsetMeters: Double {
+        GeoMath.hypotenuse(eastMeters, northMeters)
+    }
+
     public var deltaText: String {
         let east = Self.signed(eastMeters)
         let north = Self.signed(northMeters)

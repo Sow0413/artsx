@@ -15,8 +15,10 @@ final class AccuracyPolicyTests: XCTestCase {
         XCTAssertEqual(badge.tone, .yellow)
         XCTAssertEqual(badge.solutionLabel, "単独")
         XCTAssertEqual(badge.text, "単独　iPhone GPS 約3m")
-        XCTAssertEqual(badge.compactText, "単独 ±3m")
-        XCTAssertTrue(badge.accessibilityText.hasPrefix("下見。段階0。単独　iPhone GPS 約3m"))
+        XCTAssertEqual(badge.compactText, "単独 推定±3m")
+        XCTAssertTrue(badge.isPhoneSelfEstimate)
+        XCTAssertTrue(badge.accessibilityText.hasPrefix("下見。単独 推定±3m。iPhoneの自己推定。実際の誤差は既知点で確認"))
+        XCTAssertFalse(badge.accessibilityText.contains("段階0"))
         XCTAssertTrue(badge.guidance.contains("高さがあと300cm"))
         XCTAssertFalse(badge.isStakeoutGrade)
         XCTAssertEqual(reading.position?.frame, .wgs84ITRF)
@@ -156,6 +158,15 @@ final class AccuracyPolicyTests: XCTestCase {
         XCTAssertEqual(AccuracyFormat.plusMinus(meters: 20), "±20m")
         XCTAssertEqual(AccuracyFormat.plusMinus(meters: 0.2), "±20cm")
         XCTAssertEqual(AccuracyFormat.plusMinus(meters: 0.02), "±2cm")
+        XCTAssertEqual(AccuracyFormat.phoneEstimateNote, "iPhoneの自己推定。実際の誤差は既知点で確認")
+        XCTAssertEqual(AccuracyFormat.knownOffsetLine(meters: 1.36), "既知点差 1.4m")
+        XCTAssertEqual(AccuracyFormat.knownOffsetLine(meters: 0.4), "既知点差 40cm")
+        XCTAssertEqual(AccuracyFormat.knownOffsetLine(meters: 0.004), "既知点差 1cm")
+        XCTAssertEqual(AccuracyFormat.knownOffsetLine(meters: .nan), "既知点差 —")
+        XCTAssertEqual(AccuracyFormat.statusLine(for: samplePosition(accuracy: 2)), "単独 推定±2m")
+        let fix = samplePosition(accuracy: 0.02, stage: .rtk, quality: .rtkFix, receiver: .rtk, satelliteCount: 18)
+        XCTAssertEqual(AccuracyFormat.statusLine(for: fix), "FIX ±2cm 衛星18")
+        XCTAssertFalse(AccuracyFormat.statusLine(for: fix).contains("推定"))
     }
 
     func testPositionRoundTripsAndKeepsFrame() throws {

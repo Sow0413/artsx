@@ -3,7 +3,7 @@ import SurveyCore
 
 struct AccuracyBadgeView: View {
     let badge: AccuracyBadgeModel
-    var stage: PositionStage?
+    var knownOffsetMeters: Double? = nil
     var compact = false
     @State private var showsDetail = false
 
@@ -15,7 +15,7 @@ struct AccuracyBadgeView: View {
         }
         .buttonStyle(.plain)
         .sheet(isPresented: $showsDetail) {
-            AccuracyDetailSheet(badge: badge, stage: stage)
+            AccuracyDetailSheet(badge: badge, knownOffsetMeters: knownOffsetMeters)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(badge.accessibilityText)
@@ -48,7 +48,7 @@ struct AccuracyBadgeView: View {
 /// 足りない長さと届く手段。常時バナーには出さない。
 struct AccuracyDetailSheet: View {
     let badge: AccuracyBadgeModel
-    var stage: PositionStage?
+    var knownOffsetMeters: Double? = nil
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -60,12 +60,16 @@ struct AccuracyDetailSheet: View {
                         .foregroundStyle(badge.tone.tint)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                    if let stage {
-                        Text("段階\(stage.rawValue)")
-                            .font(SurveyType(16, .heavy))
-                            .foregroundStyle(SurveyColor.muted)
+                    if badge.isPhoneSelfEstimate {
+                        Text(AccuracyFormat.phoneEstimateNote)
+                            .font(SurveyType(16, .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    if badge.text != badge.compactText {
+                    if let knownOffsetMeters {
+                        Text(AccuracyFormat.knownOffsetLine(meters: knownOffsetMeters))
+                            .font(SurveyType(18, .heavy))
+                    }
+                    if !badge.isPhoneSelfEstimate, badge.text != badge.compactText, !badge.text.isEmpty {
                         Text(badge.text)
                             .font(SurveyType(18, .heavy))
                     }

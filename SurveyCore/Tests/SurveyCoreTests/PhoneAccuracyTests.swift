@@ -173,6 +173,7 @@ final class PhoneAccuracyTests: XCTestCase {
         XCTAssertTrue(shift.isStale(at: start.addingTimeInterval(10), latitude: away.latitude, longitude: away.longitude))
         XCTAssertTrue(shift.statusLine(at: start.addingTimeInterval(31 * 60), latitude: 36, longitude: 139).contains("確認"))
         XCTAssertTrue(shift.statusLine(at: start.addingTimeInterval(12 * 60), latitude: 36, longitude: 139).contains("12分"))
+        XCTAssertEqual(shift.horizontalOffsetMeters, 1, accuracy: 1e-12)
     }
 
     func testOldRecordsDecodeWithoutTheNewFields() throws {

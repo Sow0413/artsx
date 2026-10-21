@@ -108,7 +108,9 @@ final class BatterTests: XCTestCase {
             for: PositionReading(position: position, availability: .available),
             operatingStage: .iphone
         )
-        XCTAssertTrue(badge.accessibilityText.contains("段階0"))
+        XCTAssertTrue(badge.isPhoneSelfEstimate)
+        XCTAssertTrue(badge.accessibilityText.contains(AccuracyFormat.phoneEstimateNote))
+        XCTAssertFalse(badge.accessibilityText.contains("段階0"))
         XCTAssertFalse(badge.isStakeoutGrade)
         XCTAssertFalse(position.isTrustedRTKFix)
 

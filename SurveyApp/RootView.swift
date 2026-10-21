@@ -61,7 +61,11 @@ struct RootView: View {
                     .padding(.top, 4)
             }
             HStack(spacing: 8) {
-                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: true)
+                AccuracyBadgeView(
+                    badge: field.badge,
+                    knownOffsetMeters: field.knownShift?.horizontalOffsetMeters,
+                    compact: true
+                )
                     .frame(maxWidth: .infinity)
                 settingsButton
             }

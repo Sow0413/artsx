@@ -132,7 +132,9 @@ final class CrosshairTests: XCTestCase {
             operatingStage: .iphone
         )
         XCTAssertFalse(badge.isStakeoutGrade)
-        XCTAssertTrue(badge.accessibilityText.contains("段階0"))
+        XCTAssertTrue(badge.isPhoneSelfEstimate)
+        XCTAssertTrue(badge.accessibilityText.contains(AccuracyFormat.phoneEstimateNote))
+        XCTAssertFalse(badge.accessibilityText.contains("段階0"))
         XCTAssertEqual(CrosshairMath.kind, "簡易ターゲット")
     }
 }
