@@ -120,6 +120,8 @@ final class SurveyListTests: XCTestCase {
         let paths = files.enumerated().map { index, url in
             FieldRecordStore.relativePath(of: url, root: root)
         }
+        XCTAssertEqual(paths.count, 2)
+        XCTAssertTrue(paths.allSatisfy { $0.contains("/") && !$0.hasPrefix("/") })
         for (index, url) in files.enumerated() {
             try FieldRecordStore.moveToTrash(url, id: id, index: index, root: root)
         }
@@ -132,6 +134,26 @@ final class SurveyListTests: XCTestCase {
         XCTAssertEqual(FieldRecordStore.points(in: root, place: "日光").map(\.name), ["P1", "P2"])
         XCTAssertEqual(FieldRecordStore.files(named: "P1", in: root, place: "日光").count, 2)
         FieldRecordStore.removeTrashFolder(id: id, root: root)
+    }
+
+    func testTrashPathSurvivesSymlinkedRoot() throws {
+        let real = try TestFiles.directory()
+        defer { TestFiles.remove(real) }
+        let parent = try TestFiles.directory()
+        defer { TestFiles.remove(parent) }
+        let link = parent.appendingPathComponent("records", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let when = Date(timeIntervalSince1970: 1_700_000_000)
+        try FieldRecordStore.write(file("P1", at: when), root: real, place: "日光")
+        let stored = try XCTUnwrap(FieldRecordStore.files(named: "P1", in: real, place: "日光").first)
+        let path = FieldRecordStore.relativePath(of: stored, root: link)
+        XCTAssertTrue(path.contains("/"))
+        XCTAssertFalse(path.hasPrefix("/"))
+        let id = UUID()
+        try FieldRecordStore.moveToTrash(stored, id: id, index: 0, root: real)
+        try FieldRecordStore.restoreTrashFile(id: id, index: 0, root: link, relativePath: path)
+        XCTAssertEqual(FieldRecordStore.points(in: real, place: "日光").map(\.name), ["P1"])
+        XCTAssertEqual(FieldRecordStore.files(named: "P1", in: link, place: "日光").count, 1)
     }
 
     private func shot(

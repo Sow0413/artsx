@@ -190,10 +190,11 @@ public enum FieldRecordStore {
     }
 
     public static func relativePath(of file: URL, root: URL) -> String {
-        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
-        let path = file.path
-        if path.hasPrefix(rootPath) {
-            return String(path.dropFirst(rootPath.count))
+        let path = resolvedPath(file)
+        let rootPath = resolvedPath(root)
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        if path.hasPrefix(prefix) {
+            return String(path.dropFirst(prefix.count))
         }
         return file.lastPathComponent
     }
@@ -210,7 +211,7 @@ public enum FieldRecordStore {
 
     public static func restoreTrashFile(id: UUID, index: Int, root: URL, relativePath: String) throws {
         let source = trashFolder(id: id, root: root).appendingPathComponent("\(index).json")
-        let dest = root.appendingPathComponent(relativePath)
+        let dest = url(root: root, relativePath: relativePath)
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
         if FileManager.default.fileExists(atPath: dest.path) {
             try FileManager.default.removeItem(at: dest)
@@ -280,6 +281,17 @@ public enum FieldRecordStore {
 
     private static func trashFolder(id: UUID, root: URL) -> URL {
         root.appendingPathComponent(".trash", isDirectory: true).appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    /// macOS の一時ディレクトリは `/var` から `/private/var` へのリンクになる。比べる前に両方を解く。
+    private static func resolvedPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().path
+    }
+
+    /// `appendingPathComponent` は `/` をフォルダ区切りにせず、1つの名前へエンコードする。
+    private static func url(root: URL, relativePath: String) -> URL {
+        let parts = relativePath.split(separator: "/").map(String.init).filter { $0 != "." && $0 != ".." }
+        return parts.reduce(root) { $0.appendingPathComponent($1) }
     }
 
     private static func collected(
