@@ -125,9 +125,15 @@ final class FieldIntakeTests: XCTestCase {
         let text = "A01,1,BP,1000,-2000,1,\n"
         let point = try XCTUnwrap(FieldIntake.read(data: Data(text.utf8), fileName: "a.sima", zone: 7, heightMap: nil).points.first)
         let moved = point.relocated(to: 8)
+        XCTAssertEqual(moved.zone, 8)
         XCTAssertEqual(moved.northingMeters, point.northingMeters, accuracy: 0.001)
         XCTAssertEqual(moved.eastingMeters, point.eastingMeters, accuracy: 0.001)
-        XCTAssertNotEqual(moved.latitudeDegrees, point.latitudeDegrees, accuracy: 1e-6)
+        // VII と VIII は原点緯度がどちらも 36°なので、同じ北・東の緯度は変わらない。経度が動く。
+        XCTAssertEqual(moved.latitudeDegrees, point.latitudeDegrees, accuracy: 1e-8)
+        XCTAssertNotEqual(moved.longitudeDegrees, point.longitudeDegrees, accuracy: 1e-4)
+        let shifted = point.relocated(to: 10)
+        XCTAssertEqual(shifted.northingMeters, point.northingMeters, accuracy: 0.001)
+        XCTAssertNotEqual(shifted.latitudeDegrees, point.latitudeDegrees, accuracy: 1e-4)
     }
 
     func testAlongLineSnapAndFreePoint() throws {
