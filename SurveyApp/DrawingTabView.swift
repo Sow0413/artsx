@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct DrawingTabView: View {
     @ObservedObject var field: FieldModel
     @ObservedObject var drawing: DrawingSession
+    @AppStorage("survey.drawingMapStyle") private var drawingMapStyleRaw = BaseMapStyle.gsiStandard.rawValue
     @State private var importing = false
     @State private var projectName = ""
     @State private var recordName = "起点"
@@ -312,25 +313,39 @@ struct DrawingTabView: View {
                 PDFDrawingView(data: data)
                     .id(drawing.fileName ?? "pdf")
             } else {
-                DrawingCanvasView(
-                    document: drawing.document,
-                    camera: $drawing.camera,
-                    user: userOnDrawing,
-                    tone: field.badge.tone,
-                    accuracyText: accuracyText,
-                    highlight: highlight,
-                    reachCenter: reachGraphics?.center,
-                    reachRadius: reachGraphics?.radius,
-                    reachRanges: reachGraphics?.ranges ?? [],
-                    crew: crewGlyphs,
-                    onTap: { point, tolerance in
-                        drawing.takeDrawingTap(point, tolerance: tolerance)
-                    },
-                    onLongPress: { point, tolerance in
-                        drawing.takeDrawingLongPress(point, tolerance: tolerance)
-                    },
-                    onFit: { drawing.fit(in: $0) }
-                )
+                ZStack {
+                    if drawing.showsDrawingMap {
+                        DrawingBaseMapView(
+                            camera: drawing.camera,
+                            zone: drawing.zone,
+                            axis: drawing.axis,
+                            transform: drawing.activeTransform,
+                            composesAxis: drawing.activeComposesAxis,
+                            style: drawingMapStyle,
+                            store: field.tiles
+                        )
+                    }
+                    DrawingCanvasView(
+                        document: drawing.document,
+                        camera: $drawing.camera,
+                        user: userOnDrawing,
+                        tone: field.badge.tone,
+                        accuracyText: accuracyText,
+                        highlight: highlight,
+                        reachCenter: reachGraphics?.center,
+                        reachRadius: reachGraphics?.radius,
+                        reachRanges: reachGraphics?.ranges ?? [],
+                        showsMap: drawing.showsDrawingMap,
+                        crew: crewGlyphs,
+                        onTap: { point, tolerance in
+                            drawing.takeDrawingTap(point, tolerance: tolerance)
+                        },
+                        onLongPress: { point, tolerance in
+                            drawing.takeDrawingLongPress(point, tolerance: tolerance)
+                        },
+                        onFit: { drawing.fit(in: $0) }
+                    )
+                }
             }
             VStack {
                 if field.extras.proximity {
@@ -385,6 +400,60 @@ struct DrawingTabView: View {
                     .padding(24)
             }
         }
+        .overlay(alignment: .bottomLeading) {
+            if drawing.showsDrawingMap {
+                VStack(alignment: .leading, spacing: 6) {
+                    mapStyleToggle
+                    Text(GSITileCatalog.sourceCredit)
+                        .font(SurveyType(11, .semibold))
+                        .foregroundStyle(SurveyColor.text)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(SurveyColor.card.opacity(0.92), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+                .padding(8)
+            }
+        }
+    }
+
+    private var drawingMapStyle: BaseMapStyle {
+        switch BaseMapStyle(rawValue: drawingMapStyleRaw) {
+        case .gsiPale: return .gsiPale
+        case .gsiPhoto: return .gsiPhoto
+        default: return .gsiStandard
+        }
+    }
+
+    private var mapStyleToggle: some View {
+        HStack(spacing: 2) {
+            mapStyleButton("標準", .gsiStandard)
+            mapStyleButton("淡色", .gsiPale)
+            mapStyleButton("写真", .gsiPhoto)
+        }
+        .padding(2)
+        .background(SurveyColor.card)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(SurveyColor.line, lineWidth: 1)
+        )
+    }
+
+    private func mapStyleButton(_ title: String, _ style: BaseMapStyle) -> some View {
+        let selected = drawingMapStyle == style
+        return Button {
+            drawingMapStyleRaw = style.rawValue
+        } label: {
+            Text(title)
+                .font(SurveyType(13, .heavy))
+                .frame(minWidth: 44, minHeight: 36)
+                .padding(.horizontal, 4)
+                .background(selected ? SurveyColor.blue : Color.clear)
+                .foregroundStyle(selected ? SurveyColor.onAccent : SurveyColor.text)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? AccessibilityTraits.isSelected : AccessibilityTraits())
     }
 
     private var zoneBlock: some View {
@@ -1227,14 +1296,14 @@ struct DrawingTabView: View {
     }
 
     private var userOnDrawing: UserOnDrawing? {
-        guard drawing.document != nil,
+        guard drawing.showsDrawingMap,
               let position = field.navigationReading.position,
-              position.isPlottable,
-              position.hasValidHorizontalAccuracy else { return nil }
+              position.isPlottable else { return nil }
+        let accuracy = position.hasValidHorizontalAccuracy ? position.horizontalAccuracyMeters : 0
         return DrawingPlacement.user(
             latitudeDegrees: position.latitudeDegrees,
             longitudeDegrees: position.longitudeDegrees,
-            horizontalAccuracyMeters: position.horizontalAccuracyMeters,
+            horizontalAccuracyMeters: accuracy,
             zone: drawing.zone,
             axis: drawing.axis,
             transform: drawing.activeTransform,

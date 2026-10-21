@@ -11,6 +11,7 @@ struct DrawingCanvasView: View {
     let reachCenter: PlanarPoint?
     let reachRadius: Double?
     let reachRanges: [ReachRange]
+    var showsMap = false
     var crew: [CrewGlyph] = []
     var onTap: (PlanarPoint, Double) -> Void
     var onLongPress: ((PlanarPoint, Double) -> Void)? = nil
@@ -52,7 +53,7 @@ struct DrawingCanvasView: View {
                 zoomButtons
                     .padding(8)
             }
-            .background(SurveyColor.background)
+            .background(showsMap ? Color.clear : SurveyColor.background)
             .onAppear { onFit(size) }
             .onChange(of: camera.fittedID) { _, _ in onFit(size) }
         }
@@ -129,12 +130,19 @@ struct DrawingCanvasView: View {
             }
             let color = featureColor(red: stroke.red, green: stroke.green, blue: stroke.blue, outdoor: outdoor)
             let width = CGFloat(min(DrawingStroke.maximumPoints, max(DrawingStroke.minimumPoints, stroke.width)))
+            if showsMap {
+                context.stroke(path, with: .color(.white.opacity(0.9)), lineWidth: width + 1.5)
+            }
             context.stroke(path, with: .color(color), lineWidth: width)
         }
         for mark in batch.points {
             let origin = screen(mark.point, size: size)
             let rect = CGRect(x: origin.x - 2, y: origin.y - 2, width: 4, height: 4)
             let color = featureColor(red: mark.red, green: mark.green, blue: mark.blue, outdoor: outdoor)
+            if showsMap {
+                let halo = CGRect(x: origin.x - 3.5, y: origin.y - 3.5, width: 7, height: 7)
+                context.fill(Path(ellipseIn: halo), with: .color(.white.opacity(0.9)))
+            }
             context.fill(Path(rect), with: .color(color))
         }
         for label in batch.labels where label.height * camera.pointsPerUnit >= 8 {
@@ -196,10 +204,10 @@ struct DrawingCanvasView: View {
         }
     }
 
-    /// 紙の黒（SXF の白）だけ、明るい画面では細い黒にする。等高線の灰や赤青はそのまま。
+    /// 紙の黒（SXF の白）だけ、明るい画面と地図の上では細い黒にする。等高線の灰や赤青はそのまま。
     private func featureColor(red: Double, green: Double, blue: Double, outdoor: Bool) -> Color {
         let paper = red > 0.92 && green > 0.92 && blue > 0.92
-        if paper && outdoor {
+        if paper && (outdoor || showsMap) {
             return Color(red: 0.16, green: 0.17, blue: 0.18)
         }
         return Color(red: red, green: green, blue: blue)
@@ -228,44 +236,62 @@ struct DrawingCanvasView: View {
     }
 
     private func visibleBounds(size: CGSize, document: DrawingDocument) -> DrawingBounds {
-        let corners = [
+        let corners = camera.viewCorners(size: size)
+        return DrawingBounds(enclosing: corners).padded(max(document.bounds.width, document.bounds.height, 1) * 0.02)
+    }
+
+    private func screen(_ point: PlanarPoint, size: CGSize) -> CGPoint {
+        camera.screen(point, size: size)
+    }
+
+    private func drawingPoint(from location: CGPoint, size: CGSize) -> PlanarPoint {
+        camera.drawingPoint(from: location, size: size)
+    }
+
+    private func movedCenter(from start: (x: Double, y: Double), translation: CGSize) -> (x: Double, y: Double) {
+        camera.movedCenter(from: start, translation: translation)
+    }
+}
+
+extension DrawingCamera {
+    func screen(_ point: PlanarPoint, size: CGSize) -> CGPoint {
+        let dx = point.x - centerX
+        let dy = point.y - centerY
+        let radians = rotationDegrees * .pi / 180
+        let rx = dx * cos(radians) - dy * sin(radians)
+        let ry = dx * sin(radians) + dy * cos(radians)
+        return CGPoint(
+            x: size.width / 2 + CGFloat(rx * pointsPerUnit),
+            y: size.height / 2 - CGFloat(ry * pointsPerUnit)
+        )
+    }
+
+    func drawingPoint(from location: CGPoint, size: CGSize) -> PlanarPoint {
+        let scale = max(pointsPerUnit, 1e-9)
+        let rx = Double(location.x - size.width / 2) / scale
+        let ry = -Double(location.y - size.height / 2) / scale
+        let radians = rotationDegrees * .pi / 180
+        let dx = cos(radians) * rx + sin(radians) * ry
+        let dy = -sin(radians) * rx + cos(radians) * ry
+        return PlanarPoint(x: centerX + dx, y: centerY + dy)
+    }
+
+    func movedCenter(from start: (x: Double, y: Double), translation: CGSize) -> (x: Double, y: Double) {
+        let scale = max(pointsPerUnit, 1e-9)
+        let rx = -Double(translation.width) / scale
+        let ry = Double(translation.height) / scale
+        let radians = rotationDegrees * .pi / 180
+        let dx = cos(radians) * rx + sin(radians) * ry
+        let dy = -sin(radians) * rx + cos(radians) * ry
+        return (start.x + dx, start.y + dy)
+    }
+
+    func viewCorners(size: CGSize) -> [PlanarPoint] {
+        [
             CGPoint(x: 0, y: 0),
             CGPoint(x: size.width, y: 0),
             CGPoint(x: 0, y: size.height),
             CGPoint(x: size.width, y: size.height)
         ].map { drawingPoint(from: $0, size: size) }
-        return DrawingBounds(enclosing: corners).padded(max(document.bounds.width, document.bounds.height, 1) * 0.02)
-    }
-
-    private func screen(_ point: PlanarPoint, size: CGSize) -> CGPoint {
-        let dx = point.x - camera.centerX
-        let dy = point.y - camera.centerY
-        let radians = camera.rotationDegrees * .pi / 180
-        let rx = dx * cos(radians) - dy * sin(radians)
-        let ry = dx * sin(radians) + dy * cos(radians)
-        return CGPoint(
-            x: size.width / 2 + CGFloat(rx * camera.pointsPerUnit),
-            y: size.height / 2 - CGFloat(ry * camera.pointsPerUnit)
-        )
-    }
-
-    private func drawingPoint(from location: CGPoint, size: CGSize) -> PlanarPoint {
-        let scale = max(camera.pointsPerUnit, 1e-9)
-        let rx = Double(location.x - size.width / 2) / scale
-        let ry = -Double(location.y - size.height / 2) / scale
-        let radians = camera.rotationDegrees * .pi / 180
-        let dx = cos(radians) * rx + sin(radians) * ry
-        let dy = -sin(radians) * rx + cos(radians) * ry
-        return PlanarPoint(x: camera.centerX + dx, y: camera.centerY + dy)
-    }
-
-    private func movedCenter(from start: (x: Double, y: Double), translation: CGSize) -> (x: Double, y: Double) {
-        let scale = max(camera.pointsPerUnit, 1e-9)
-        let rx = -Double(translation.width) / scale
-        let ry = Double(translation.height) / scale
-        let radians = camera.rotationDegrees * .pi / 180
-        let dx = cos(radians) * rx + sin(radians) * ry
-        let dy = -sin(radians) * rx + cos(radians) * ry
-        return (start.x + dx, start.y + dy)
     }
 }

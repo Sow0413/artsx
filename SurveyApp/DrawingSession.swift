@@ -170,6 +170,13 @@ final class DrawingSession: ObservableObject {
         )
     }
 
+    /// 公共座標は現場の系があるとき。手元の図面は 2点合わせが付いてから。
+    var showsDrawingMap: Bool {
+        guard let document, !document.bounds.isEmpty, isGeoreferenced else { return false }
+        if activeTransform != nil { return true }
+        return project?.zone != nil
+    }
+
     func reload() {
         ProjectStore.purgeTrash(at: projectsRoot)
         projects = (try? ProjectStore.list(at: projectsRoot)) ?? []

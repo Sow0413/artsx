@@ -1187,6 +1187,26 @@ public enum DrawingPlacement {
         return UserOnDrawing(point: drawing, accuracyRadius: radius)
     }
 
+    /// 緯度経度を図面の点に戻す。現在地と同じ写像で、精度円は付けない。
+    public static func point(
+        latitudeDegrees: Double,
+        longitudeDegrees: Double,
+        zone: Int,
+        axis: DrawingAxis,
+        transform: Similarity2D?,
+        composesAxis: Bool = false
+    ) -> PlanarPoint? {
+        user(
+            latitudeDegrees: latitudeDegrees,
+            longitudeDegrees: longitudeDegrees,
+            horizontalAccuracyMeters: 0,
+            zone: zone,
+            axis: axis,
+            transform: transform,
+            composesAxis: composesAxis
+        )?.point
+    }
+
     public static func inspect(
         point: PlanarPoint,
         zone: Int,

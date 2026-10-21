@@ -1,6 +1,6 @@
 import Foundation
 
-/// 地理院タイルの種類。このスライスで取るのは標準地図だけ。ほかは現場パック用の枠。
+/// 地理院タイルの種類。図面の下には標準・淡色・写真を敷く。陰影は現場パックの枠だけ。
 public enum BaseMapStyle: String, Sendable, Codable, Equatable, CaseIterable {
     case gsiStandard = "std"
     case gsiPale = "pale"
@@ -135,8 +135,26 @@ public enum GSITileCatalog {
     public static let displayZoomRange: ClosedRange<Int> = 0...21
     public static let userAgent = "SurveyField/0.1 (iOS; GSI tile cache)"
 
+    /// サーバ上の拡張子。写真だけ JPEG。キャッシュとパックのファイル名は従来どおり png のまま。
+    public static func fileExtension(for style: BaseMapStyle) -> String {
+        switch style {
+        case .gsiPhoto: return "jpg"
+        case .gsiStandard, .gsiPale, .gsiRelief: return "png"
+        }
+    }
+
+    /// その種類のタイルが実在するズーム。これより深い縮尺は図面側で引き伸ばす。
+    public static func sourceZoomRange(for style: BaseMapStyle) -> ClosedRange<Int> {
+        switch style {
+        case .gsiStandard: return standardZoomRange
+        case .gsiPale: return 5...18
+        case .gsiPhoto: return 2...18
+        case .gsiRelief: return 5...15
+        }
+    }
+
     public static func url(for tile: TileID) -> URL {
-        let string = "\(standardHost)/\(tile.style.rawValue)/\(tile.z)/\(tile.x)/\(tile.y).png"
+        let string = "\(standardHost)/\(tile.style.rawValue)/\(tile.z)/\(tile.x)/\(tile.y).\(fileExtension(for: tile.style))"
         guard let url = URL(string: string) else {
             preconditionFailure("地理院タイルの URL を作れません")
         }
@@ -144,7 +162,7 @@ public enum GSITileCatalog {
     }
 
     public static func urlTemplate(for style: BaseMapStyle) -> String {
-        "\(standardHost)/\(style.rawValue)/{z}/{x}/{y}.png"
+        "\(standardHost)/\(style.rawValue)/{z}/{x}/{y}.\(fileExtension(for: style))"
     }
 }
 

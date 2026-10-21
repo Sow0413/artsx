@@ -54,6 +54,22 @@ final class TileTests: XCTestCase {
         XCTAssertEqual(GSITileCatalog.sourceCredit, "出典：国土地理院")
     }
 
+    func testPhotoTilesAreJPEGAndPaleStaysPNG() {
+        let photo = TileID(style: .gsiPhoto, z: 15, x: 29105, y: 12903)
+        XCTAssertEqual(
+            GSITileCatalog.url(for: photo).absoluteString,
+            "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/15/29105/12903.jpg"
+        )
+        XCTAssertTrue(GSITileCatalog.urlTemplate(for: .gsiPhoto).hasSuffix(".jpg"))
+        let pale = TileID(style: .gsiPale, z: 15, x: 29105, y: 12903)
+        let paleURL = GSITileCatalog.url(for: pale).absoluteString
+        XCTAssertTrue(paleURL.contains("/pale/"))
+        XCTAssertTrue(paleURL.hasSuffix(".png"))
+        XCTAssertEqual(GSITileCatalog.sourceZoomRange(for: .gsiStandard), 0...18)
+        XCTAssertEqual(GSITileCatalog.sourceZoomRange(for: .gsiPale), 5...18)
+        XCTAssertEqual(GSITileCatalog.sourceZoomRange(for: .gsiPhoto), 2...18)
+    }
+
     func testOtherReferenceTilesAndYAxis() {
         XCTAssertEqual(
             TileMath.tileID(latitude: 0.1, longitude: 0.1, zoom: 1),
