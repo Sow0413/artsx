@@ -69,6 +69,8 @@ final class FieldModel: ObservableObject {
     @Published var importAfterMenu = false
     @Published var recordPlace = UserDefaults.standard.string(forKey: "survey.recordPlace") ?? ""
     @Published private(set) var recordPins: [FieldRecordPin] = []
+    /// 地理院 DEM。無いとき、または通信が無いときは nil で、地図の行は出さない。
+    @Published private(set) var gsiElevationMeters: Double?
     @Published private(set) var recordBanner: RecordBanner?
     @Published private(set) var recordSuccessTick = 0
     @Published private(set) var recordWarningTick = 0
@@ -247,6 +249,10 @@ final class FieldModel: ObservableObject {
     private var lastGeocodedLatitude: Double?
     private var lastGeocodedLongitude: Double?
     private var geocodeTask: Task<Void, Never>?
+    private var gsiCache = GSIElevationCache()
+    private var gsiShown: GSIElevationCache.Entry?
+    private var gsiTask: Task<Void, Never>?
+    private var gsiGeneration = 0
     private var recordBannerToken = UUID()
     private var exportNoticeToken = UUID()
 
@@ -1373,6 +1379,55 @@ final class FieldModel: ObservableObject {
     var crosshairElevation: Double? {
         guard let crosshairTilt else { return nil }
         return tiltZero.corrected(crosshairTilt)
+    }
+
+    /// 地図にいるあいだ、地理院の標高を 10 m か 30 秒ごとに取る。失敗したら行を消す。
+    func refreshTerrainElevation(now: Date = Date()) {
+        guard tab == .map else { return }
+        guard let position = reading.position ?? navigationReading.position, position.isPlottable else { return }
+        let latitude = position.latitudeDegrees
+        let longitude = position.longitudeDegrees
+        if let fresh = gsiCache.fresh(latitudeDegrees: latitude, longitudeDegrees: longitude, now: now) {
+            gsiShown = fresh
+            gsiElevationMeters = fresh.meters
+            return
+        }
+        guard gsiCache.shouldRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, now: now) else { return }
+        if let shown = gsiShown,
+           GeoDistance.meters(
+               latitude1: shown.latitudeDegrees,
+               longitude1: shown.longitudeDegrees,
+               latitude2: latitude,
+               longitude2: longitude
+           ) > GSIElevationPolicy.moveMeters {
+            gsiShown = nil
+            gsiElevationMeters = nil
+        }
+        gsiCache.noteRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, at: now)
+        gsiGeneration += 1
+        let generation = gsiGeneration
+        gsiTask?.cancel()
+        gsiTask = Task { [weak self] in
+            let meters = await GSIElevationAPI.fetch(latitudeDegrees: latitude, longitudeDegrees: longitude)
+            guard !Task.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, generation == self.gsiGeneration else { return }
+                if let meters {
+                    let entry = GSIElevationCache.Entry(
+                        latitudeDegrees: latitude,
+                        longitudeDegrees: longitude,
+                        meters: meters,
+                        fetchedAt: Date()
+                    )
+                    self.gsiCache.remember(entry)
+                    self.gsiShown = entry
+                    self.gsiElevationMeters = meters
+                } else {
+                    self.gsiShown = nil
+                    self.gsiElevationMeters = nil
+                }
+            }
+        }
     }
 
     /// アンテナ補正のあとの楕円体高を、標高へ直す。持ち高さの引き方は変えない。
@@ -2885,6 +2940,9 @@ final class FieldModel: ObservableObject {
         trackIncidents()
         refreshVisibleControlPoints()
         considerPlaceName()
+        if tab == .map {
+            refreshTerrainElevation()
+        }
         guard followUser, let position = navigationReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
     }

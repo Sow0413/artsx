@@ -18,6 +18,7 @@ struct MapTabView: View {
             .overlay(alignment: .bottom) { mapSendButton }
             .background(SurveyColor.mapBackdrop)
             .overlay { safetyWash }
+            .onAppear { field.refreshTerrainElevation() }
             .sheet(isPresented: $field.showsIncidentStats) {
                 IncidentStatsSheet(field: field)
             }
@@ -122,22 +123,47 @@ struct MapTabView: View {
     @ViewBuilder
     private var coordinateChip: some View {
         if let position = field.reading.position ?? field.navigationReading.position, position.isPlottable {
-            let height = Self.mapHeightLine(field.liveSurveyHeight(position))
+            let survey = field.liveSurveyHeight(position)
+            let height = Self.mapHeightLine(survey)
+            let terrain = field.gsiElevationMeters.flatMap {
+                GSIElevationText.line(demMeters: $0, gnssMeters: survey.orthometricMeters)
+            }
             VStack(alignment: .leading, spacing: 0) {
                 Text(height)
+                    .foregroundStyle(Color.black)
+                if let terrain {
+                    terrainText(terrain)
+                }
                 Text(CoordinateText.latitude(position.latitudeDegrees))
+                    .foregroundStyle(Color.black)
                 Text(CoordinateText.longitude(position.longitudeDegrees))
+                    .foregroundStyle(Color.black)
             }
             .font(SurveyType(14, .heavy, mono: true))
-            .foregroundStyle(Color.black)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(height)、緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))")
+            .accessibilityLabel(Self.coordinateLabel(height: height, terrain: terrain, position: position))
             .allowsHitTesting(false)
         }
     }
+
+    private func terrainText(_ line: GSIElevationLine) -> Text {
+        let prefix = Text(line.prefix).foregroundColor(.black)
+        guard let difference = line.difference else { return prefix }
+        let color: Color = line.highlightDifference ? Self.terrainAlert : .black
+        return prefix + Text(difference).foregroundColor(color)
+    }
+
+    private static func coordinateLabel(height: String, terrain: GSIElevationLine?, position: GeodeticPosition) -> String {
+        let place = "\(height)、緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))"
+        guard let terrain else { return place }
+        return "\(height)、\(terrain.spoken)、緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))"
+    }
+
+    /// 白地のチップの上で橙のまま残す。屋外表示の黒にはしない。
+    private static let terrainAlert = Color(red: 0.90, green: 0.42, blue: 0.05)
 
     private static func mapHeightLine(_ height: SurveyHeight) -> String {
         guard let meters = height.orthometricMeters else { return "標高 —" }
