@@ -141,6 +141,87 @@ public enum FieldRecordStore {
         }.sorted()
     }
 
+    /// 現場の記録。place が空なら全部。day があればその日付だけ。ゴミ箱は含めない。
+    public static func points(in root: URL, place: String?, day: String? = nil) -> [FieldRecordPin] {
+        let manager = FileManager.default
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let placeName = place?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let places: [URL]
+        if let placeName, !placeName.isEmpty {
+            places = [root.appendingPathComponent(placeFolder(placeName, latitude: 0, longitude: 0), isDirectory: true)]
+        } else if let found = try? manager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            places = found
+        } else {
+            return []
+        }
+        var found = collected(in: root, place: place, day: day, places: places, decoder: decoder)
+        found.sort { lhs, rhs in
+            if lhs.point.timestamp != rhs.point.timestamp {
+                return lhs.point.timestamp > rhs.point.timestamp
+            }
+            return lhs.point.name < rhs.point.name
+        }
+        var seen: Set<String> = []
+        var pins: [FieldRecordPin] = []
+        for item in found where seen.insert(item.point.name).inserted {
+            pins.append(FieldRecordPin(
+                number: pins.count + 1,
+                name: item.point.name,
+                latitude: item.point.latitude,
+                longitude: item.point.longitude,
+                place: item.place,
+                day: item.day,
+                fileURL: item.url
+            ))
+        }
+        return pins
+    }
+
+    /// 同じ点名の記録ファイル。一覧は新しい1件だけ出すので、削除では残りもまとめて移す。
+    public static func files(named name: String, in root: URL, place: String?, day: String? = nil) -> [URL] {
+        collected(in: root, place: place, day: day)
+            .filter { $0.point.name == name }
+            .map(\.url)
+    }
+
+    public static func relativePath(of file: URL, root: URL) -> String {
+        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        let path = file.path
+        if path.hasPrefix(rootPath) {
+            return String(path.dropFirst(rootPath.count))
+        }
+        return file.lastPathComponent
+    }
+
+    public static func moveToTrash(_ file: URL, id: UUID, index: Int, root: URL) throws {
+        let folder = trashFolder(id: id, root: root)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let dest = folder.appendingPathComponent("\(index).json")
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.moveItem(at: file, to: dest)
+    }
+
+    public static func restoreTrashFile(id: UUID, index: Int, root: URL, relativePath: String) throws {
+        let source = trashFolder(id: id, root: root).appendingPathComponent("\(index).json")
+        let dest = root.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.removeItem(at: dest)
+        }
+        try FileManager.default.moveItem(at: source, to: dest)
+    }
+
+    public static func removeTrashFolder(id: UUID, root: URL) {
+        try? FileManager.default.removeItem(at: trashFolder(id: id, root: root))
+    }
+
     /// その日の記録だけ。場所フォルダを横断し、時刻順に 1 から番号を振る。
     public static func pins(in root: URL, on day: Date, calendar: Calendar = .current) -> [FieldRecordPin] {
         let dayName = dayFolder(day, calendar: calendar)
@@ -195,6 +276,59 @@ public enum FieldRecordStore {
             .replacingOccurrences(of: ":", with: "-")
         let trimmed = stem.isEmpty ? "point" : stem
         return "\(trimmed)-\(clock).json"
+    }
+
+    private static func trashFolder(id: UUID, root: URL) -> URL {
+        root.appendingPathComponent(".trash", isDirectory: true).appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    private static func collected(
+        in root: URL,
+        place: String?,
+        day: String?,
+        places given: [URL]? = nil,
+        decoder givenDecoder: JSONDecoder? = nil
+    ) -> [(point: FieldPointFile, place: String, day: String, url: URL)] {
+        let manager = FileManager.default
+        let decoder = givenDecoder ?? {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return decoder
+        }()
+        let places = given ?? {
+            let placeName = place?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let placeName, !placeName.isEmpty {
+                return [root.appendingPathComponent(placeFolder(placeName, latitude: 0, longitude: 0), isDirectory: true)]
+            }
+            return (try? manager.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+        }()
+        var found: [(point: FieldPointFile, place: String, day: String, url: URL)] = []
+        for placeURL in places {
+            var isDirectory: ObjCBool = false
+            guard manager.fileExists(atPath: placeURL.path, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+            let days = (try? manager.contentsOfDirectory(
+                at: placeURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+            for dayURL in days {
+                let dayName = dayURL.lastPathComponent
+                guard day == nil || day == dayName else { continue }
+                guard let files = try? manager.contentsOfDirectory(at: dayURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else {
+                    continue
+                }
+                for file in files where file.pathExtension.lowercased() == "json" {
+                    guard let data = try? Data(contentsOf: file),
+                          let point = try? decoder.decode(FieldPointFile.self, from: data) else { continue }
+                    found.append((point, placeURL.lastPathComponent, dayName, file))
+                }
+            }
+        }
+        return found
     }
 
     private static let posix = Locale(identifier: "en_US_POSIX")

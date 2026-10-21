@@ -101,6 +101,18 @@ public final class FieldJournal {
         return intQuery("SELECT count(*) FROM observations")
     }
 
+    public func observations(named name: String) -> [FieldObservation] {
+        lock.lock()
+        defer { lock.unlock() }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT payload FROM observations WHERE name = ? ORDER BY recorded_at", -1, &statement, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, 1, name)
+        return rows(statement).compactMap(decodeObservation)
+    }
+
     public func names() -> Set<String> {
         lock.lock()
         defer { lock.unlock() }
@@ -226,6 +238,142 @@ public final class FieldJournal {
         return rows(statement).compactMap(decodeBook)
     }
 
+    public func bookEntry(named name: String) -> CoordinateBookEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+        return bookPayload(named: name).flatMap(decodeBook)
+    }
+
+    /// 今の座標簿の値を履歴に移す。取り直しの前に呼ぶ。点が無ければ何もしない。
+    public func archiveBook(named name: String, at date: Date = Date()) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let payload = bookPayload(named: name) else { return }
+        let sql = "INSERT INTO book_history (id, name, replaced_at, payload) VALUES (?, ?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw ProjectStoreError.unreadable }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, 1, UUID().uuidString)
+        bind(statement, 2, name)
+        sqlite3_bind_double(statement, 3, date.timeIntervalSince1970)
+        bind(statement, 4, payload)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw ProjectStoreError.unreadable }
+    }
+
+    public func bookHistory(named name: String) -> [ArchivedBookEntry] {
+        lock.lock()
+        defer { lock.unlock() }
+        let sql = "SELECT id, name, replaced_at, payload FROM book_history WHERE name = ? ORDER BY replaced_at DESC"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, 1, name)
+        var entries: [ArchivedBookEntry] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let idText = text(statement, 0), let id = UUID(uuidString: idText),
+                  let storedName = text(statement, 1),
+                  let payload = text(statement, 3),
+                  let entry = decodeBook(payload) else { continue }
+            entries.append(ArchivedBookEntry(
+                id: id,
+                name: storedName,
+                replacedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                entry: entry
+            ))
+        }
+        return entries
+    }
+
+    public func bookKinds(for names: [String]) -> [String: String] {
+        var kinds: [String: String] = [:]
+        for name in Set(names) {
+            if let kind = bookEntry(named: name)?.kind {
+                kinds[name] = kind
+            }
+        }
+        return kinds
+    }
+
+    @discardableResult
+    public func removeBook(named name: String) -> CoordinateBookEntry? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let payload = bookPayload(named: name), let entry = decodeBook(payload) else { return nil }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM book WHERE name = ?", -1, &statement, nil) == SQLITE_OK else { return nil }
+        bind(statement, 1, name)
+        let status = sqlite3_step(statement)
+        sqlite3_finalize(statement)
+        guard status == SQLITE_DONE else { return nil }
+        return entry
+    }
+
+    public func removeObservations(ids: [UUID]) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        for id in ids {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM observations WHERE id = ?", -1, &statement, nil) == SQLITE_OK else {
+                throw ProjectStoreError.unreadable
+            }
+            bind(statement, 1, id.uuidString)
+            let status = sqlite3_step(statement)
+            sqlite3_finalize(statement)
+            guard status == SQLITE_DONE else { throw ProjectStoreError.unreadable }
+        }
+    }
+
+    public func trash(_ item: TrashedPoint) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let data = try encoder.encode(item.payload)
+        guard let payload = String(data: data, encoding: .utf8) else { throw ProjectStoreError.unreadable }
+        let sql = "INSERT INTO trash (id, name, deleted_at, payload) VALUES (?, ?, ?, ?)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { throw ProjectStoreError.unreadable }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, 1, item.id.uuidString)
+        bind(statement, 2, item.name)
+        sqlite3_bind_double(statement, 3, item.deletedAt.timeIntervalSince1970)
+        bind(statement, 4, payload)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw ProjectStoreError.unreadable }
+    }
+
+    public func trashedPoints() -> [TrashedPoint] {
+        lock.lock()
+        defer { lock.unlock() }
+        return readTrash()
+    }
+
+    /// 行をゴミ箱から外して返す。復元する側が中身を戻す。
+    public func takeTrash(id: UUID) -> TrashedPoint? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let item = readTrash().first(where: { $0.id == id }) else { return nil }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM trash WHERE id = ?", -1, &statement, nil) == SQLITE_OK else { return nil }
+        bind(statement, 1, id.uuidString)
+        let status = sqlite3_step(statement)
+        sqlite3_finalize(statement)
+        guard status == SQLITE_DONE else { return nil }
+        return item
+    }
+
+    /// 30日を過ぎた行を消して返す。ファイルの削除は呼び出し側。
+    public func purgeTrash(at now: Date) -> [TrashedPoint] {
+        lock.lock()
+        defer { lock.unlock() }
+        let expired = readTrash().filter { $0.isExpired(at: now) }
+        for item in expired {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM trash WHERE id = ?", -1, &statement, nil) == SQLITE_OK else { continue }
+            bind(statement, 1, item.id.uuidString)
+            _ = sqlite3_step(statement)
+            sqlite3_finalize(statement)
+        }
+        return expired
+    }
+
     /// 古い JSON が残っていて SQLite が空のときだけ、一度取り込む。
     public func importLegacyIfNeeded() {
         if count() == 0 {
@@ -304,6 +452,23 @@ public final class FieldJournal {
             fix_restarted INTEGER NOT NULL,
             fix_position TEXT,
             updated_at REAL NOT NULL
+        )
+        """)
+        try exec("""
+        CREATE TABLE IF NOT EXISTS book_history (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            replaced_at REAL NOT NULL,
+            payload TEXT NOT NULL
+        )
+        """)
+        try exec("CREATE INDEX IF NOT EXISTS book_history_name ON book_history(name, replaced_at)")
+        try exec("""
+        CREATE TABLE IF NOT EXISTS trash (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            deleted_at REAL NOT NULL,
+            payload TEXT NOT NULL
         )
         """)
     }
@@ -385,6 +550,37 @@ public final class FieldJournal {
     private func decodeObservation(_ payload: String) -> FieldObservation? {
         guard let data = payload.data(using: .utf8) else { return nil }
         return try? decoder.decode(FieldObservation.self, from: data)
+    }
+
+    private func readTrash() -> [TrashedPoint] {
+        let sql = "SELECT id, name, deleted_at, payload FROM trash ORDER BY deleted_at DESC"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(statement) }
+        var items: [TrashedPoint] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let idText = text(statement, 0), let id = UUID(uuidString: idText),
+                  let name = text(statement, 1),
+                  let payload = text(statement, 3),
+                  let data = payload.data(using: .utf8),
+                  let body = try? decoder.decode(PointTrashPayload.self, from: data) else { continue }
+            items.append(TrashedPoint(
+                id: id,
+                name: name,
+                deletedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                payload: body
+            ))
+        }
+        return items
+    }
+
+    private func bookPayload(named name: String) -> String? {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT payload FROM book WHERE name = ?", -1, &statement, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, 1, name)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return text(statement, 0)
     }
 
     private func decodeBook(_ payload: String) -> CoordinateBookEntry? {

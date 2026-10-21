@@ -71,8 +71,8 @@ struct MeasureLogView: View {
                 if field.gnssAvailable, field.operation.showsAdvanced {
                     gnssSection
                 }
-                if field.observations.observations.isEmpty {
-                    Text(field.observationCount == 0 ? "まだ点がありません。" : "点は端末に残しています。")
+                if surveyGroups.isEmpty {
+                    Text("まだ点がありません。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
@@ -82,12 +82,27 @@ struct MeasureLogView: View {
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                ForEach(field.observations.observations.reversed()) { observation in
-                    observationRow(observation)
+                ForEach(surveyGroups) { group in
+                    Text(group.title)
+                        .font(SurveyType(16, .heavy))
+                    ForEach(group.rows) { observation in
+                        observationRow(observation)
+                    }
                 }
             }
             .padding(20)
         }
+    }
+
+    private var surveyGroups: [SurveyPointGroup] {
+        let rows = field.observations.observations
+        let kinds = field.journal.bookKinds(for: rows.map(\.name))
+        return SurveyList.grouped(
+            rows,
+            groups: SurveyList.surveyGroups,
+            bookKinds: kinds,
+            projectID: field.drawing.project?.id
+        )
     }
 
     private func observationRow(_ observation: FieldObservation) -> some View {

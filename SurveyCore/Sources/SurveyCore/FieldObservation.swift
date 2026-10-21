@@ -20,6 +20,10 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
     public var fixDurationSeconds: TimeInterval?
     /// その点の観測状況。古い記録には無い。
     public var condition: ObservationCondition?
+    /// 取った現場。古い記録には無い。
+    public var projectID: String?
+    /// 水準器の簡易ターゲットは level。測量の一覧には出さない。
+    public var origin: String?
 
     public init(
         id: UUID = UUID(),
@@ -32,7 +36,9 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         closureAdjustment: ClosureAdjustment? = nil,
         needsResurvey: Bool = false,
         fixDurationSeconds: TimeInterval? = nil,
-        condition: ObservationCondition? = nil
+        condition: ObservationCondition? = nil,
+        projectID: String? = nil,
+        origin: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -45,10 +51,12 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         self.needsResurvey = needsResurvey
         self.fixDurationSeconds = fixDurationSeconds
         self.condition = condition
+        self.projectID = projectID
+        self.origin = origin
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, workID, captured, adopted, corrected, appliedCorrectionID, closureAdjustment, needsResurvey, fixDurationSeconds, condition
+        case id, name, workID, captured, adopted, corrected, appliedCorrectionID, closureAdjustment, needsResurvey, fixDurationSeconds, condition, projectID, origin
     }
 
     public init(from decoder: Decoder) throws {
@@ -64,6 +72,8 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         needsResurvey = try container.decodeIfPresent(Bool.self, forKey: .needsResurvey) ?? false
         fixDurationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .fixDurationSeconds)
         condition = try container.decodeIfPresent(ObservationCondition.self, forKey: .condition)
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
+        origin = try container.decodeIfPresent(String.self, forKey: .origin)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -79,6 +89,8 @@ public struct FieldObservation: Codable, Equatable, Sendable, Identifiable {
         try container.encode(needsResurvey, forKey: .needsResurvey)
         try container.encodeIfPresent(fixDurationSeconds, forKey: .fixDurationSeconds)
         try container.encodeIfPresent(condition, forKey: .condition)
+        try container.encodeIfPresent(projectID, forKey: .projectID)
+        try container.encodeIfPresent(origin, forKey: .origin)
     }
 
     public var horizontalAccuracyAtCapture: Double { captured.horizontalAccuracyMeters }

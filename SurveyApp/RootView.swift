@@ -213,6 +213,9 @@ struct RootView: View {
             }
             .modifier(SurveyScheme())
         }
+        .sheet(isPresented: $field.showsPointList) {
+            PointListSheet(field: field)
+        }
         .sheet(isPresented: $field.showsProjects) {
             ProjectListSheet(field: field, drawing: field.drawing)
         }

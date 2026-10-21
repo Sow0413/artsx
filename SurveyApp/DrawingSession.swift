@@ -1480,6 +1480,28 @@ final class DrawingSession: ObservableObject {
     }
 
     @discardableResult
+    func removeFieldPoint(id: String) -> FieldPoint? {
+        guard let index = fieldPoints.firstIndex(where: { $0.id == id }) else { return nil }
+        let point = fieldPoints.remove(at: index)
+        if let project {
+            try? FieldPointStore.save(fieldPoints, projectName: project.name, at: projectsRoot)
+        }
+        publishBook(fieldPoints)
+        mapRevision += 1
+        return point
+    }
+
+    func restoreFieldPoint(_ point: FieldPoint) {
+        guard !fieldPoints.contains(where: { $0.id == point.id }) else { return }
+        fieldPoints.append(point)
+        if let project {
+            try? FieldPointStore.save(fieldPoints, projectName: project.name, at: projectsRoot)
+        }
+        publishBook(fieldPoints)
+        mapRevision += 1
+    }
+
+    @discardableResult
     func sendToStakeout(_ id: String) -> Bool {
         guard let point = fieldPoints.first(where: { $0.id == id }) else { return false }
         stakeoutPointID = id

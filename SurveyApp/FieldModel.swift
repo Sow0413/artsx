@@ -91,6 +91,10 @@ final class FieldModel: ObservableObject {
     @Published private(set) var instrumentTrust: InstrumentTrust
     @Published private(set) var observations: FieldObservationLog
     @Published var showsWorkSettings = false
+    @Published var showsPointList = false
+    @Published var showsTrash = false
+    @Published var selectedPointListID: String?
+    @Published private(set) var retakeName: String?
     @Published private(set) var captureMessage: String?
     @Published var plannedRounds = 3
     @Published private(set) var rounds: [BenchmarkRound] = []
@@ -1199,7 +1203,7 @@ final class FieldModel: ObservableObject {
             captureMessage = "位置が無いので残せません。"
             return false
         }
-        guard let name = nextPointName else {
+        guard let name = nameForCapture() else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
@@ -1220,9 +1224,11 @@ final class FieldModel: ObservableObject {
             captured: position,
             corrected: shifted,
             appliedCorrectionID: shifted == nil ? nil : correction?.id,
-            condition: condition
+            condition: condition,
+            projectID: drawing.project?.id
         )
         store(observation)
+        noteRetakeSaved(name)
         remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
         captureMessage = shifted == nil
             ? "\(observation.name)を残しました。下見の座標は捨てません。"
@@ -1246,7 +1252,7 @@ final class FieldModel: ObservableObject {
                 : "RTK FIX のときだけ基準点を記録できます。FLOAT と単独は残せません。"
             return false
         }
-        guard let name = nextPointName else {
+        guard let name = nameForCapture() else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
@@ -1261,9 +1267,11 @@ final class FieldModel: ObservableObject {
             workID: "boundary",
             captured: fix.position,
             fixDurationSeconds: fix.fixDurationSeconds,
-            condition: condition
+            condition: condition,
+            projectID: drawing.project?.id
         )
         store(observation)
+        noteRetakeSaved(name)
         remember(CoordinateBookIndex.entry(from: observation, kind: "基準点"))
         let satellites = condition.satelliteNote
         let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
@@ -1440,7 +1448,9 @@ final class FieldModel: ObservableObject {
             name: name,
             workID: workCatalog.selected.id,
             captured: position,
-            condition: condition
+            condition: condition,
+            projectID: drawing.project?.id,
+            origin: SurveyList.levelOrigin
         )
         store(observation)
         remember(CoordinateBookIndex.entry(from: observation, kind: CrosshairMath.kind))
@@ -1865,7 +1875,7 @@ final class FieldModel: ObservableObject {
             showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
             return false
         }
-        let name = nextPointName ?? "P\(observationCount + 1)"
+        let name = retakeName ?? nextPointName ?? "P\(observationCount + 1)"
         let work = workCatalog.selected
         let correction = correctionStore.active
         let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
@@ -1883,9 +1893,11 @@ final class FieldModel: ObservableObject {
             captured: position,
             corrected: shifted,
             appliedCorrectionID: shifted == nil ? nil : correction?.id,
-            condition: condition
+            condition: condition,
+            projectID: drawing.project?.id
         )
         store(observation)
+        noteRetakeSaved(name)
         remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
         let point = FieldPointFile(
             name: name,
@@ -1918,8 +1930,191 @@ final class FieldModel: ObservableObject {
     }
 
     func showRecordList() {
-        tab = .survey
         modeMenu = nil
+        purgeExpiredTrash()
+        showsTrash = false
+        showsPointList = true
+    }
+
+    func nameForCapture() -> String? {
+        if let retakeName, !retakeName.isEmpty { return retakeName }
+        return nextPointName
+    }
+
+    func noteRetakeSaved(_ name: String) {
+        guard retakeName == name else { return }
+        try? journal.archiveBook(named: name)
+        retakeName = nil
+    }
+
+    func beginRetake() {
+        guard let row = selectedPointRow() else { return }
+        retakeName = row.name
+        showsPointList = false
+        captureMessage = "\(row.name)を取り直します。"
+    }
+
+    func pointListSections() -> [(title: String, rows: [PointListRow])] {
+        switch tab {
+        case .map:
+            return [("記録", recordRows())]
+        case .drawing:
+            return [("図面", drawingRows())]
+        case .survey:
+            return observationSections(SurveyList.surveyGroups)
+        case .build:
+            return observationSections(SurveyList.buildGroups)
+        }
+    }
+
+    func trashRows() -> [TrashedPoint] {
+        journal.trashedPoints()
+    }
+
+    func bookHistory(for name: String) -> [ArchivedBookEntry] {
+        journal.bookHistory(named: name)
+    }
+
+    func selectedPointRow() -> PointListRow? {
+        guard let selectedPointListID else { return nil }
+        return pointListSections().flatMap(\.rows).first { $0.id == selectedPointListID }
+    }
+
+    func trashSelectedPoint() {
+        guard let row = selectedPointRow() else { return }
+        let id = UUID()
+        var observations: [FieldObservation] = []
+        var records: [String] = []
+        var book: CoordinateBookEntry?
+        var drawingPoint: FieldPoint?
+        switch row.kind {
+        case .record(let name), .observation(let name, _):
+            let workIDs: Set<String>
+            if case .observation = row.kind {
+                workIDs = Set((tab == .build ? SurveyList.buildGroups : SurveyList.surveyGroups).map(\.id))
+            } else {
+                workIDs = Set(SurveyList.surveyGroups.map(\.id) + SurveyList.buildGroups.map(\.id))
+            }
+            observations = journal.observations(named: name).filter { item in
+                guard SurveyList.matchesProject(item, projectID: drawing.project?.id) else { return false }
+                if case .record = row.kind { return true }
+                return workIDs.contains(item.workID)
+            }
+            let files = FieldRecordStore.files(named: name, in: recordsRoot, place: listPlace, day: listDay)
+            for (index, file) in files.enumerated() {
+                records.append(FieldRecordStore.relativePath(of: file, root: recordsRoot))
+                try? FieldRecordStore.moveToTrash(file, id: id, index: index, root: recordsRoot)
+            }
+            try? journal.removeObservations(ids: observations.map(\.id))
+            if journal.observations(named: name).isEmpty {
+                book = journal.removeBook(named: name)
+            }
+        case .drawing(let pointID):
+            drawingPoint = drawing.removeFieldPoint(id: pointID)
+        }
+        let payload = PointTrashPayload(
+            observations: observations,
+            book: book,
+            records: records,
+            drawingProject: drawing.project?.name,
+            drawingPoint: drawingPoint
+        )
+        try? journal.trash(TrashedPoint(id: id, name: row.name, deletedAt: Date(), payload: payload))
+        refreshListedPoints()
+        selectedPointListID = nil
+        captureMessage = "\(row.name)をゴミ箱に移しました。"
+    }
+
+    func restoreTrash(_ id: UUID) {
+        guard let item = journal.takeTrash(id: id) else { return }
+        for observation in item.payload.observations {
+            try? journal.commit(observation)
+        }
+        if let book = item.payload.book {
+            try? journal.upsertBook(book)
+        }
+        for (index, path) in item.payload.records.enumerated() {
+            try? FieldRecordStore.restoreTrashFile(id: item.id, index: index, root: recordsRoot, relativePath: path)
+        }
+        if let point = item.payload.drawingPoint {
+            drawing.restoreFieldPoint(point)
+        }
+        FieldRecordStore.removeTrashFolder(id: item.id, root: recordsRoot)
+        refreshListedPoints()
+        captureMessage = "\(item.name)を戻しました。"
+    }
+
+    func purgeExpiredTrash() {
+        for item in journal.purgeTrash(at: Date()) {
+            FieldRecordStore.removeTrashFolder(id: item.id, root: recordsRoot)
+        }
+    }
+
+    private var listPlace: String? {
+        let place = drawing.project?.place?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let place, !place.isEmpty { return place }
+        let edited = recordPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+        return edited.isEmpty ? nil : edited
+    }
+
+    private var listDay: String? { nil }
+
+    private func recordRows() -> [PointListRow] {
+        FieldRecordStore.points(in: recordsRoot, place: listPlace, day: listDay).map { pin in
+            PointListRow(
+                id: pin.fileURL.path,
+                name: pin.name,
+                group: "記録",
+                detail: "\(pin.place)/\(pin.day)",
+                kind: .record(pin.name)
+            )
+        }
+    }
+
+    private func drawingRows() -> [PointListRow] {
+        drawing.fieldPoints.map { point in
+            PointListRow(
+                id: point.id,
+                name: point.name,
+                group: "図面",
+                detail: point.mapLabel,
+                kind: .drawing(point.id)
+            )
+        }
+    }
+
+    private func observationSections(_ groups: [(id: String, title: String)]) -> [(title: String, rows: [PointListRow])] {
+        let observations = journal.allObservations()
+        let kinds = journal.bookKinds(for: observations.map(\.name))
+        return SurveyList.grouped(
+            observations,
+            groups: groups,
+            bookKinds: kinds,
+            projectID: drawing.project?.id
+        ).map { group in
+            (group.title, group.rows.map { item in
+                PointListRow(
+                    id: item.id.uuidString,
+                    name: item.name,
+                    group: group.title,
+                    detail: listDetail(item),
+                    kind: .observation(item.name, item.workID)
+                )
+            })
+        }
+    }
+
+    private func listDetail(_ observation: FieldObservation) -> String {
+        if let meters = observation.condition?.orthometricHeightMeters {
+            return "標高 \(SurveyHeight.meters(meters))m"
+        }
+        return "\(CoordinateText.latitude(observation.captured.latitudeDegrees)) \(CoordinateText.longitude(observation.captured.longitudeDegrees))"
+    }
+
+    private func refreshListedPoints() {
+        observations = FieldObservationLog(observations: journal.recent())
+        observationCount = journal.count()
+        reloadRecordPins()
     }
 
     /// 今のモードの出す。地図からは測量の書き出しを開く。
