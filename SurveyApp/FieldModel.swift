@@ -12,6 +12,11 @@ struct RecordBanner: Equatable {
     var folderURL: URL?
 }
 
+struct ExportNotice: Equatable {
+    var text: String
+    var fileURL: URL?
+}
+
 enum FieldTab: String, CaseIterable, Identifiable {
     case map
     case drawing
@@ -99,6 +104,8 @@ final class FieldModel: ObservableObject {
     @Published var enclosingBook = false
     @Published private(set) var exportMessage: String?
     @Published private(set) var exportURL: URL?
+    /// 書き出しの結果。数秒で消す。メニューの中には残さない。
+    @Published private(set) var exportNotice: ExportNotice?
     @Published var operation = OperationDesk.load()
     @Published var showsToolOrder = false
     @Published var stature = StatureProfile.load()
@@ -237,6 +244,7 @@ final class FieldModel: ObservableObject {
     private var lastGeocodedLongitude: Double?
     private var geocodeTask: Task<Void, Never>?
     private var recordBannerToken = UUID()
+    private var exportNoticeToken = UUID()
 
     init(
         source: any PositionSource,
@@ -2361,6 +2369,7 @@ final class FieldModel: ObservableObject {
         let journal = journal
         exportMessage = "書き出しています。"
         exportURL = nil
+        exportNotice = nil
         DispatchQueue.global(qos: .userInitiated).async {
             let observations = journal.allObservations()
             let siteBook = journal.bookEntries()
@@ -2382,8 +2391,7 @@ final class FieldModel: ObservableObject {
             }
             guard !entries.isEmpty else {
                 DispatchQueue.main.async {
-                    self.exportMessage = "絞り込みに合う点がありません。"
-                    self.exportURL = nil
+                    self.showExportNotice("絞り込みに合う点がありません。", fileURL: nil)
                 }
                 return
             }
@@ -2393,13 +2401,11 @@ final class FieldModel: ObservableObject {
                 let url = folder.appendingPathComponent(format.filename)
                 try bytes.write(to: url, options: .atomic)
                 DispatchQueue.main.async {
-                    self.exportURL = url
-                    self.exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
+                    self.showExportNotice("\(format.label)を \(entries.count) 点、\(format.filename) に書きました。", fileURL: url)
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.exportURL = nil
-                    self.exportMessage = "書き出せませんでした。"
+                    self.showExportNotice("書き出せませんでした。", fileURL: nil)
                 }
             }
         }
@@ -2413,12 +2419,26 @@ final class FieldModel: ObservableObject {
             let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
             let url = folder.appendingPathComponent(name)
             try Data(body.utf8).write(to: url, options: .atomic)
-            exportURL = url
-            exportMessage = name
+            showExportNotice(name, fileURL: url)
         } catch {
-            exportURL = nil
-            exportMessage = "書き出せませんでした。"
+            showExportNotice("書き出せませんでした。", fileURL: nil)
         }
+    }
+
+    func showExportNotice(_ text: String, fileURL: URL?) {
+        exportMessage = text
+        exportURL = fileURL
+        let token = UUID()
+        exportNoticeToken = token
+        exportNotice = ExportNotice(text: text, fileURL: fileURL)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.exportNoticeToken == token else { return }
+            self.exportNotice = nil
+        }
+    }
+
+    func dismissExportNotice() {
+        exportNotice = nil
     }
 
     func exportDrawingTransform() {
@@ -2432,8 +2452,7 @@ final class FieldModel: ObservableObject {
     func exportArbitraryPoints() {
         let points = drawing.fieldPoints.filter { $0.origin == .arbitrary }
         guard !points.isEmpty else {
-            exportMessage = "任意点がありません。"
-            exportURL = nil
+            showExportNotice("任意点がありません。", fileURL: nil)
             return
         }
         var lines = ["name,X,Y,h"]
@@ -2480,8 +2499,7 @@ final class FieldModel: ObservableObject {
             lines.append("\(Self.csv(point.name)),\(formation),\(ground),\(fill.differenceText ?? ""),\(fill.word ?? "")")
         }
         guard count > 0 else {
-            exportMessage = "切盛がありません。"
-            exportURL = nil
+            showExportNotice("切盛がありません。", fileURL: nil)
             return
         }
         writeExport(name: "切盛.csv", body: lines.joined(separator: "\n"))
@@ -2489,8 +2507,7 @@ final class FieldModel: ObservableObject {
 
     private func writeTransform(name: String) {
         guard let transform = drawing.activeTransform else {
-            exportMessage = "合わせがありません。"
-            exportURL = nil
+            showExportNotice("合わせがありません。", fileURL: nil)
             return
         }
         let saved = drawing.alignments
@@ -2515,8 +2532,7 @@ final class FieldModel: ObservableObject {
 
     private func writeObservations(_ rows: [FieldObservation], name: String, empty: String) {
         guard !rows.isEmpty else {
-            exportMessage = empty
-            exportURL = nil
+            showExportNotice(empty, fileURL: nil)
             return
         }
         var lines = ["name,work,lat,lon,h"]

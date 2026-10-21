@@ -23,15 +23,8 @@ struct DrawingTabView: View {
     @State private var showsSetup = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            projectBar
-            canvas.frame(maxWidth: .infinity, maxHeight: .infinity)
-            if drawing.twoPointMode {
-                TwoPointPanel(field: field, drawing: drawing)
-            } else {
-                actionBar
-            }
-        }
+        board
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SurveyColor.background)
         .overlay {
             ZStack {
@@ -144,7 +137,6 @@ struct DrawingTabView: View {
                 .foregroundStyle(SurveyColor.text)
             }
             .buttonStyle(.plain)
-            .disabled(drawing.project == nil)
             .accessibilityLabel("現場")
         }
         .padding(.horizontal, 12)
@@ -217,6 +209,139 @@ struct DrawingTabView: View {
             .foregroundStyle(SurveyColor.text)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var board: some View {
+        if drawing.document == nil, drawing.pdfData == nil {
+            emptyBoard
+        } else {
+            VStack(spacing: 0) {
+                projectBar
+                if let message = drawing.message, !message.isEmpty {
+                    Text(message)
+                        .font(SurveyType(16, .heavy))
+                        .foregroundStyle(SurveyColor.amber)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+                canvas.frame(maxWidth: .infinity, maxHeight: .infinity)
+                if drawing.twoPointMode {
+                    TwoPointPanel(field: field, drawing: drawing)
+                } else {
+                    actionBar
+                }
+            }
+        }
+    }
+
+    /// 図面が無いあいだは、測量と同じ並びで手順を出す。空白のキャンバスにしない。
+    private var emptyBoard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("図面")
+                .font(SurveyType(28, .heavy))
+                .foregroundStyle(SurveyColor.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+            Button {
+                field.showsProjects = true
+            } label: {
+                HStack(spacing: 8) {
+                    Text(drawing.project?.name ?? "現場")
+                        .font(SurveyType(18, .heavy))
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(SurveyType(14, .bold))
+                        .foregroundStyle(SurveyColor.muted)
+                }
+                .foregroundStyle(SurveyColor.text)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .accessibilityLabel("現場")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let message = drawing.message, !message.isEmpty {
+                        Text(message)
+                            .font(SurveyType(16, .heavy))
+                            .foregroundStyle(SurveyColor.amber)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    FlowRow(title: "取り込む", icon: "square.and.arrow.down") {
+                        if drawing.project == nil {
+                            field.showsProjects = true
+                        } else {
+                            importing = true
+                        }
+                    }
+                    FlowRow(title: "2点合わせ", icon: "link") {
+                        FieldFlow.perform(.align, field: field, fromMenu: false)
+                    }
+                    FlowRow(title: "任意点", icon: "mappin") {
+                        FieldFlow.perform(.arbitrary, field: field, fromMenu: false)
+                    }
+                    FlowRow(title: "丁張へ", icon: "arrow.up.forward") {
+                        sendSelectionToStakeout()
+                    }
+                    FlowRow(title: "出す", icon: "square.and.arrow.up") {
+                        FieldFlow.perform(.writeDrawing, field: field, fromMenu: false)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(SurveyColor.background)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let step = FieldFlow.drawingStep(drawing) {
+                Button(FieldFlow.title(step, field: field)) {
+                    if step == .importFile {
+                        importing = true
+                    } else if step == .projects {
+                        field.showsProjects = true
+                    } else if step == .sendStakeout {
+                        sendSelectionToStakeout()
+                    } else {
+                        FieldFlow.perform(step, field: field, fromMenu: false)
+                    }
+                }
+                .buttonStyle(FlowNextButton())
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
+                .background(SurveyColor.bar)
+            }
+        }
+    }
+
+    private func sendSelectionToStakeout() {
+        let sent: Bool
+        if drawing.draftPoint != nil {
+            sent = drawing.sendDraftToStakeout()
+        } else if let id = drawing.selectedPointID {
+            sent = drawing.sendToStakeout(id)
+        } else if let id = drawing.fieldPoints.first?.id {
+            sent = drawing.sendToStakeout(id)
+        } else {
+            sent = false
+        }
+        if sent {
+            field.selectWork("stakeout")
+            field.tab = .build
+        } else {
+            drawing.report("先に点を置いてください。")
+        }
     }
 
     private var canvas: some View {

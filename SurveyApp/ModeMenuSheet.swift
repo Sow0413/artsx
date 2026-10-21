@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import SurveyCore
 
 /// モードメニューを閉じたあとで開く画面。シートの上にシートを出さない。
@@ -186,20 +187,48 @@ struct ModeMenuSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    rows
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        rows
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(16)
+                .scrollContentBackground(.hidden)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let pin {
+                    Button(FieldFlow.title(pin, field: field)) {
+                        FieldFlow.perform(pin, field: field, fromMenu: true) { handoff = $0 }
+                    }
+                    .buttonStyle(FlowNextButton())
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity)
+                    .background(SurveyColor.bar)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(SurveyColor.background)
             .navigationTitle(mode.title)
             .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) { pinBar }
+            .overlay(alignment: .top) {
+                if let notice = field.exportNotice {
+                    ExportNoticeButton(notice: notice) {
+                        field.dismissExportNotice()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                }
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .modifier(SurveyScheme())
+        .modifier(PageSheetWidth())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(SurveyColor.background)
     }
 
     @ViewBuilder
@@ -220,78 +249,6 @@ struct ModeMenuSheet: View {
         FieldFlow.menuPin(mode, field: field)
     }
 
-    /// 図面の今の段。それより前の手順だけを、ピンの上に並べる。
-    private var drawingRank: Int {
-        switch pin {
-        case .projects: return 0
-        case .importFile: return 1
-        case .align: return 2
-        case .arbitrary: return 3
-        case .sendStakeout: return 4
-        case .writeDrawing: return 5
-        case nil:
-            return field.drawing.twoPointMode ? 2 : 1
-        default:
-            return 5
-        }
-    }
-
-    /// 1 は記録の前。2 は出す。
-    private var surveyRank: Int {
-        pin == .writeSurvey ? 2 : 1
-    }
-
-    /// 施工。0 データ、1 点、2 誘導、3 記録、4 出す。
-    private var buildRank: Int {
-        switch pin {
-        case .pickData: return 0
-        case .pickPoint: return 1
-        case .guide: return 2
-        case .record: return 3
-        case .writeBuild: return 4
-        default: return 3
-        }
-    }
-
-    @ViewBuilder
-    private var pinBar: some View {
-        if pin != nil || field.exportURL != nil || field.exportMessage != nil {
-            pinBarContent
-        }
-    }
-
-    private var pinBarContent: some View {
-        VStack(spacing: 8) {
-            if let message = field.exportMessage {
-                Text(message)
-                    .font(SurveyType(14, .heavy))
-                    .foregroundStyle(SurveyColor.muted)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if let url = field.exportURL {
-                ShareLink(item: url) {
-                    Text("共有")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(SurveyColor.card)
-                        .foregroundStyle(SurveyColor.text)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            if let pin {
-                Button(FieldFlow.title(pin, field: field)) {
-                    FieldFlow.perform(pin, field: field, fromMenu: true) { handoff = $0 }
-                }
-                .buttonStyle(FlowNextButton())
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
-        .background(SurveyColor.bar)
-    }
-
     @ViewBuilder
     private var mapRows: some View {
         if let layers = field.drawing.document?.layers, !layers.isEmpty {
@@ -310,14 +267,13 @@ struct ModeMenuSheet: View {
             .foregroundStyle(SurveyColor.text)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        if pin != .toggleHeading {
-            flowRow(FieldFlow.title(.toggleHeading, field: field), icon: "location.north") {
-                field.toggleMapHeading()
-            }
+        flowRow(FieldFlow.title(.toggleHeading, field: field), icon: "location.north") {
+            field.toggleMapHeading()
         }
-        if field.drawing.hasMapOverlay, pin != .toggleCad {
+        if field.drawing.hasMapOverlay {
             flowRow(field.mapCadOn ? "図面オフ" : "図面オン", icon: "ruler") {
                 field.toggleMapCad()
             }
@@ -348,47 +304,45 @@ struct ModeMenuSheet: View {
 
     @ViewBuilder
     private var drawingRows: some View {
-        if drawingRank > 1, field.drawing.project != nil {
-            flowRow("取り込む", icon: "square.and.arrow.down") {
-                handoff = .fileImport
-                field.modeMenu = nil
-            }
-        }
-        if drawingRank > 2, field.drawing.document != nil {
-            flowRow("2点合わせ", icon: "link") {
-                FieldFlow.perform(.align, field: field, fromMenu: true) { handoff = $0 }
-            }
-        }
-        if drawingRank > 3, field.drawing.canPlaceArbitrary {
-            flowRow("任意点", icon: "mappin") {
-                FieldFlow.perform(.arbitrary, field: field, fromMenu: true) { handoff = $0 }
-            }
-        }
-        if drawingRank > 4, field.drawing.draftPoint != nil || field.drawing.selectedPointID != nil {
-            flowRow("丁張へ", icon: "arrow.up.forward") {
-                let sent: Bool
-                if field.drawing.draftPoint != nil {
-                    sent = field.drawing.sendDraftToStakeout()
-                } else if let id = field.drawing.selectedPointID {
-                    sent = field.drawing.sendToStakeout(id)
-                } else {
-                    sent = false
-                }
-                if sent {
-                    field.selectWork("stakeout")
-                    field.tab = .build
-                }
-                field.modeMenu = nil
-            }
-        }
-        if drawingRank >= 5 {
-            exportRow("合わせた図面") { field.exportAlignedDrawing() }
-            if field.drawing.activeTransform != nil {
-                exportRow("任意点") { field.exportArbitraryPoints() }
+        flowRow("取り込む", icon: "square.and.arrow.down") {
+            if field.drawing.project == nil {
+                handoff = .projects
             } else {
-                exportRow("変換") { field.exportDrawingTransform() }
+                handoff = .fileImport
             }
+            field.modeMenu = nil
         }
+        flowRow("2点合わせ", icon: "link") {
+            FieldFlow.perform(.align, field: field, fromMenu: true) { handoff = $0 }
+        }
+        flowRow("任意点", icon: "mappin") {
+            FieldFlow.perform(.arbitrary, field: field, fromMenu: true) { handoff = $0 }
+        }
+        flowRow("丁張へ", icon: "arrow.up.forward") {
+            let sent: Bool
+            if field.drawing.draftPoint != nil {
+                sent = field.drawing.sendDraftToStakeout()
+            } else if let id = field.drawing.selectedPointID {
+                sent = field.drawing.sendToStakeout(id)
+            } else if let id = field.drawing.fieldPoints.first?.id {
+                sent = field.drawing.sendToStakeout(id)
+            } else {
+                sent = false
+            }
+            if sent {
+                field.selectWork("stakeout")
+                field.tab = .build
+            } else {
+                field.drawing.report("先に点を置いてください。")
+            }
+            field.modeMenu = nil
+        }
+        flowRow("出す", icon: "square.and.arrow.up") {
+            FieldFlow.perform(.writeDrawing, field: field, fromMenu: false)
+        }
+        exportRow("合わせた図面") { field.exportAlignedDrawing() }
+        exportRow("任意点") { field.exportArbitraryPoints() }
+        exportRow("変換") { field.exportDrawingTransform() }
     }
 
     @ViewBuilder
@@ -406,53 +360,109 @@ struct ModeMenuSheet: View {
             handoff = .ar
             field.modeMenu = nil
         }
-        if surveyRank > 1 {
-            flowRow("記録へ", icon: "record.circle") {
-                FieldFlow.perform(.goMap, field: field, fromMenu: true) { handoff = $0 }
-            }
-            if field.bookQuery.bounds != nil {
-                exportRow("記録点") { field.exportRecordedPoints() }
-            }
-            exportRow("SIMA") { field.exportDelivery(.sima) }
-            if field.bookQuery.bounds == nil {
-                exportRow("CSV") { field.exportDelivery(.csv) }
-            }
-            exportRow("観測記録") { field.exportObservationLog() }
+        flowRow("記録へ", icon: "record.circle") {
+            FieldFlow.perform(.goMap, field: field, fromMenu: true) { handoff = $0 }
         }
+        exportRow("記録点") { field.exportRecordedPoints() }
+        exportRow("SIMA") { field.exportDelivery(.sima) }
+        exportRow("CSV") { field.exportDelivery(.csv) }
+        exportRow("観測記録") { field.exportObservationLog() }
     }
 
     @ViewBuilder
     private var buildRows: some View {
-        if buildRank > 0 {
-            flowRow("データ選択", icon: "folder") {
-                FieldFlow.perform(.pickData, field: field, fromMenu: true) { handoff = $0 }
-            }
+        flowRow("データ選択", icon: "folder") {
+            FieldFlow.perform(.pickData, field: field, fromMenu: true) { handoff = $0 }
         }
-        if buildRank > 1 {
-            flowRow("点を選ぶ", icon: "mappin") {
-                FieldFlow.perform(.pickPoint, field: field, fromMenu: true) { handoff = $0 }
-            }
-            WorkBar(field: field, ids: FieldFlow.buildWorkIDs)
-            flowRow("丁張", icon: "arrow.up.forward") {
-                handoff = .batter
-                field.modeMenu = nil
-            }
+        flowRow("点を選ぶ", icon: "mappin") {
+            FieldFlow.perform(.pickPoint, field: field, fromMenu: true) { handoff = $0 }
         }
-        if buildRank > 2 {
-            flowRow("誘導", icon: "location") {
-                FieldFlow.perform(.guide, field: field, fromMenu: true) { handoff = $0 }
-            }
+        WorkBar(field: field, ids: FieldFlow.buildWorkIDs)
+        flowRow("誘導", icon: "location") {
+            FieldFlow.perform(.guide, field: field, fromMenu: true) { handoff = $0 }
         }
-        if buildRank > 3 {
-            flowRow("記録", icon: "record.circle") {
-                FieldFlow.perform(.record, field: field, fromMenu: true) { handoff = $0 }
-            }
-            exportRow("出来形") { field.exportDelivery(.asBuiltPDF) }
-            exportRow("切盛") { field.exportCutFill() }
+        flowRow("丁張", icon: "arrow.up.forward") {
+            handoff = .batter
+            field.modeMenu = nil
         }
+        flowRow("記録", icon: "record.circle") {
+            FieldFlow.perform(.record, field: field, fromMenu: true) { handoff = $0 }
+        }
+        exportRow("丁張結果") { field.exportStakeoutResults() }
+        exportRow("出来形") { field.exportDelivery(.asBuiltPDF) }
+        exportRow("切盛") { field.exportCutFill() }
     }
 
     private func flowRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        FlowRow(title: title, icon: icon, action: action)
+    }
+
+    private func exportRow(_ title: String, action: @escaping () -> Void) -> some View {
+        flowRow(title, icon: "square.and.arrow.up", action: action)
+    }
+}
+
+struct ExportNoticeButton: View {
+    let notice: ExportNotice
+    var onDismiss: () -> Void
+    @State private var sharing = false
+
+    var body: some View {
+        Button {
+            if notice.fileURL != nil {
+                sharing = true
+            } else {
+                onDismiss()
+            }
+        } label: {
+            Text(notice.text)
+                .font(SurveyType(16, .heavy))
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+                .foregroundStyle(Color.black)
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Color.white.opacity(0.94), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(notice.text)
+        .accessibilityHint(notice.fileURL == nil ? "閉じる" : "共有")
+        .sheet(isPresented: $sharing) {
+            if let url = notice.fileURL {
+                ActivityShare(url: url)
+            }
+        }
+    }
+}
+
+struct ActivityShare: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+/// シートを画面幅に固定する。中身の理想幅が細いと、iOS 18 以降のシートが縦の帯になる。
+private struct PageSheetWidth: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.presentationSizing(.page)
+        } else {
+            content
+        }
+    }
+}
+
+struct FlowRow: View {
+    let title: String
+    var icon: String
+    let action: () -> Void
+
+    var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
                 Image(systemName: icon)
@@ -469,14 +479,10 @@ struct ModeMenuSheet: View {
             }
             .foregroundStyle(SurveyColor.text)
             .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    private func exportRow(_ title: String, action: @escaping () -> Void) -> some View {
-        flowRow(title, icon: "square.and.arrow.up", action: action)
     }
 }
 

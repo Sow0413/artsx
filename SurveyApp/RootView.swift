@@ -85,26 +85,34 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(SurveyColor.background)
             .overlay(alignment: .top) {
-                if let banner = field.recordBanner {
-                    Button {
-                        openRecordBanner()
-                    } label: {
-                        Text(banner.text)
-                            .font(SurveyType(16, .heavy))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.55)
-                            .foregroundStyle(Color.black)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 44)
-                            .background(Color.white.opacity(0.94), in: Capsule())
+                VStack(spacing: 8) {
+                    if let banner = field.recordBanner {
+                        Button {
+                            openRecordBanner()
+                        } label: {
+                            Text(banner.text)
+                                .font(SurveyType(16, .heavy))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.55)
+                                .foregroundStyle(Color.black)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 44)
+                                .background(Color.white.opacity(0.94), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(banner.text)
+                        .accessibilityHint(banner.folderURL == nil ? "閉じる" : "フォルダを開く")
                     }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .accessibilityLabel(banner.text)
-                    .accessibilityHint(banner.folderURL == nil ? "閉じる" : "フォルダを開く")
+                    if field.modeMenu == nil, let notice = field.exportNotice {
+                        ExportNoticeButton(notice: notice) {
+                            field.dismissExportNotice()
+                        }
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
             }
             SurveyTabBar(
                 selection: $field.tab,
