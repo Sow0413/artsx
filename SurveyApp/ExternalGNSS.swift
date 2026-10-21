@@ -288,6 +288,7 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         }
     }
 
+    /// この端末のソケットは一つ。別の端末は同じ ID で同時につながる。
     private func openNTRIP() {
         guard connection == nil, !ntripRejected else { return }
         let settings = NTRIPSettings.load()
@@ -508,7 +509,7 @@ struct ExternalReceiverSettings: View {
                 fieldRow("ホスト") { TextField(DocomoCaster.host, text: $host).textInputAutocapitalization(.never).autocorrectionDisabled() }
                 fieldRow("ポート") { TextField("2101", text: $port).keyboardType(.numberPad) }
                 fieldRow("マウント") { TextField(DocomoCaster.mountpoint, text: $mountpoint).textInputAutocapitalization(.never).autocorrectionDisabled() }
-                Text("RRS。1つのIDは同時に1回線。GGAは10秒。")
+                Text("同じIDを複数の端末で使えます。GGAは10秒。")
                     .font(SurveyType(15, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                 Text("Drogger は BLE 4.4.2 以上。Classic は使いません。")

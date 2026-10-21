@@ -32,7 +32,7 @@ public struct NTRIPAccount: Equatable, Sendable {
     }
 }
 
-/// docomo 高精度GNSS。RRS は最寄り局を選ぶマウントポイント。パスワードは持たない。
+/// docomo 高精度GNSS。RRS は最寄り局を選ぶマウントポイント。同じ ID は何台でも同時に使える。パスワードは持たない。
 public enum DocomoCaster {
     public static let host = "d-gnss.jp"
     public static let port = 2101
