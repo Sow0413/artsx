@@ -319,13 +319,7 @@ struct BatterSheet: View {
         case .poleTip:
             guard let position, let device = position.ellipsoidalHeightMeters else { return nil }
             guard let tip = BatterMath.poleTip(deviceEllipsoidal: device, poleMeters: field.poleHeight.meters) else { return nil }
-            return SurveyHeight.resolve(
-                ellipsoidalMeters: tip,
-                latitudeDegrees: position.latitudeDegrees,
-                longitudeDegrees: position.longitudeDegrees,
-                meanSeaLevelMeters: position.meanSeaLevelMeters,
-                deviceEllipsoidalMeters: device
-            ).orthometricMeters ?? tip
+            return field.surveyHeight(ellipsoidal: tip, at: position).orthometricMeters ?? tip
         case .crosshair:
             guard BatterMath.acceptsCrosshair(isLevel: crosshairLevel),
                   let ground = field.crosshairGroundHeight(),

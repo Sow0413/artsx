@@ -40,22 +40,24 @@ public enum NMEA {
         return Sentence(kind: kind, fields: Array(columns.dropFirst()))
     }
 
-    /// 受信機の GGA。標高は直交高さ、分離はジオイド高。楕円体高は両方を足す。
+    /// 受信機の GGA。直交高さと分離の和が楕円体高。標高は受信機の分離では作らない。
     public static func position(from lines: [String], at date: Date = Date()) -> GeodeticPosition? {
         var gga: Sentence?
         var rmc: Sentence?
         var gst: Sentence?
+        var gns: Sentence?
         for line in lines {
             guard let sentence = parse(line) else { continue }
             switch sentence.kind {
             case "GGA": gga = sentence
             case "RMC": rmc = sentence
             case "GST": gst = sentence
+            case "GNS": gns = sentence
             default: break
             }
         }
         guard let gga else { return nil }
-        return position(gga: gga, rmc: rmc, gst: gst, at: date)
+        return position(gga: gga, rmc: rmc, gst: gst, gns: gns, at: date)
     }
 
     public static func gga(
@@ -81,14 +83,17 @@ public enum NMEA {
         return "$\(body)*\(checksum(body))"
     }
 
-    static func position(gga: Sentence, rmc: Sentence?, gst: Sentence?, at date: Date) -> GeodeticPosition? {
+    static func position(gga: Sentence, rmc: Sentence?, gst: Sentence?, gns: Sentence? = nil, at date: Date) -> GeodeticPosition? {
         let fields = gga.fields
         guard fields.count > 5,
               let latitude = degrees(fields[1], hemisphere: fields.count > 2 ? fields[2] : ""),
               let longitude = degrees(fields[3], hemisphere: fields.count > 4 ? fields[4] : ""),
               let quality = Int(fields[5]) else { return nil }
-        let fix = fixQuality(quality)
+        var fix = fixQuality(quality)
         guard fix != .none else { return nil }
+        if reportsCLAS(gns) || reportsCLAS(rmcMode: rmc) {
+            fix = .clas
+        }
         let satellites = fields.count > 6 ? Int(fields[6]) : nil
         let hdop = fields.count > 7 ? Double(fields[7]) : nil
         let orthometric = fields.count > 8 ? Double(fields[8]) : nil
@@ -105,7 +110,8 @@ public enum NMEA {
         let horizontal = gstHorizontal ?? assumedHorizontal(fix: fix, hdop: hdop)
         let vertical = altitudeAccuracy(gst) ?? (horizontal * 1.5)
         let course = courseDegrees(rmc)
-        let stage: PositionStage = (fix == .rtkFix || fix == .float) ? .rtk : .iphone
+        let stage: PositionStage = fix == .clas ? .clas : ((fix == .rtkFix || fix == .float) ? .rtk : .iphone)
+        let receiver: ReceiverKind = fix == .clas ? .clas : .rtk
         return GeodeticPosition(
             latitudeDegrees: latitude,
             longitudeDegrees: longitude,
@@ -115,7 +121,7 @@ public enum NMEA {
             timestamp: date,
             stage: stage,
             fixQuality: fix,
-            receiver: .rtk,
+            receiver: receiver,
             satelliteCount: satellites,
             pdop: hdop,
             correctionAgeSeconds: age,
@@ -125,27 +131,31 @@ public enum NMEA {
         )
     }
 
-    /// GGA の直交高さと、楕円体高から引いた地理院の標高。差は地理院 − 受信機。
-    public static func receiverHeightLine(
-        orthometricMeters: Double,
-        ellipsoidalMeters: Double?,
-        latitudeDegrees: Double,
-        longitudeDegrees: Double
-    ) -> String? {
-        guard orthometricMeters.isFinite else { return nil }
-        let shown = FixedNumber.string(orthometricMeters, fractionDigits: 1)
-        let gsi = SurveyHeight.resolve(
-            ellipsoidalMeters: ellipsoidalMeters,
-            latitudeDegrees: latitudeDegrees,
-            longitudeDegrees: longitudeDegrees,
-            meanSeaLevelMeters: orthometricMeters
-        ).orthometricMeters
-        guard let gsi, gsi.isFinite else { return "受信機 \(shown)m" }
-        let receiverShown = (orthometricMeters * 10).rounded() / 10
-        let gsiShown = (gsi * 10).rounded() / 10
+    /// 差は地理院の標高 − 受信機の直交高さ。受信機の数は標高にしない。
+    public static func receiverGapLine(receiverOrthometricMeters: Double, gsiOrthometricMeters: Double) -> String? {
+        guard receiverOrthometricMeters.isFinite, gsiOrthometricMeters.isFinite else { return nil }
+        let receiverShown = (receiverOrthometricMeters * 10).rounded() / 10
+        let gsiShown = (gsiOrthometricMeters * 10).rounded() / 10
         let diff = gsiShown - receiverShown
         let signed = String(format: "%+.1f", locale: posix, diff)
-        return "受信機 \(shown)m（地理院との差 \(signed)m）"
+        return "受信機との差 \(signed)m"
+    }
+
+    /// GNS のモードに P があり、RTK の R / F が無いとき、受信機は CLAS と報告している。
+    static func reportsCLAS(_ gns: Sentence?) -> Bool {
+        guard let mode = gns.flatMap({ $0.fields.count > 5 ? $0.fields[5] : nil }) else { return false }
+        return precise(mode)
+    }
+
+    static func reportsCLAS(rmcMode rmc: Sentence?) -> Bool {
+        guard let rmc, rmc.fields.count > 11 else { return false }
+        return precise(rmc.fields[11])
+    }
+
+    private static func precise(_ mode: String) -> Bool {
+        let letters = mode.uppercased()
+        guard letters.contains("P") else { return false }
+        return !letters.contains("R") && !letters.contains("F")
     }
 
     static func fixQuality(_ quality: Int) -> FixQuality {

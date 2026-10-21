@@ -149,10 +149,6 @@ struct RootView: View {
                     .accessibilityHidden(true)
             }
         }
-        .confirmationDialog(field.fixWarning, isPresented: $field.asksFixOverride, titleVisibility: .visible) {
-            Button("記録する") { field.acceptFixOverride() }
-            Button("やめる", role: .cancel) { field.declineFixOverride() }
-        }
         .onAppear {
             field.start()
             field.setSightForeground(scenePhase == .active)

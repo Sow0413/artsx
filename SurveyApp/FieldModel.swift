@@ -12,12 +12,6 @@ struct RecordBanner: Equatable {
     var folderURL: URL?
 }
 
-enum FixOverrideAction {
-    case record
-    case capture
-    case average
-}
-
 struct ExportNotice: Equatable {
     var text: String
     var fileURL: URL?
@@ -220,8 +214,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var gnssChoices: [GNSSChoice] = []
     @Published private(set) var receiverChoices: [GNSSChoice] = []
     @Published private(set) var receiverStatus = "未接続"
-    @Published var asksFixOverride = false
-    @Published var fixWarning = "FIXではありません。このまま記録しますか。"
+    @Published private(set) var receiverFirmware = ""
+    @Published private(set) var rtcmLine = ""
     @Published private(set) var observationCount = 0
     @Published private(set) var incidentStatRows: [IncidentStatRow] = []
     @Published private(set) var sealedIncidents: [SealedIncidentRow] = []
@@ -230,7 +224,12 @@ final class FieldModel: ObservableObject {
     private let statsRelay = IncidentStatsRelayStub(reachable: false)
     private var incidentTimer: Timer?
     private var phoneAccuracyTimer: Timer?
-    private var pendingAverage: (GeodeticPosition, PhoneAverageStamp)?
+    @Published private(set) var geoid2024Meters: Double?
+    private var geoidAnchorLat: Double?
+    private var geoidAnchorLon: Double?
+    private var geoidCache = GSIGeoid2024Cache()
+    private var geoidTask: Task<Void, Never>?
+    private var geoidGeneration = 0
     private var restoredIncidentProject: String?
     let controlPoints: [ControlPoint]
     let journal: FieldJournal
@@ -246,10 +245,8 @@ final class FieldModel: ObservableObject {
     private var radioReading: PositionReading?
     private var radioAt: Date?
     private var correctionAt: Date?
-    private var usingRadio = false
+    private var positionTier: PositioningTier = .phone
     private var gnssNoticeToken = UUID()
-    private var pendingFixAction: FixOverrideAction?
-    private var fixOverrideArmed = false
     private var downloadTask: Task<Void, Never>?
     private var benchmarkTask: Task<Void, Never>?
     private var visibleBounds: GeoBounds?
@@ -1232,7 +1229,6 @@ final class FieldModel: ObservableObject {
 
     @discardableResult
     func captureObservation() -> Bool {
-        if blockedByFix(.capture) { return false }
         guard StageGate.allowsRecording(workID: workCatalog.selected.id, stage: stageTransition.stage) else {
             captureMessage = Self.stageDroppedRecording
             return false
@@ -1250,7 +1246,7 @@ final class FieldModel: ObservableObject {
         let control = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
         let prepared = preparedPhonePoint(position)
         let stored = prepared.position
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: stored,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
@@ -1299,7 +1295,7 @@ final class FieldModel: ObservableObject {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: fix.position,
             stage: stageTransition.stage,
             durationSeconds: fix.fixDurationSeconds,
@@ -1386,7 +1382,7 @@ final class FieldModel: ObservableObject {
             return false
         }
         position.ellipsoidalHeightMeters = record.heightMeters
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: position,
             stage: record.stage,
             durationSeconds: nil,
@@ -1467,6 +1463,41 @@ final class FieldModel: ObservableObject {
         }
     }
 
+    /// ジオイド2024。10 m か 30 秒ごと。失敗しても、直前の値は 500 m まで使う。
+    func refreshGeoid2024(now: Date = Date()) {
+        guard let position = reading.position ?? navigationReading.position, position.isPlottable else { return }
+        let latitude = position.latitudeDegrees
+        let longitude = position.longitudeDegrees
+        guard geoidCache.shouldRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, now: now) else { return }
+        geoidCache.noteRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, at: now)
+        geoidGeneration += 1
+        let generation = geoidGeneration
+        geoidTask?.cancel()
+        geoidTask = Task { [weak self] in
+            let sample = await GSIGeoid2024API.fetch(latitudeDegrees: latitude, longitudeDegrees: longitude)
+            guard !Task.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, generation == self.geoidGeneration, let sample else { return }
+                self.geoidAnchorLat = latitude
+                self.geoidAnchorLon = longitude
+                self.geoid2024Meters = sample.separationMeters
+            }
+        }
+    }
+
+    private func geoidSeparation(near position: GeodeticPosition) -> Double? {
+        guard let meters = geoid2024Meters, meters.isFinite,
+              let latitude = geoidAnchorLat, let longitude = geoidAnchorLon else { return nil }
+        let moved = GeoDistance.meters(
+            latitude1: latitude,
+            longitude1: longitude,
+            latitude2: position.latitudeDegrees,
+            longitude2: position.longitudeDegrees
+        )
+        guard moved <= GSIGeoid2024Policy.reuseMeters else { return nil }
+        return meters
+    }
+
     /// アンテナ補正のあとの楕円体高を、標高へ直す。持ち高さの引き方は変えない。
     func liveSurveyHeight(_ position: GeodeticPosition) -> SurveyHeight {
         let record = StatureMath.record(
@@ -1475,12 +1506,37 @@ final class FieldModel: ObservableObject {
             sight: liveSight
         ).flatMap { StatureMath.applies(stage: stageTransition.stage, receiver: position.receiver) ? $0 : nil }
         let base = record?.groundHeightMeters ?? position.ellipsoidalHeightMeters
+        return surveyHeight(ellipsoidal: base, at: position)
+    }
+
+    func surveyHeight(ellipsoidal: Double?, at position: GeodeticPosition) -> SurveyHeight {
+        let sea = position.receiver == .iphoneGPS ? position.meanSeaLevelMeters : nil
         return SurveyHeight.resolve(
-            ellipsoidalMeters: base,
+            ellipsoidalMeters: ellipsoidal,
             latitudeDegrees: position.latitudeDegrees,
             longitudeDegrees: position.longitudeDegrees,
-            meanSeaLevelMeters: position.meanSeaLevelMeters,
-            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
+            meanSeaLevelMeters: sea,
+            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters,
+            gsi2024SeparationMeters: geoidSeparation(near: position)
+        )
+    }
+
+    private func stamped(
+        position: GeodeticPosition,
+        stage: PositionStage,
+        durationSeconds: TimeInterval?,
+        epochCount: Int?,
+        stature profile: StatureProfile? = nil,
+        sight: SightSample? = nil
+    ) -> ObservationCondition {
+        ObservationCondition.snapshot(
+            position: position,
+            stage: stage,
+            durationSeconds: durationSeconds,
+            epochCount: epochCount,
+            stature: profile,
+            sight: sight,
+            gsi2024SeparationMeters: geoidSeparation(near: position)
         )
     }
 
@@ -1496,13 +1552,7 @@ final class FieldModel: ObservableObject {
         }
         guard let hold = StatureMath.holdMeters(profile: stature, sight: sight) else { return nil }
         let ellipsoidalGround = device - hold
-        return SurveyHeight.resolve(
-            ellipsoidalMeters: ellipsoidalGround,
-            latitudeDegrees: position.latitudeDegrees,
-            longitudeDegrees: position.longitudeDegrees,
-            meanSeaLevelMeters: position.meanSeaLevelMeters,
-            deviceEllipsoidalMeters: device
-        ).orthometricMeters ?? ellipsoidalGround
+        return surveyHeight(ellipsoidal: ellipsoidalGround, at: position).orthometricMeters ?? ellipsoidalGround
     }
 
     @discardableResult
@@ -1530,7 +1580,7 @@ final class FieldModel: ObservableObject {
             verticalAccuracy: accuracy.vertical,
             at: Date()
         )
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: position,
             stage: .iphone,
             durationSeconds: nil,
@@ -1665,7 +1715,7 @@ final class FieldModel: ObservableObject {
             timestamp: Date(),
             headingDegrees: headingNow
         )
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: position,
             stage: .iphone,
             durationSeconds: nil,
@@ -1969,7 +2019,6 @@ final class FieldModel: ObservableObject {
     /// 今の位置を1点残す。座標簿と Documents/records/<場所>/<日付>/ の両方へ書く。
     @discardableResult
     func recordHere() -> Bool {
-        if blockedByFix(.record) { return false }
         guard let position = reading.position, position.isPlottable else {
             showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
             return false
@@ -1986,7 +2035,7 @@ final class FieldModel: ObservableObject {
         let control = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
         let prepared = preparedPhonePoint(position)
         let stored = prepared.position
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: stored,
             stage: average == nil ? stageTransition.stage : .iphone,
             durationSeconds: average?.durationSeconds ?? epochWatch.duration(at: stored.timestamp),
@@ -2982,6 +3031,14 @@ final class FieldModel: ObservableObject {
         receiverStatus = text
     }
 
+    func noteReceiverFirmware(_ text: String) {
+        receiverFirmware = text
+    }
+
+    func noteRTCM(_ line: String) {
+        rtcmLine = line
+    }
+
     func noteReceiver(_ position: GeodeticPosition) {
         radioReading = PositionReading(position: position, availability: .available)
         radioAt = Date()
@@ -3025,34 +3082,6 @@ final class FieldModel: ObservableObject {
         )
     }
 
-    func acceptFixOverride() {
-        let action = pendingFixAction
-        pendingFixAction = nil
-        asksFixOverride = false
-        fixOverrideArmed = true
-        switch action {
-        case .record:
-            _ = recordHere()
-        case .capture:
-            _ = captureObservation()
-        case .average:
-            if let pending = pendingAverage {
-                writeRecord(pending.0, average: pending.1)
-            }
-        case nil:
-            break
-        }
-        pendingAverage = nil
-        fixOverrideArmed = false
-    }
-
-    func declineFixOverride() {
-        asksFixOverride = false
-        pendingFixAction = nil
-        pendingAverage = nil
-        fixOverrideArmed = false
-    }
-
     private func notePhone(_ reading: PositionReading) {
         phoneReading = reading
         capturePhoneAverage()
@@ -3066,20 +3095,14 @@ final class FieldModel: ObservableObject {
             receiverAt: radioAt,
             correctionAt: correctionAt,
             now: now,
-            wasUsingReceiver: usingRadio
+            previous: positionTier
         )
-        if let drop = choice.drop {
-            switch drop {
-            case .receiver:
-                showGNSSNotice("受信機が切れました。iPhoneの測位に戻しました。")
-            case .corrections:
-                showGNSSNotice("補正が切れました。iPhoneの測位に戻しました。")
-            }
+        if let notice = choice.notice {
+            showGNSSNotice(notice)
         }
-        usingRadio = choice.usingReceiver
-        if choice.reading == reading, usingRadio == choice.usingReceiver, choice.drop == nil {
-            return
-        }
+        let changed = choice.reading != reading || positionTier != choice.tier
+        positionTier = choice.tier
+        guard changed else { return }
         apply(choice.reading)
     }
 
@@ -3091,15 +3114,6 @@ final class FieldModel: ObservableObject {
             guard let self, self.gnssNoticeToken == token else { return }
             self.gnssNotice = nil
         }
-    }
-
-    private func blockedByFix(_ action: FixOverrideAction) -> Bool {
-        guard !fixOverrideArmed else { return false }
-        guard let warning = ExternalFix.warning(workID: workCatalog.selected.id, position: reading.position) else { return false }
-        fixWarning = warning
-        pendingFixAction = action
-        asksFixOverride = true
-        return true
     }
 
     private func apply(_ reading: PositionReading) {
@@ -3141,6 +3155,7 @@ final class FieldModel: ObservableObject {
         trackIncidents()
         refreshVisibleControlPoints()
         considerPlaceName()
+        refreshGeoid2024()
         if tab == .map {
             refreshTerrainElevation()
         }
@@ -3586,7 +3601,6 @@ final class FieldModel: ObservableObject {
             showRecordBanner(RecordBanner(text: "現場を選んでください", folderURL: nil), success: false)
             return
         }
-        pendingAverage = nil
         phoneRun = PhoneAverageRun(startedAt: Date(), limit: averageSpan.seconds, purpose: purpose)
         phoneClock = Date()
         showsPhoneAverage = false
@@ -3630,7 +3644,7 @@ final class FieldModel: ObservableObject {
 
     private func capturePhoneAverage() {
         guard var run = phoneRun, let position = phoneReading.position, position.isPlottable else { return }
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: position,
             stage: .iphone,
             durationSeconds: nil,
@@ -3684,15 +3698,7 @@ final class FieldModel: ObservableObject {
     }
 
     private func commitAverage(_ result: PhoneAverageResult) {
-        let position = averagedPosition(result)
-        if let warning = ExternalFix.warning(workID: workCatalog.selected.id, position: position) {
-            pendingAverage = (position, result.stamp)
-            fixWarning = warning
-            pendingFixAction = .average
-            asksFixOverride = true
-            return
-        }
-        writeRecord(position, average: result.stamp)
+        writeRecord(averagedPosition(result), average: result.stamp)
     }
 
     private func averagedPosition(_ result: PhoneAverageResult) -> GeodeticPosition {

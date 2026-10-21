@@ -23,7 +23,7 @@ public enum CoordinateText {
             ellipsoidalMeters: position.ellipsoidalHeightMeters,
             latitudeDegrees: position.latitudeDegrees,
             longitudeDegrees: position.longitudeDegrees,
-            meanSeaLevelMeters: position.meanSeaLevelMeters
+            meanSeaLevelMeters: position.receiver == .iphoneGPS ? position.meanSeaLevelMeters : nil
         )
         let place = "\(latitude(position.latitudeDegrees)), \(longitude(position.longitudeDegrees))"
         return ([place, height.primaryLine] + height.detailLines).joined(separator: "　")

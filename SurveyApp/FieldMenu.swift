@@ -330,12 +330,9 @@ private struct DisplaySettings: View {
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     if let orthometric = position.meanSeaLevelMeters,
-                       let line = NMEA.receiverHeightLine(
-                           orthometricMeters: orthometric,
-                           ellipsoidalMeters: position.ellipsoidalHeightMeters,
-                           latitudeDegrees: position.latitudeDegrees,
-                           longitudeDegrees: position.longitudeDegrees
-                       ), position.receiver == .rtk {
+                       let gsi = height.orthometricMeters,
+                       let line = NMEA.receiverGapLine(receiverOrthometricMeters: orthometric, gsiOrthometricMeters: gsi),
+                       position.receiver != .iphoneGPS {
                         Text(line)
                             .font(SurveyType(15, .semibold))
                             .foregroundStyle(SurveyColor.muted)

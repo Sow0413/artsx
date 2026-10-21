@@ -22,6 +22,40 @@ final class GeoidTests: XCTestCase {
         XCTAssertTrue(height.detailLines.contains(JapanGeoid.modelName))
     }
 
+    func testGeoid2024IsSubtractedAheadOfThe2011Grid() throws {
+        let raw = #"{"OutputData":{"latitude":"36.774500000","longitude":"139.200810000","geoidHeight":"43.6740","HeightReferenceConversion":"0.0000","geoidHeight+HeightReferenceConversion":"43.6740"}}"#
+        let sample = try XCTUnwrap(GSIGeoid2024API.parse(Data(raw.utf8)))
+        XCTAssertEqual(sample.geoidMeters, 43.674, accuracy: 1e-9)
+        XCTAssertEqual(sample.referenceConversionMeters, 0, accuracy: 1e-9)
+        XCTAssertEqual(sample.separationMeters, 43.674, accuracy: 1e-9)
+        let height = SurveyHeight.resolve(
+            ellipsoidalMeters: 989,
+            latitudeDegrees: 36.77450,
+            longitudeDegrees: 139.20081,
+            meanSeaLevelMeters: 945.8,
+            gsi2024SeparationMeters: sample.separationMeters
+        )
+        XCTAssertEqual(height.orthometricMeters ?? 0, 989 - 43.674, accuracy: 1e-9)
+        XCTAssertEqual(height.model, JapanGeoid.modelName2024)
+        XCTAssertNotEqual(height.orthometricMeters ?? 0, 945.8)
+        let invalid = #"{"OutputData":{"geoidHeight":"-9999.0000","HeightReferenceConversion":"-9999.0000","geoidHeight+HeightReferenceConversion":"-9999.0000"}}"#
+        XCTAssertNil(GSIGeoid2024API.parse(Data(invalid.utf8)))
+        let url = try XCTUnwrap(GSIGeoid2024API.url(latitudeDegrees: 36.77450, longitudeDegrees: 139.20081))
+        XCTAssertEqual(url.host, "vldb.gsi.go.jp")
+        XCTAssertTrue(url.path.hasSuffix("geoidcalc.pl"))
+        let position = samplePosition(latitude: 36.77450, longitude: 139.20081, height: 989, stage: .rtk, quality: .rtkFix, receiver: .rtk)
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: .rtk,
+            durationSeconds: 1,
+            epochCount: 1,
+            gsi2024SeparationMeters: 43.674
+        )
+        XCTAssertEqual(condition.geoidModel, JapanGeoid.modelName2024)
+        XCTAssertEqual(condition.orthometricHeightMeters ?? 0, 989 - 43.674, accuracy: 1e-9)
+        XCTAssertEqual(condition.solutionLabel, "FIX")
+    }
+
     func testOutsideTheGridFallsBackToMeanSeaLevel() {
         XCTAssertNil(JapanGeoid.undulationMeters(latitudeDegrees: 0, longitudeDegrees: 0))
         let shifted = SurveyHeight.resolve(

@@ -19,13 +19,8 @@ struct OperatorView: View {
             )
         }
         let phoneHeight = position.flatMap { here -> Double? in
-            SurveyHeight.resolve(
-                ellipsoidalMeters: here.ellipsoidalHeightMeters,
-                latitudeDegrees: here.latitudeDegrees,
-                longitudeDegrees: here.longitudeDegrees,
-                meanSeaLevelMeters: here.meanSeaLevelMeters,
-                deviceEllipsoidalMeters: here.ellipsoidalHeightMeters
-            ).orthometricMeters ?? here.ellipsoidalHeightMeters
+            field.surveyHeight(ellipsoidal: here.ellipsoidalHeightMeters, at: here).orthometricMeters
+                ?? here.ellipsoidalHeightMeters
         }
         let height = OperatorStation.height(
             ellipsoidalMeters: phoneHeight,

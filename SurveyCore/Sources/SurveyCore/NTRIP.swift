@@ -32,7 +32,15 @@ public struct NTRIPAccount: Equatable, Sendable {
     }
 }
 
+/// docomo 高精度GNSS。RRS は最寄り局を選ぶマウントポイント。パスワードは持たない。
+public enum DocomoCaster {
+    public static let host = "d-gnss.jp"
+    public static let port = 2101
+    public static let mountpoint = "RRSGD2024"
+}
+
 public enum NTRIPRequest {
+    /// docomo は GGA を 10 秒ごと。1 秒より長く、という案内に合わせる。
     public static let ggaInterval: TimeInterval = 10
 
     public static func shouldSendGGA(last: Date?, now: Date) -> Bool {
@@ -200,22 +208,26 @@ public enum RTCM3 {
     }
 }
 
-/// 受信機と補正の両方が新しいあいだだけ、受信機の位置を使う。
-public enum ExternalDrop: Equatable, Sendable {
-    case receiver
-    case corrections
+/// docomo の RTK、受信機が報告した CLAS、単独、iPhone の順。
+public enum PositioningTier: Equatable, Sendable {
+    case docomo
+    case clas
+    case single
+    case phone
 }
 
 public struct ExternalPositionChoice: Equatable, Sendable {
     public var reading: PositionReading
-    public var usingReceiver: Bool
-    public var drop: ExternalDrop?
+    public var tier: PositioningTier
+    public var notice: String?
 
-    public init(reading: PositionReading, usingReceiver: Bool, drop: ExternalDrop?) {
+    public init(reading: PositionReading, tier: PositioningTier, notice: String?) {
         self.reading = reading
-        self.usingReceiver = usingReceiver
-        self.drop = drop
+        self.tier = tier
+        self.notice = notice
     }
+
+    public var usingReceiver: Bool { tier != .phone }
 }
 
 public enum ExternalPosition {
@@ -228,20 +240,66 @@ public enum ExternalPosition {
         receiverAt: Date?,
         correctionAt: Date?,
         now: Date,
-        wasUsingReceiver: Bool
+        previous: PositioningTier
     ) -> ExternalPositionChoice {
         let receiverOK = receiver?.position?.isPlottable == true
             && fresh(receiverAt, now: now, limit: receiverFreshSeconds)
         let correctionsOK = fresh(correctionAt, now: now, limit: correctionFreshSeconds)
-        let use = receiverOK && correctionsOK
-        let reading = (use ? receiver : nil) ?? iphone
-        let drop: ExternalDrop?
-        if wasUsingReceiver && !use {
-            drop = receiverOK ? .corrections : .receiver
+        let reported = receiver?.position
+        let rtk = reported?.fixQuality == .rtkFix || reported?.fixQuality == .float
+        let clas = reported?.fixQuality == .clas || reported?.receiver == .clas
+        let tier: PositioningTier
+        let reading: PositionReading
+        if receiverOK, correctionsOK, rtk, let receiver {
+            tier = .docomo
+            reading = receiver
+        } else if receiverOK, clas, let receiver {
+            tier = .clas
+            reading = receiver
+        } else if receiverOK, let receiver, let position = receiver.position {
+            tier = .single
+            reading = PositionReading(position: single(position), availability: receiver.availability)
         } else {
-            drop = nil
+            tier = .phone
+            reading = iphone
         }
-        return ExternalPositionChoice(reading: reading, usingReceiver: use, drop: drop)
+        return ExternalPositionChoice(
+            reading: reading,
+            tier: tier,
+            notice: notice(from: previous, to: tier)
+        )
+    }
+
+    /// FIX のまま補正が切れた点は、単独としてタグする。
+    static func single(_ position: GeodeticPosition) -> GeodeticPosition {
+        var copy = position
+        switch copy.fixQuality {
+        case .rtkFix, .float, .clas:
+            copy.fixQuality = .standalone
+            copy.stage = .iphone
+            copy.correctionAgeSeconds = nil
+        case .standalone, .dgps, .none:
+            break
+        }
+        return copy
+    }
+
+    private static func notice(from previous: PositioningTier, to tier: PositioningTier) -> String? {
+        guard previous != tier else { return nil }
+        switch tier {
+        case .clas:
+            return previous == .docomo ? "CLASに切り替えました。" : nil
+        case .single:
+            switch previous {
+            case .docomo: return "補正が切れました。単独測位です。"
+            case .clas: return "単独測位です。"
+            case .phone, .single: return nil
+            }
+        case .phone:
+            return "受信機が切れました。iPhoneの測位に戻しました。"
+        case .docomo:
+            return nil
+        }
     }
 
     private static func fresh(_ date: Date?, now: Date, limit: TimeInterval) -> Bool {
@@ -251,13 +309,67 @@ public enum ExternalPosition {
 }
 
 public enum ExternalFix {
-    public static let warnedWorks: Set<String> = ["stakeout", "asBuilt"]
+    /// FIX でなくても記録は止めない。解の文字は点に残す。
+    public static func blocksRecording(workID: String, position: GeodeticPosition?) -> Bool {
+        _ = (workID, position)
+        return false
+    }
+}
 
-    /// FIX 以外の丁張・出来形。記録は止めず、操作する人に確認を返す。
-    public static func warning(workID: String, position: GeodeticPosition?) -> String? {
-        guard warnedWorks.contains(workID) else { return nil }
-        if position?.isTrustedRTKFix == true { return nil }
-        let label = position?.solutionLabel ?? "—"
-        return "いまは\(label)です。丁張と出来形は FIX で記録します。このまま残しますか。"
+/// BLE へ書いた RTCM の量と、届いてから書き終わるまでの時間。中身は残さない。
+public struct RTCMMeter: Equatable, Sendable {
+    public struct Sample: Equatable, Sendable {
+        public var at: Date
+        public var bytes: Int
+        public var chunks: Int
+        public var latencySeconds: Double
+
+        public init(at: Date, bytes: Int, chunks: Int, latencySeconds: Double) {
+            self.at = at
+            self.bytes = bytes
+            self.chunks = chunks
+            self.latencySeconds = latencySeconds
+        }
+    }
+
+    public static let windowSeconds: TimeInterval = 10
+    public private(set) var samples: [Sample]
+
+    public init(samples: [Sample] = []) {
+        self.samples = samples
+    }
+
+    public mutating func note(bytes: Int, chunks: Int, latencySeconds: Double, at date: Date) {
+        samples.append(Sample(at: date, bytes: bytes, chunks: chunks, latencySeconds: latencySeconds))
+        let cutoff = date.addingTimeInterval(-Self.windowSeconds)
+        samples.removeAll { $0.at < cutoff }
+    }
+
+    public func line(now: Date) -> String {
+        let cutoff = now.addingTimeInterval(-Self.windowSeconds)
+        let recent = samples.filter { $0.at >= cutoff }
+        let bytes = recent.reduce(0) { $0 + $1.bytes }
+        let chunks = recent.reduce(0) { $0 + $1.chunks }
+        let span = max(now.timeIntervalSince(recent.first?.at ?? now), 1)
+        let kb = Double(bytes) / span / 1024
+        let rate = String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), kb)
+        let delay = recent.last.map { " 遅延 \(Int(($0.latencySeconds * 1000).rounded()))ms" } ?? ""
+        return "RTCM \(rate)KB/s \(chunks)分割\(delay)"
+    }
+}
+
+public enum BLEMTU {
+    /// ATT の書き込み長で切る。20 バイト未満にはしない。
+    public static func split(_ data: Data, maximumWriteLength: Int) -> [Data] {
+        let limit = max(20, maximumWriteLength)
+        if data.isEmpty { return [] }
+        var pieces: [Data] = []
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + limit, data.count)
+            pieces.append(data.subdata(in: offset..<end))
+            offset = end
+        }
+        return pieces
     }
 }

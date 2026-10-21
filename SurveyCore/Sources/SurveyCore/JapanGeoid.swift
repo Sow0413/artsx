@@ -1,9 +1,11 @@
 import Foundation
 
-/// 標高 = 楕円体高 − ジオイド高。格子は国土地理院「日本のジオイド2011（Ver.2.2）」。
-/// 出典: 国土地理院。格子外は CLLocation.altitude（平均海水面）を代わりに使う。
+/// 標高 = 楕円体高 − ジオイド高。手元の格子は国土地理院「日本のジオイド2011（Ver.2.2）」。
+/// ジオイド2024の値が来たときは、そちらを先に引く。受信機のジオイド分離は標高に使わない。
+/// 出典: 国土地理院。格子外の iPhone は CLLocation.altitude を代わりに使う。
 public enum JapanGeoid {
     public static let modelName = "日本のジオイド2011 Ver.2.2"
+    public static let modelName2024 = "ジオイド2024日本とその周辺"
     public static let fallbackModelName = "CLLocation.altitude"
 
     public static func undulationMeters(latitudeDegrees: Double, longitudeDegrees: Double) -> Double? {
@@ -42,9 +44,18 @@ public struct SurveyHeight: Equatable, Sendable {
         latitudeDegrees: Double,
         longitudeDegrees: Double,
         meanSeaLevelMeters: Double? = nil,
-        deviceEllipsoidalMeters: Double? = nil
+        deviceEllipsoidalMeters: Double? = nil,
+        gsi2024SeparationMeters: Double? = nil
     ) -> SurveyHeight {
         let ellipsoidal = finite(ellipsoidalMeters)
+        if let ellipsoidal, let separation = finite(gsi2024SeparationMeters), separation > -1000 {
+            return SurveyHeight(
+                orthometricMeters: ellipsoidal - separation,
+                ellipsoidalMeters: ellipsoidal,
+                geoidMeters: separation,
+                model: JapanGeoid.modelName2024
+            )
+        }
         if let ellipsoidal,
            let undulation = JapanGeoid.undulationMeters(latitudeDegrees: latitudeDegrees, longitudeDegrees: longitudeDegrees) {
             return SurveyHeight(

@@ -126,7 +126,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         durationSeconds: TimeInterval?,
         epochCount: Int?,
         stature profile: StatureProfile? = nil,
-        sight: SightSample? = nil
+        sight: SightSample? = nil,
+        gsi2024SeparationMeters: Double? = nil
     ) -> ObservationCondition {
         let record = profile.flatMap { StatureMath.record(profile: $0, deviceHeight: position.ellipsoidalHeightMeters, sight: sight) }
             .flatMap { StatureMath.applies(stage: stage, receiver: position.receiver) ? $0 : nil }
@@ -135,8 +136,9 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
             ellipsoidalMeters: base,
             latitudeDegrees: position.latitudeDegrees,
             longitudeDegrees: position.longitudeDegrees,
-            meanSeaLevelMeters: position.meanSeaLevelMeters,
-            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
+            meanSeaLevelMeters: position.receiver == .iphoneGPS ? position.meanSeaLevelMeters : nil,
+            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters,
+            gsi2024SeparationMeters: gsi2024SeparationMeters
         )
         return ObservationCondition(
             solution: position.fixQuality,
@@ -161,13 +163,14 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         )
     }
 
-    public mutating func setElevation(from position: GeodeticPosition, baseEllipsoidal: Double?) {
+    public mutating func setElevation(from position: GeodeticPosition, baseEllipsoidal: Double?, gsi2024SeparationMeters: Double? = nil) {
         let height = SurveyHeight.resolve(
             ellipsoidalMeters: baseEllipsoidal,
             latitudeDegrees: position.latitudeDegrees,
             longitudeDegrees: position.longitudeDegrees,
-            meanSeaLevelMeters: position.meanSeaLevelMeters,
-            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
+            meanSeaLevelMeters: position.receiver == .iphoneGPS ? position.meanSeaLevelMeters : nil,
+            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters,
+            gsi2024SeparationMeters: gsi2024SeparationMeters
         )
         surveyEllipsoidalMeters = height.ellipsoidalMeters
         orthometricHeightMeters = height.orthometricMeters

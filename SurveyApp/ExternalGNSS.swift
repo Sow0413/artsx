@@ -45,9 +45,9 @@ enum NTRIPSecret {
 }
 
 struct NTRIPSettings: Codable, Equatable {
-    var host: String = ""
-    var port: Int = 2101
-    var mountpoint: String = ""
+    var host: String = DocomoCaster.host
+    var port: Int = DocomoCaster.port
+    var mountpoint: String = DocomoCaster.mountpoint
     var user: String = ""
     var version: NTRIPVersion = .v2
     var enabled: Bool = false
@@ -60,9 +60,16 @@ struct NTRIPSettings: Codable, Equatable {
 
     static func load() -> NTRIPSettings {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let value = try? JSONDecoder().decode(NTRIPSettings.self, from: data) else {
+              var value = try? JSONDecoder().decode(NTRIPSettings.self, from: data) else {
             return NTRIPSettings()
         }
+        if value.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            value.host = DocomoCaster.host
+        }
+        if value.mountpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            value.mountpoint = DocomoCaster.mountpoint
+        }
+        if value.port <= 0 { value.port = DocomoCaster.port }
         return value
     }
 
@@ -93,6 +100,20 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     private var lastGGA: Date?
     private var ggaTimer: DispatchSourceTimer?
     private var running = false
+    private var ntripRejected = false
+    private var commands: [String] = []
+    private var pendingCommand = false
+    private var writeTags: [Int] = []
+    private var rtcmBatches: [Int: RTCMBatch] = [:]
+    private var nextBatch = 1
+    private var rtcmMeter = RTCMMeter()
+
+    private struct RTCMBatch {
+        var bytes: Int
+        var chunks: Int
+        var arrived: Date
+        var left: Int
+    }
 
     func attach(_ field: FieldModel) {
         self.field = field
@@ -127,8 +148,10 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
 
     func applySettings() {
         guard running else { return }
-        connection?.cancel()
+        ntripRejected = false
+        let old = connection
         connection = nil
+        old?.cancel()
         headerDone = false
         ntripBuffer.removeAll()
         openNTRIP()
@@ -217,6 +240,29 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
                 peripheral.setNotifyValue(true, for: characteristic)
             }
         }
+        commands.removeAll()
+        pendingCommand = false
+        enqueue(DroggerLink.firmwareQueryBody)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard !writeTags.isEmpty else { return }
+        let tag = writeTags.removeFirst()
+        guard tag > 0, var batch = rtcmBatches[tag] else { return }
+        batch.left -= 1
+        if batch.left == 0 {
+            rtcmBatches[tag] = nil
+            let now = Date()
+            rtcmMeter.note(
+                bytes: batch.bytes,
+                chunks: batch.chunks,
+                latencySeconds: now.timeIntervalSince(batch.arrived),
+                at: now
+            )
+            publishRTCM(now)
+        } else {
+            rtcmBatches[tag] = batch
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -227,6 +273,10 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
             nmeaBuffer.removeSubrange(0...newline)
             guard let text = String(data: chunk, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                   text.hasPrefix("$") else { continue }
+            if text.contains("PBIZR") {
+                noteDrogger(text)
+                continue
+            }
             recentSentences.append(text)
             if recentSentences.count > 12 {
                 recentSentences.removeFirst(recentSentences.count - 12)
@@ -239,6 +289,7 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     }
 
     private func openNTRIP() {
+        guard connection == nil, !ntripRejected else { return }
         let settings = NTRIPSettings.load()
         guard running, settings.enabled, settings.account.isComplete else { return }
         let password = NTRIPSecret.load()
@@ -251,14 +302,18 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         let connection = NWConnection(host: NWEndpoint.Host(settings.host), port: port, using: .tcp)
         self.connection = connection
         connection.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
+            guard let self, self.connection === connection else { return }
             switch state {
             case .ready:
                 self.send(Data(header.utf8))
                 self.receive()
                 self.armGGA()
             case .failed, .cancelled:
+                self.connection = nil
                 self.failCorrections()
+                self.queue.asyncAfter(deadline: .now() + 5) { [weak self] in
+                    self?.openNTRIP()
+                }
             default:
                 break
             }
@@ -308,6 +363,7 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
         if !headerDone {
             let intake = NTRIPStream.consume(ntripBuffer)
             if intake.failed {
+                ntripRejected = intake.status == 401 || intake.status == 404
                 ntripBuffer.removeAll()
                 failCorrections()
                 connection?.cancel()
@@ -335,18 +391,83 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     }
 
     private func writeRTCM(_ data: Data) {
+        let arrived = Date()
+        writeChunks(data, arrived: arrived, rtcm: true)
+    }
+
+    private func enqueue(_ body: String) {
+        commands.append(DroggerLink.sentence(body))
+        pumpCommands()
+    }
+
+    private func pumpCommands() {
+        guard !pendingCommand, let line = commands.first, rx != nil else { return }
+        commands.removeFirst()
+        pendingCommand = true
+        writeChunks(Data(line.utf8), arrived: Date(), rtcm: false)
+    }
+
+    private func noteDrogger(_ line: String) {
+        pendingCommand = false
+        if let firmware = DroggerLink.firmware(in: line) {
+            let text: String
+            if !firmware.ble {
+                text = "Classic は使いません"
+            } else if DroggerLink.isAtLeast(firmware.version) {
+                text = "F/W \(firmware.version)"
+                enqueue(DroggerLink.clasBody)
+            } else {
+                text = "F/W \(firmware.version)"
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.field?.noteReceiverFirmware(text)
+            }
+        }
+        pumpCommands()
+    }
+
+    private func writeChunks(_ data: Data, arrived: Date, rtcm: Bool) {
         DispatchQueue.main.async { [weak self] in
             guard let self, let peripheral = self.peripheral, let rx = self.rx else { return }
             let type: CBCharacteristicWriteType = rx.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
-            let limit = max(20, peripheral.maximumWriteValueLength(for: type == .withoutResponse ? .withoutResponse : .withResponse))
-            var offset = 0
-            let bytes = [UInt8](data)
-            while offset < bytes.count {
-                let end = min(offset + limit, bytes.count)
-                peripheral.writeValue(Data(bytes[offset..<end]), for: rx, type: type)
-                offset = end
+            let limit = peripheral.maximumWriteValueLength(for: type == .withoutResponse ? .withoutResponse : .withResponse)
+            let pieces = BLEMTU.split(data, maximumWriteLength: limit)
+            guard !pieces.isEmpty else { return }
+            if type == .withoutResponse {
+                for piece in pieces {
+                    peripheral.writeValue(piece, for: rx, type: type)
+                }
+                if rtcm {
+                    let now = Date()
+                    self.rtcmMeter.note(
+                        bytes: data.count,
+                        chunks: pieces.count,
+                        latencySeconds: now.timeIntervalSince(arrived),
+                        at: now
+                    )
+                    self.publishRTCM(now)
+                }
+                return
+            }
+            let tag: Int
+            if rtcm {
+                let id = self.nextBatch
+                self.nextBatch += 1
+                self.rtcmBatches[id] = RTCMBatch(bytes: data.count, chunks: pieces.count, arrived: arrived, left: pieces.count)
+                tag = id
+            } else {
+                tag = 0
+            }
+            for piece in pieces {
+                self.writeTags.append(tag)
+                peripheral.writeValue(piece, for: rx, type: type)
             }
         }
+    }
+
+    private func publishRTCM(_ now: Date) {
+        let line = rtcmMeter.line(now: now)
+        field?.noteRTCM(line)
     }
 
     private func send(_ data: Data) {
@@ -362,9 +483,9 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
 
 struct ExternalReceiverSettings: View {
     @ObservedObject var field: FieldModel
-    @State private var host = ""
+    @State private var host = DocomoCaster.host
     @State private var port = "2101"
-    @State private var mountpoint = ""
+    @State private var mountpoint = DocomoCaster.mountpoint
     @State private var user = ""
     @State private var password = ""
     @State private var version: NTRIPVersion = .v2
@@ -384,9 +505,25 @@ struct ExternalReceiverSettings: View {
                 Text(field.receiverStatus)
                     .font(SurveyType(16, .heavy))
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                fieldRow("ホスト") { TextField("caster", text: $host).textInputAutocapitalization(.never).autocorrectionDisabled() }
+                fieldRow("ホスト") { TextField(DocomoCaster.host, text: $host).textInputAutocapitalization(.never).autocorrectionDisabled() }
                 fieldRow("ポート") { TextField("2101", text: $port).keyboardType(.numberPad) }
-                fieldRow("マウント") { TextField("VRS", text: $mountpoint).textInputAutocapitalization(.never).autocorrectionDisabled() }
+                fieldRow("マウント") { TextField(DocomoCaster.mountpoint, text: $mountpoint).textInputAutocapitalization(.never).autocorrectionDisabled() }
+                Text("RRS。1つのIDは同時に1回線。GGAは10秒。")
+                    .font(SurveyType(15, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                Text("Drogger は BLE 4.4.2 以上。Classic は使いません。")
+                    .font(SurveyType(15, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                if !field.receiverFirmware.isEmpty {
+                    Text(field.receiverFirmware)
+                        .font(SurveyType(16, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                if !field.rtcmLine.isEmpty {
+                    Text(field.rtcmLine)
+                        .font(SurveyType(16, .heavy, mono: true))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
                 fieldRow("ユーザー") { TextField("user", text: $user).textInputAutocapitalization(.never).autocorrectionDisabled() }
                 fieldRow("パスワード") {
                     SecureField(passwordSaved ? "保存済み" : "password", text: $password)

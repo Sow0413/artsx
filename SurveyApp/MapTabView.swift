@@ -128,7 +128,7 @@ struct MapTabView: View {
             let terrain = field.gsiElevationMeters.flatMap {
                 GSIElevationText.line(demMeters: $0, gnssMeters: survey.orthometricMeters)
             }
-            let receiver = Self.receiverHeightLine(position)
+            let receiver = Self.receiverHeightLine(position, gsiMeters: survey.orthometricMeters)
             VStack(alignment: .leading, spacing: 0) {
                 Text(height)
                     .foregroundStyle(Color.black)
@@ -161,14 +161,9 @@ struct MapTabView: View {
         return prefix + Text(difference).foregroundColor(color)
     }
 
-    private static func receiverHeightLine(_ position: GeodeticPosition) -> String? {
-        guard position.receiver == .rtk, let orthometric = position.meanSeaLevelMeters else { return nil }
-        return NMEA.receiverHeightLine(
-            orthometricMeters: orthometric,
-            ellipsoidalMeters: position.ellipsoidalHeightMeters,
-            latitudeDegrees: position.latitudeDegrees,
-            longitudeDegrees: position.longitudeDegrees
-        )
+    private static func receiverHeightLine(_ position: GeodeticPosition, gsiMeters: Double?) -> String? {
+        guard position.receiver != .iphoneGPS, let orthometric = position.meanSeaLevelMeters, let gsiMeters else { return nil }
+        return NMEA.receiverGapLine(receiverOrthometricMeters: orthometric, gsiOrthometricMeters: gsiMeters)
     }
 
     private static func coordinateLabel(height: String, receiver: String?, terrain: GSIElevationLine?, position: GeodeticPosition) -> String {

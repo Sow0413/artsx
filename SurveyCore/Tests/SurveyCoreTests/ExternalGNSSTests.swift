@@ -48,15 +48,49 @@ final class ExternalGNSSTests: XCTestCase {
         XCTAssertEqual(AccuracyFormat.statusLine(for: samplePosition()), "単独 ±3m")
     }
 
-    func testReceiverHeightShowsTheGSIDifference() {
-        let line = NMEA.receiverHeightLine(
-            orthometricMeters: 945.8,
-            ellipsoidalMeters: 989.0,
+    func testReceiverGapDoesNotUseTheReceiverHeightAsTheSurveyHeight() {
+        let line = NMEA.receiverGapLine(receiverOrthometricMeters: 945.8, gsiOrthometricMeters: 945.326)
+        XCTAssertEqual(line, "受信機との差 -0.5m")
+        XCTAssertNil(NMEA.receiverGapLine(receiverOrthometricMeters: .nan, gsiOrthometricMeters: 1))
+    }
+
+    func testGNSPreciseReportsCLASAndRTKModeDoesNot() {
+        let when = Date(timeIntervalSince1970: 1_700_000_000)
+        let gga = NMEA.gga(
             latitudeDegrees: 36.77450,
-            longitudeDegrees: 139.20081
+            longitudeDegrees: 139.20081,
+            quality: 4,
+            satellites: 18,
+            hdop: 0.6,
+            orthometricMeters: 945.8,
+            geoidSeparationMeters: 43.2,
+            ageSeconds: 2,
+            station: "",
+            at: when
         )
-        XCTAssertTrue(line?.hasPrefix("受信機 945.8m（地理院との差 ") == true)
-        XCTAssertTrue(line?.hasSuffix("m）") == true)
+        let precise = "GNGNS,092750.00,3646.4700,N,13912.0486,E,PPP,18,0.6,945.8,43.2,,"
+        let clas = NMEA.position(from: [gga, "$\(precise)*\(NMEA.checksum(precise))"], at: when)
+        XCTAssertEqual(clas?.fixQuality, .clas)
+        XCTAssertEqual(clas?.receiver, .clas)
+        XCTAssertEqual(clas?.stage, .clas)
+        XCTAssertEqual(clas?.solutionLabel, "CLAS")
+        let rtk = "GNGNS,092750.00,3646.4700,N,13912.0486,E,RRR,18,0.6,945.8,43.2,,"
+        let fix = NMEA.position(from: [gga, "$\(rtk)*\(NMEA.checksum(rtk))"], at: when)
+        XCTAssertEqual(fix?.fixQuality, .rtkFix)
+        XCTAssertEqual(fix?.solutionLabel, "FIX")
+    }
+
+    func testDroggerFirmwareQueryAndCLASCommand() {
+        XCTAssertEqual(DroggerLink.sentence(DroggerLink.firmwareQueryBody), "$PBIZ,query,fwver*1B\r\n")
+        XCTAssertEqual(DroggerLink.sentence(DroggerLink.clasBody), "$PBIZ,gnss,1,1,1,1,0,1,1,1,1*38\r\n")
+        let ble = DroggerLink.sentence("PBIZR,query,fwver,60,001122,334455,667788,1,4.4.2,")
+        XCTAssertEqual(DroggerLink.firmware(in: ble), DroggerLink.Firmware(version: "4.4.2", ble: true))
+        XCTAssertTrue(DroggerLink.isAtLeast("4.4.2"))
+        XCTAssertTrue(DroggerLink.isAtLeast("4.4.10"))
+        XCTAssertFalse(DroggerLink.isAtLeast("4.3.14"))
+        let spp = DroggerLink.sentence("PBIZR,query,fwver,60,001122,334455,667788,0,4.5.0,")
+        XCTAssertEqual(DroggerLink.firmware(in: spp)?.ble, false)
+        XCTAssertNil(DroggerLink.firmware(in: "$PBIZR,query,fwver,1*00"))
     }
 
     func testNTRIPHeaderKeepsThePasswordOutOfTheOtherLines() {
@@ -74,6 +108,10 @@ final class ExternalGNSSTests: XCTestCase {
         XCTAssertFalse(v1.contains("Ntrip-GGA"))
         XCTAssertFalse(NTRIPRequest.shouldSendGGA(last: Date(timeIntervalSince1970: 0), now: Date(timeIntervalSince1970: 9)))
         XCTAssertTrue(NTRIPRequest.shouldSendGGA(last: Date(timeIntervalSince1970: 0), now: Date(timeIntervalSince1970: 10)))
+        XCTAssertEqual(NTRIPRequest.ggaInterval, 10)
+        XCTAssertEqual(DocomoCaster.host, "d-gnss.jp")
+        XCTAssertEqual(DocomoCaster.port, 2101)
+        XCTAssertEqual(DocomoCaster.mountpoint, "RRSGD2024")
     }
 
     func testRTCMFramesSurviveTheHTTPHeadAndABadByte() {
@@ -95,7 +133,7 @@ final class ExternalGNSSTests: XCTestCase {
         XCTAssertTrue(denied.frames.isEmpty)
     }
 
-    func testReceiverIsUsedOnlyWhileCorrectionsAreFresh() {
+    func testFallbackUsesDocomoThenCLASThenSingle() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let phone = PositionReading(position: samplePosition(), availability: .available)
         let fix = samplePosition(accuracy: 0.02, stage: .rtk, quality: .rtkFix, receiver: .rtk, satelliteCount: 22, correctionAgeSeconds: 1)
@@ -106,40 +144,70 @@ final class ExternalGNSSTests: XCTestCase {
             receiverAt: now,
             correctionAt: now,
             now: now,
-            wasUsingReceiver: false
+            previous: .phone
         )
+        XCTAssertEqual(live.tier, .docomo)
         XCTAssertTrue(live.usingReceiver)
         XCTAssertEqual(live.reading.position?.fixQuality, .rtkFix)
-        XCTAssertNil(live.drop)
+        XCTAssertNil(live.notice)
         let dropped = ExternalPosition.choose(
             iphone: phone,
             receiver: receiver,
             receiverAt: now,
             correctionAt: now.addingTimeInterval(-11),
             now: now,
-            wasUsingReceiver: true
+            previous: .docomo
         )
-        XCTAssertFalse(dropped.usingReceiver)
-        XCTAssertEqual(dropped.drop, .corrections)
-        XCTAssertEqual(dropped.reading.position?.receiver, .iphoneGPS)
+        XCTAssertEqual(dropped.tier, .single)
+        XCTAssertEqual(dropped.reading.position?.fixQuality, .standalone)
+        XCTAssertEqual(dropped.reading.position?.receiver, .rtk)
+        XCTAssertEqual(dropped.reading.position?.solutionLabel, "単独")
+        XCTAssertEqual(dropped.notice, "補正が切れました。単独測位です。")
+        let clasFix = samplePosition(accuracy: 0.05, stage: .clas, quality: .clas, receiver: .clas)
+        let clas = ExternalPosition.choose(
+            iphone: phone,
+            receiver: PositionReading(position: clasFix, availability: .available),
+            receiverAt: now,
+            correctionAt: now.addingTimeInterval(-11),
+            now: now,
+            previous: .docomo
+        )
+        XCTAssertEqual(clas.tier, .clas)
+        XCTAssertEqual(clas.reading.position?.solutionLabel, "CLAS")
+        XCTAssertEqual(clas.notice, "CLASに切り替えました。")
         let silent = ExternalPosition.choose(
             iphone: phone,
             receiver: nil,
             receiverAt: nil,
             correctionAt: nil,
             now: now,
-            wasUsingReceiver: true
+            previous: .docomo
         )
-        XCTAssertEqual(silent.drop, .receiver)
+        XCTAssertEqual(silent.tier, .phone)
+        XCTAssertEqual(silent.reading.position?.receiver, .iphoneGPS)
+        XCTAssertEqual(silent.notice, "受信機が切れました。iPhoneの測位に戻しました。")
     }
 
-    func testStakeoutWarnsUnlessTheFixIsTrusted() {
-        XCTAssertNil(ExternalFix.warning(workID: "preview", position: samplePosition()))
-        XCTAssertNotNil(ExternalFix.warning(workID: "stakeout", position: samplePosition(accuracy: 0.2, stage: .rtk, quality: .float, receiver: .rtk)))
-        XCTAssertNotNil(ExternalFix.warning(workID: "asBuilt", position: nil))
+    func testRecordingKeepsTheSolutionTag() {
+        let floated = samplePosition(accuracy: 0.2, stage: .rtk, quality: .float, receiver: .rtk)
+        XCTAssertFalse(ExternalFix.blocksRecording(workID: "stakeout", position: floated))
+        XCTAssertFalse(ExternalFix.blocksRecording(workID: "asBuilt", position: nil))
+        XCTAssertFalse(ExternalFix.blocksRecording(workID: "preview", position: samplePosition()))
+        XCTAssertEqual(floated.solutionLabel, "FLOAT")
+        XCTAssertEqual(samplePosition().solutionLabel, "単独")
         let fix = samplePosition(accuracy: 0.02, verticalAccuracy: 0.02, stage: .rtk, quality: .rtkFix, receiver: .rtk)
         XCTAssertTrue(fix.isTrustedRTKFix)
-        XCTAssertNil(ExternalFix.warning(workID: "stakeout", position: fix))
-        XCTAssertNil(ExternalFix.warning(workID: "asBuilt", position: fix))
+        XCTAssertEqual(fix.solutionLabel, "FIX")
+    }
+
+    func testRTCMLineCountsChunksAndLatency() {
+        var meter = RTCMMeter()
+        let start = Date(timeIntervalSince1970: 0)
+        meter.note(bytes: 2048, chunks: 4, latencySeconds: 0.035, at: start)
+        XCTAssertEqual(meter.line(now: start), "RTCM 2.0KB/s 4分割 遅延 35ms")
+        let pieces = BLEMTU.split(Data(repeating: 0xD3, count: 50), maximumWriteLength: 23)
+        XCTAssertEqual(pieces.map(\.count), [23, 23, 4])
+        XCTAssertEqual(BLEMTU.split(Data(repeating: 1, count: 10), maximumWriteLength: 8).count, 1)
+        XCTAssertTrue(BLEMTU.split(Data(), maximumWriteLength: 20).isEmpty)
     }
 }
