@@ -180,55 +180,80 @@ enum FieldFlow {
     }
 }
 
+/// 測量メニューと同じページ。図面・施工・地図もこの幅と下端ボタンを使う。
+struct ModeMenuPage<Content: View>: View {
+    let title: String
+    var pinTitle: String?
+    var notice: ExportNotice?
+    var onDismissNotice: () -> Void
+    var onPin: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(geo.size.width, 1)
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        content()
+                    }
+                    .padding(16)
+                    .frame(width: width, alignment: .leading)
+                }
+                .scrollContentBackground(.hidden)
+                .background(SurveyColor.background)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if let pinTitle {
+                        Button(pinTitle, action: onPin)
+                            .buttonStyle(FlowNextButton())
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .padding(.bottom, 8)
+                            .frame(width: width)
+                            .background(SurveyColor.bar)
+                    }
+                }
+                .overlay(alignment: .top) {
+                    if let notice {
+                        ExportNoticeButton(notice: notice, onDismiss: onDismissNotice)
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .frame(width: width)
+                    }
+                }
+            }
+            .frame(width: width, height: geo.size.height)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerRelativeFrame(.horizontal)
+        .modifier(SurveyScheme())
+        .modifier(PageSheetWidth())
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(SurveyColor.background)
+    }
+}
+
 struct ModeMenuSheet: View {
     @ObservedObject var field: FieldModel
     let mode: FieldTab
     @Binding var handoff: ModeHandoff?
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        rows
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .scrollContentBackground(.hidden)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if let pin {
-                    Button(FieldFlow.title(pin, field: field)) {
-                        FieldFlow.perform(pin, field: field, fromMenu: true) { handoff = $0 }
-                    }
-                    .buttonStyle(FlowNextButton())
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity)
-                    .background(SurveyColor.bar)
-                }
+        ModeMenuPage(
+            title: mode.title,
+            pinTitle: pin.map { FieldFlow.title($0, field: field) },
+            notice: field.exportNotice,
+            onDismissNotice: { field.dismissExportNotice() },
+            onPin: {
+                guard let pin else { return }
+                FieldFlow.perform(pin, field: field, fromMenu: true) { handoff = $0 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(SurveyColor.background)
-            .navigationTitle(mode.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .overlay(alignment: .top) {
-                if let notice = field.exportNotice {
-                    ExportNoticeButton(notice: notice) {
-                        field.dismissExportNotice()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                }
-            }
+        ) {
+            rows
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .modifier(SurveyScheme())
-        .modifier(PageSheetWidth())
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        .presentationBackground(SurveyColor.background)
     }
 
     @ViewBuilder
