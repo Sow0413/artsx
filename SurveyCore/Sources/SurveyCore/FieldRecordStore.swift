@@ -19,11 +19,11 @@ public struct FieldPointFile: Codable, Equatable, Sendable {
         latitude: Double,
         longitude: Double,
         ellipsoidalHeightMeters: Double?,
+        orthometricHeightMeters: Double? = nil,
+        geoidModel: String? = nil,
         horizontalAccuracyMeters: Double?,
         verticalAccuracyMeters: Double?,
-        timestamp: Date,
-        orthometricHeightMeters: Double? = nil,
-        geoidModel: String? = nil
+        timestamp: Date
     ) {
         self.name = name
         self.latitude = latitude
