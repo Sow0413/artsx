@@ -19,19 +19,17 @@ struct DrawingTabView: View {
     @State private var impactDraft = ""
     @State private var stillDraft = ""
     @State private var fallNote = ""
+    @State private var showsAlign = false
+    @State private var showsSetup = false
 
     var body: some View {
-        GeometryReader { geo in
-            if geo.size.width >= 720 {
-                HStack(spacing: 0) {
-                    canvas.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    controls.frame(width: min(380, geo.size.width * 0.4))
-                }
+        VStack(spacing: 0) {
+            projectBar
+            canvas.frame(maxWidth: .infinity, maxHeight: .infinity)
+            if drawing.twoPointMode {
+                TwoPointPanel(field: field, drawing: drawing)
             } else {
-                VStack(spacing: 0) {
-                    canvas.frame(height: max(260, geo.size.height * 0.46))
-                    controls
-                }
+                actionBar
             }
         }
         .background(SurveyColor.background)
@@ -51,44 +49,202 @@ struct DrawingTabView: View {
                 }
             }
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: drawingTypes) { result in
+        .fileImporter(isPresented: $importing, allowedContentTypes: surveyImportTypes()) { result in
             switch result {
             case let .success(url):
                 guard let data = readSecurityScoped(url) else {
                     drawing.report("ファイルを読めませんでした。")
                     return
                 }
-                let here = field.workingReading.position
-                drawing.importFile(
-                    data: data,
-                    fileName: url.lastPathComponent,
-                    latitude: here?.latitudeDegrees,
-                    longitude: here?.longitudeDegrees
-                )
+                drawing.importFile(data: data, fileName: url.lastPathComponent)
             case .failure:
                 drawing.report("ファイルを読めませんでした。")
             }
         }
+        .sheet(isPresented: $showsAlign) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        alignmentSection
+                        inspectionSection
+                    }
+                    .padding(16)
+                }
+                .background(SurveyColor.background)
+                .navigationTitle("合わせ")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("閉じる") { showsAlign = false }
+                            .font(SurveyType(17, .heavy))
+                    }
+                }
+            }
+            .modifier(SurveyScheme())
+        }
+        .sheet(isPresented: $showsSetup) {
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        stationSection
+                        machineSection
+                        eyeSection
+                        zoneBlock
+                        layerBlock
+                        if drawing.document?.has(.background) == true {
+                            backgroundSection
+                        }
+                        if field.extras.proximity {
+                            proximitySection
+                        }
+                        if field.extras.fall {
+                            fallSection
+                        }
+                    }
+                    .padding(16)
+                }
+                .background(SurveyColor.background)
+                .navigationTitle("数値")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("閉じる") { showsSetup = false }
+                            .font(SurveyType(17, .heavy))
+                    }
+                }
+            }
+            .modifier(SurveyScheme())
+            .onAppear { syncCabDrafts() }
+        }
+        .sheet(isPresented: Binding(
+            get: { drawing.pendingIntake != nil },
+            set: { if !$0 { drawing.pendingIntake = nil } }
+        )) {
+            HeightMapSheet(drawing: drawing, columnCount: drawing.pendingIntake?.columnCount ?? 2)
+        }
+    }
+
+    private var projectBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                field.showsProjects = true
+            } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(drawing.project?.name ?? "現場")
+                        .font(SurveyType(18, .heavy))
+                        .lineLimit(1)
+                    if let file = drawing.fileName {
+                        Text(file)
+                            .font(SurveyType(13, .semibold))
+                            .foregroundStyle(SurveyColor.muted)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .foregroundStyle(SurveyColor.text)
+            }
+            .buttonStyle(.plain)
+            .disabled(drawing.project == nil)
+            .accessibilityLabel("現場")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(SurveyColor.bar)
+    }
+
+    private var actionBar: some View {
+        let step = FieldFlow.drawingStep(drawing)
+        let showsEarlier = drawing.project != nil || drawing.document != nil || drawing.pdfData != nil
+        return VStack(spacing: 8) {
+            if showsEarlier {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if step != .importFile, drawing.project != nil {
+                        actionButton("取り込む") { importing = true }
+                    }
+                    if step != .align, drawing.document != nil {
+                        actionButton("2点合わせ") {
+                            FieldFlow.perform(.align, field: field, fromMenu: false)
+                        }
+                    }
+                    if step != .arbitrary, drawing.canPlaceArbitrary || drawing.placingArbitrary {
+                        Button {
+                            drawing.placingArbitrary.toggle()
+                        } label: {
+                            Text("任意点")
+                                .font(SurveyType(16, .heavy))
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 44)
+                                .background(drawing.placingArbitrary ? SurveyColor.blue : SurveyColor.card)
+                                .foregroundStyle(drawing.placingArbitrary ? SurveyColor.onAccent : SurveyColor.text)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    if drawing.document != nil || drawing.pdfData != nil {
+                        actionButton("全体") { drawing.showWholeDrawing() }
+                    }
+                    if drawing.project != nil {
+                        actionButton("数値") { showsSetup = true }
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+            }
+            if let step {
+                Button(FieldFlow.title(step, field: field)) {
+                    if step == .importFile {
+                        importing = true
+                    } else {
+                        FieldFlow.perform(step, field: field, fromMenu: false)
+                    }
+                }
+                .buttonStyle(FlowNextButton())
+                .padding(.horizontal, 12)
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 24)
+        .background(SurveyColor.bar)
+    }
+
+    private func actionButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .font(SurveyType(16, .heavy))
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
+            .background(SurveyColor.card)
+            .foregroundStyle(SurveyColor.text)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .buttonStyle(.plain)
     }
 
     private var canvas: some View {
         ZStack {
-            DrawingCanvasView(
-                document: drawing.document,
-                camera: $drawing.camera,
-                user: userOnDrawing,
-                tone: field.badge.tone,
-                accuracyText: accuracyText,
-                highlight: highlight,
-                reachCenter: reachGraphics?.center,
-                reachRadius: reachGraphics?.radius,
-                reachRanges: reachGraphics?.ranges ?? [],
-                crew: crewGlyphs,
-                onTap: { point, tolerance in
-                    drawing.takeDrawingTap(point, tolerance: tolerance)
-                },
-                onFit: { drawing.fit(in: $0) }
-            )
+            if let data = drawing.pdfData, drawing.document == nil {
+                PDFDrawingView(data: data)
+                    .id(drawing.fileName ?? "pdf")
+            } else {
+                DrawingCanvasView(
+                    document: drawing.document,
+                    camera: $drawing.camera,
+                    user: userOnDrawing,
+                    tone: field.badge.tone,
+                    accuracyText: accuracyText,
+                    highlight: highlight,
+                    reachCenter: reachGraphics?.center,
+                    reachRadius: reachGraphics?.radius,
+                    reachRanges: reachGraphics?.ranges ?? [],
+                    crew: crewGlyphs,
+                    onTap: { point, tolerance in
+                        drawing.takeDrawingTap(point, tolerance: tolerance)
+                    },
+                    onLongPress: { point, tolerance in
+                        drawing.takeDrawingLongPress(point, tolerance: tolerance)
+                    },
+                    onFit: { drawing.fit(in: $0) }
+                )
+            }
             VStack {
                 if field.extras.proximity {
                     SafetyBanner(crew: field.crew) {
@@ -115,6 +271,13 @@ struct DrawingTabView: View {
                 }
                 Spacer()
             }
+            if let draft = drawing.draftPoint {
+                VStack {
+                    Spacer()
+                    arbitraryCard(draft)
+                        .padding(12)
+                }
+            }
             if let progress = drawing.importProgress {
                 VStack(spacing: 10) {
                     Text(progress.label)
@@ -128,14 +291,84 @@ struct DrawingTabView: View {
                         .foregroundStyle(SurveyColor.muted)
                 }
                 .padding(24)
-            } else if drawing.document == nil {
-                Text(drawing.project == nil ? "プロジェクトを作って、DXF か SFC を読み込みます。" : "DXF か SFC を読み込むと、ここに図面が出ます。")
-                    .font(SurveyType(16, .semibold))
+            } else if drawing.document == nil && drawing.pdfData == nil {
+                Text(drawing.project == nil ? "現場を選ぶ" : "取り込む")
+                    .font(SurveyType(18, .heavy))
                     .foregroundStyle(SurveyColor.muted)
-                    .multilineTextAlignment(.center)
                     .padding(24)
             }
         }
+    }
+
+    private var zoneBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("系", selection: zoneBinding) {
+                ForEach(drawing.zoneChoices, id: \.self) { number in
+                    Text("\(number)系").tag(number)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(SurveyColor.text)
+            Picker("軸", selection: axisBinding) {
+                ForEach(DrawingAxis.allCases, id: \.self) { axis in
+                    Text(axis.label).tag(axis)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(SurveyColor.text)
+        }
+    }
+
+    private var layerBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let document = drawing.document, document.has(.background) {
+                Toggle("背景を表示", isOn: roleBinding(.background))
+                    .font(SurveyType(15, .semibold))
+                    .tint(SurveyColor.amber)
+                if document.has(.design) {
+                    Toggle("設計を表示", isOn: roleBinding(.design))
+                        .font(SurveyType(15, .semibold))
+                        .tint(SurveyColor.amber)
+                }
+            }
+            if let layers = drawing.document?.layers, !layers.isEmpty {
+                DisclosureGroup("レイヤ \(layers.filter(\.isVisible).count)/\(layers.count)") {
+                    ForEach(layers) { layer in
+                        Toggle(layerTitle(layer), isOn: layerBinding(layer))
+                            .font(SurveyType(15, .semibold))
+                            .tint(SurveyColor.amber)
+                    }
+                }
+                .font(SurveyType(15, .heavy))
+                .foregroundStyle(SurveyColor.text)
+            }
+        }
+    }
+
+    private func arbitraryCard(_ draft: FieldPoint) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(draft.snapLabel ?? "任意")
+                .font(SurveyType(14, .heavy))
+                .foregroundStyle(SurveyColor.muted)
+            Text("X \(FieldPoint.meters(draft.northingMeters))")
+            Text("Y \(FieldPoint.meters(draft.eastingMeters))")
+            TextField("計画高", text: Binding(
+                get: {
+                    guard let meters = draft.designHeightMeters else { return "" }
+                    return String(format: "%g", meters)
+                },
+                set: { drawing.setDraftHeight($0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .keyboardType(.numbersAndPunctuation)
+            Button("保存") { drawing.saveDraftPoint() }
+                .buttonStyle(SurveyPlainButton())
+        }
+        .font(SurveyType(28, .heavy, mono: true))
+        .foregroundStyle(SurveyColor.text)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var controls: some View {
@@ -785,8 +1018,7 @@ struct DrawingTabView: View {
         Binding(
             get: { drawing.project?.prefecture },
             set: { name in
-                let here = field.workingReading.position
-                drawing.setPrefecture(name, latitude: here?.latitudeDegrees, longitude: here?.longitudeDegrees)
+                drawing.setPrefecture(name, latitude: nil, longitude: nil)
             }
         )
     }
@@ -967,11 +1199,6 @@ struct SurveyPlainButton: ButtonStyle {
                     .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
             )
     }
-}
-
-private var drawingTypes: [UTType] {
-    let types = [UTType(filenameExtension: "dxf"), UTType(filenameExtension: "sfc")].compactMap { $0 }
-    return types.isEmpty ? [.data] : types
 }
 
 private extension Array {

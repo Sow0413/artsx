@@ -13,6 +13,7 @@ struct DrawingCanvasView: View {
     let reachRanges: [ReachRange]
     var crew: [CrewGlyph] = []
     var onTap: (PlanarPoint, Double) -> Void
+    var onLongPress: ((PlanarPoint, Double) -> Void)? = nil
     var onFit: (CGSize) -> Void
 
     @State private var magnifyBase: Double?
@@ -38,6 +39,15 @@ struct DrawingCanvasView: View {
                 let tolerance = 22 / max(camera.pointsPerUnit, 1e-9)
                 onTap(drawingPoint(from: location, size: size), tolerance)
             }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.45, maximumDistance: 16)
+                    .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+                    .onEnded { value in
+                        guard case let .second(true, drag?) = value else { return }
+                        let tolerance = 22 / max(camera.pointsPerUnit, 1e-9)
+                        onLongPress?(drawingPoint(from: drag.location, size: size), tolerance)
+                    }
+            )
             .overlay(alignment: .bottomTrailing) {
                 zoomButtons
                     .padding(8)

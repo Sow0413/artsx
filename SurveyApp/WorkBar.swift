@@ -3,11 +3,17 @@ import SurveyCore
 
 struct WorkBar: View {
     @ObservedObject var field: FieldModel
+    var ids: [String]? = nil
+
+    private var works: [WorkRequirement] {
+        guard let ids else { return field.workCatalog.works }
+        return ids.compactMap { id in field.workCatalog.works.first { $0.id == id } }
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(field.workCatalog.works) { work in
+                ForEach(works) { work in
                     Button {
                         field.selectWork(work.id)
                     } label: {

@@ -7,22 +7,35 @@ struct SealedIncidentRow: Identifiable, Equatable {
     var title: String
 }
 
+struct RecordBanner: Equatable {
+    var text: String
+    var folderURL: URL?
+}
+
 enum FieldTab: String, CaseIterable, Identifiable {
     case map
     case drawing
-    case measure
-    case export
-    case seat
+    case survey
+    case build
 
     var id: String { rawValue }
+
+    /// 以前の画面名。measure は測量、seat は施工、export は測量のメニューに戻す。
+    static func restored(_ raw: String) -> FieldTab {
+        switch raw {
+        case "survey", "measure", "export": return .survey
+        case "build", "seat": return .build
+        case "drawing": return .drawing
+        default: return .map
+        }
+    }
 
     var title: String {
         switch self {
         case .map: return "地図"
         case .drawing: return "図面"
-        case .measure: return "測る"
-        case .export: return "出す"
-        case .seat: return "オペ"
+        case .survey: return "測量"
+        case .build: return "施工"
         }
     }
 
@@ -30,9 +43,8 @@ enum FieldTab: String, CaseIterable, Identifiable {
         switch self {
         case .map: return "map"
         case .drawing: return "ruler"
-        case .measure: return "mappin"
-        case .export: return "square.and.arrow.up"
-        case .seat: return "steeringwheel"
+        case .survey: return "mappin.and.ellipse"
+        case .build: return "hammer"
         }
     }
 }
@@ -44,9 +56,20 @@ final class FieldModel: ObservableObject {
     @Published var followUser: Bool
     @Published var mapHeadingUp = UserDefaults.standard.bool(forKey: "survey.mapHeadingUp")
     @Published private(set) var mapHeadingToken = 0
+    @Published var mapCadOn = (UserDefaults.standard.object(forKey: "survey.mapCadOn") as? Bool) ?? true
+    @Published var mapCadOpacity = UserDefaults.standard.object(forKey: "survey.mapCadOpacity") as? Double ?? 0.85
+    @Published var showsProjects = false
+    @Published var showsCadOpacity = false
+    @Published var asksImport = false
+    @Published var importAfterMenu = false
     @Published var recordPlace = UserDefaults.standard.string(forKey: "survey.recordPlace") ?? ""
-    @Published private(set) var recordFlash: String?
+    @Published private(set) var recordPins: [FieldRecordPin] = []
+    @Published private(set) var recordBanner: RecordBanner?
+    @Published private(set) var recordSuccessTick = 0
+    @Published private(set) var recordWarningTick = 0
     @Published var tab: FieldTab
+    /// 同じタブをもう一度押したときのメニュー。
+    @Published var modeMenu: FieldTab?
     @Published private(set) var isDownloading = false
     @Published private(set) var downloadMessage = "表示中の範囲を、圏外用に保存します。"
     @Published private(set) var savedAreaCount = 0
@@ -213,7 +236,7 @@ final class FieldModel: ObservableObject {
     private var lastGeocodedLatitude: Double?
     private var lastGeocodedLongitude: Double?
     private var geocodeTask: Task<Void, Never>?
-    private var recordFlashToken = UUID()
+    private var recordBannerToken = UUID()
 
     init(
         source: any PositionSource,
@@ -299,13 +322,14 @@ final class FieldModel: ObservableObject {
         }
         drawing.onProjectCommitted = { [weak self] in
             self?.rememberSession()
+            self?.adoptProjectPlace()
         }
         $tab.dropFirst().sink { [weak self] _ in
             self?.rememberSession()
         }.store(in: &cancellables)
         let saved = journal.session()
-        if let tab = FieldTab(rawValue: saved.tab) {
-            self.tab = tab
+        if !saved.tab.isEmpty {
+            self.tab = FieldTab.restored(saved.tab)
         }
         if let workID = saved.workID, workCatalog.works.contains(where: { $0.id == workID }) {
             workCatalog = workCatalog.selecting(workID)
@@ -424,7 +448,7 @@ final class FieldModel: ObservableObject {
                 selfLongitude: plottable ? position?.longitudeDegrees : nil,
                 courseDegrees: position?.courseDegrees,
                 headingDegrees: position?.headingDegrees,
-                facing: tab == .seat ? .machine : .own,
+                facing: tab == .build ? .machine : .own,
                 now: Date()
             )
             if heard.beacon.active {
@@ -601,7 +625,7 @@ final class FieldModel: ObservableObject {
             selfLongitude: plottable ? position?.longitudeDegrees : nil,
             courseDegrees: position?.courseDegrees,
             headingDegrees: position?.headingDegrees,
-            facing: tab == .seat ? .machine : .own
+            facing: tab == .build ? .machine : .own
         )
         firstView = view
         let line = view.nearestOpen || view.greeterOpen ? view.headline : view.progress
@@ -620,7 +644,7 @@ final class FieldModel: ObservableObject {
             selfLongitude: plottable ? position?.longitudeDegrees : nil,
             courseDegrees: position?.courseDegrees,
             headingDegrees: position?.headingDegrees,
-            facing: tab == .seat ? .machine : .own
+            facing: tab == .build ? .machine : .own
         )
     }
 
@@ -919,7 +943,7 @@ final class FieldModel: ObservableObject {
             selfLongitude: plottable ? position?.longitudeDegrees : nil,
             courseDegrees: position?.courseDegrees,
             headingDegrees: position?.headingDegrees,
-            facing: tab == .seat ? .machine : .own,
+            facing: tab == .build ? .machine : .own,
             now: Date()
         )
     }
@@ -1603,7 +1627,7 @@ final class FieldModel: ObservableObject {
             tab = .map
         case .openExport:
             operation.commit(effect)
-            tab = .export
+            openModeExport()
         default:
             operation.commit(effect)
         }
@@ -1639,6 +1663,7 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
+        reloadRecordPins()
         if stature.statureMeters == nil {
             asksStature = true
         }
@@ -1762,6 +1787,28 @@ final class FieldModel: ObservableObject {
         mapHeadingToken += 1
     }
 
+    func toggleMapCad() {
+        mapCadOn.toggle()
+        UserDefaults.standard.set(mapCadOn, forKey: "survey.mapCadOn")
+    }
+
+    func ensureMapCad() {
+        guard !mapCadOn else { return }
+        mapCadOn = true
+        UserDefaults.standard.set(true, forKey: "survey.mapCadOn")
+    }
+
+    func setMapCadOpacity(_ value: Double) {
+        let clamped = min(1, max(0.15, value))
+        mapCadOpacity = clamped
+        UserDefaults.standard.set(clamped, forKey: "survey.mapCadOpacity")
+    }
+
+    private func adoptProjectPlace() {
+        guard let place = drawing.project?.place?.trimmingCharacters(in: .whitespacesAndNewlines), !place.isEmpty else { return }
+        setRecordPlace(place)
+    }
+
     func setRecordPlace(_ raw: String) {
         recordPlace = raw
         recordPlaceEdited = true
@@ -1783,7 +1830,7 @@ final class FieldModel: ObservableObject {
     @discardableResult
     func recordHere() -> Bool {
         guard let position = reading.position, position.isPlottable else {
-            showRecordFlash("位置なし")
+            showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
             return false
         }
         let name = nextPointName ?? "P\(observationCount + 1)"
@@ -1817,20 +1864,69 @@ final class FieldModel: ObservableObject {
             verticalAccuracyMeters: position.verticalAccuracyMeters,
             timestamp: position.timestamp
         )
-        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("records", isDirectory: true)
-        _ = try? FieldRecordStore.write(point, root: root, place: recordPlace)
-        showRecordFlash(name)
+        let saved = try? FieldRecordStore.write(point, root: recordsRoot, place: recordPlace)
+        reloadRecordPins(on: position.timestamp)
+        if let saved, let pin = recordPins.first(where: { $0.fileURL.path == saved.path }) {
+            showRecordBanner(RecordBanner(text: pin.caption, folderURL: pin.folderURL), success: true)
+        } else {
+            let place = FieldRecordStore.placeFolder(recordPlace, latitude: position.latitudeDegrees, longitude: position.longitudeDegrees)
+            let day = FieldRecordStore.dayFolder(position.timestamp)
+            let number = recordPins.count + 1
+            showRecordBanner(RecordBanner(text: "記録 #\(number) ・\(place)/\(day)", folderURL: nil), success: true)
+        }
         return true
     }
 
-    private func showRecordFlash(_ text: String) {
+    func showRecordList() {
+        tab = .survey
+        modeMenu = nil
+    }
+
+    /// 今のモードの出す。地図からは測量の書き出しを開く。
+    func openModeExport() {
+        switch tab {
+        case .drawing:
+            modeMenu = .drawing
+        case .build:
+            modeMenu = .build
+        case .map, .survey:
+            tab = .survey
+            modeMenu = .survey
+        }
+    }
+
+    /// バナーを閉じ、開くフォルダがあれば返す。
+    func takeRecordFolder() -> URL? {
+        let folder = recordBanner?.folderURL
+        recordBanner = nil
+        return folder
+    }
+
+    private var recordsRoot: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("records", isDirectory: true)
+    }
+
+    func recordDays(for place: String) -> [String] {
+        FieldRecordStore.dayFolders(in: recordsRoot, place: place)
+    }
+
+    private func reloadRecordPins(on day: Date = Date()) {
+        recordPins = FieldRecordStore.pins(in: recordsRoot, on: day)
+    }
+
+    private func showRecordBanner(_ banner: RecordBanner, success: Bool) {
         let token = UUID()
-        recordFlashToken = token
-        recordFlash = text
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            guard let self, self.recordFlashToken == token else { return }
-            self.recordFlash = nil
+        recordBannerToken = token
+        recordBanner = banner
+        if success {
+            recordSuccessTick += 1
+        } else {
+            recordWarningTick += 1
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.recordBannerToken == token else { return }
+            self.recordBanner = nil
         }
     }
 
@@ -2196,13 +2292,15 @@ final class FieldModel: ObservableObject {
 
     func cancelBookEnclosure() {
         enclosingBook = false
-        tab = .export
+        tab = .survey
+        modeMenu = .survey
     }
 
     func confirmBookEnclosure() {
         bookQuery.bounds = viewport.bounds
         enclosingBook = false
-        tab = .export
+        tab = .survey
+        modeMenu = .survey
     }
 
     func clearBookFilters() {
@@ -2305,6 +2403,136 @@ final class FieldModel: ObservableObject {
                 }
             }
         }
+    }
+
+    func writeExport(name: String, body: String) {
+        let projectName = drawing.project?.name
+        let root = drawing.projectsRoot
+        let site = siteDirectory
+        do {
+            let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
+            let url = folder.appendingPathComponent(name)
+            try Data(body.utf8).write(to: url, options: .atomic)
+            exportURL = url
+            exportMessage = name
+        } catch {
+            exportURL = nil
+            exportMessage = "書き出せませんでした。"
+        }
+    }
+
+    func exportDrawingTransform() {
+        writeTransform(name: "変換.txt")
+    }
+
+    func exportAlignedDrawing() {
+        writeTransform(name: "合わせた図面.txt")
+    }
+
+    func exportArbitraryPoints() {
+        let points = drawing.fieldPoints.filter { $0.origin == .arbitrary }
+        guard !points.isEmpty else {
+            exportMessage = "任意点がありません。"
+            exportURL = nil
+            return
+        }
+        var lines = ["name,X,Y,h"]
+        for point in points {
+            let height = point.designHeightMeters.map(FieldPoint.meters) ?? ""
+            lines.append("\(Self.csv(point.name)),\(FieldPoint.meters(point.northingMeters)),\(FieldPoint.meters(point.eastingMeters)),\(height)")
+        }
+        writeExport(name: "任意点.csv", body: lines.joined(separator: "\n"))
+    }
+
+    func exportRecordedPoints() {
+        guard !recordPins.isEmpty else {
+            exportDelivery(.csv)
+            return
+        }
+        var lines = ["name,lat,lon"]
+        for pin in recordPins {
+            lines.append("\(Self.csv(pin.name)),\(pin.latitude),\(pin.longitude)")
+        }
+        writeExport(name: "記録点.csv", body: lines.joined(separator: "\n"))
+    }
+
+    func exportObservationLog() {
+        writeObservations(journal.allObservations(), name: "観測記録.csv", empty: "観測がありません。")
+    }
+
+    func exportStakeoutResults() {
+        writeObservations(
+            journal.allObservations().filter { $0.workID == "stakeout" },
+            name: "丁張.csv",
+            empty: "丁張の記録がありません。"
+        )
+    }
+
+    func exportCutFill() {
+        var lines = ["name,FH,GL,diff,word"]
+        var count = 0
+        for point in drawing.fieldPoints {
+            let fill = CutFill.make(formation: point.formationHeightMeters, ground: point.groundLevelMeters)
+            guard fill.formationMeters != nil || fill.groundMeters != nil else { continue }
+            count += 1
+            let formation = fill.formationMeters.map(FieldPoint.meters) ?? ""
+            let ground = fill.groundMeters.map(FieldPoint.meters) ?? ""
+            lines.append("\(Self.csv(point.name)),\(formation),\(ground),\(fill.differenceText ?? ""),\(fill.word ?? "")")
+        }
+        guard count > 0 else {
+            exportMessage = "切盛がありません。"
+            exportURL = nil
+            return
+        }
+        writeExport(name: "切盛.csv", body: lines.joined(separator: "\n"))
+    }
+
+    private func writeTransform(name: String) {
+        guard let transform = drawing.activeTransform else {
+            exportMessage = "合わせがありません。"
+            exportURL = nil
+            return
+        }
+        let saved = drawing.alignments
+            .filter { $0.drawingFileName == drawing.fileName }
+            .max { $0.createdAt < $1.createdAt }
+        let rms = drawing.fit?.rmsMeters ?? saved?.rmsMeters
+        var lines = [
+            "系 \(drawing.zone)",
+            "縮尺 \(Self.plain(transform.scale))",
+            "回転 \(Self.plain(transform.rotationDegrees))",
+            "東 \(Self.plain(transform.translationEasting))",
+            "北 \(Self.plain(transform.translationNorthing))"
+        ]
+        if let rms {
+            lines.append("残差 \(Self.plain(rms))")
+        }
+        if let file = drawing.fileName {
+            lines.append(file)
+        }
+        writeExport(name: name, body: lines.joined(separator: "\n"))
+    }
+
+    private func writeObservations(_ rows: [FieldObservation], name: String, empty: String) {
+        guard !rows.isEmpty else {
+            exportMessage = empty
+            exportURL = nil
+            return
+        }
+        var lines = ["name,work,lat,lon,h"]
+        for item in rows {
+            let height = item.captured.ellipsoidalHeightMeters.map(Self.plain) ?? ""
+            lines.append("\(Self.csv(item.name)),\(item.workID),\(item.captured.latitudeDegrees),\(item.captured.longitudeDegrees),\(height)")
+        }
+        writeExport(name: name, body: lines.joined(separator: "\n"))
+    }
+
+    private static func csv(_ value: String) -> String {
+        value.replacingOccurrences(of: ",", with: " ").replacingOccurrences(of: "\n", with: " ")
+    }
+
+    private static func plain(_ value: Double) -> String {
+        String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     private static func deliveryFolder(projectName: String?, root: URL, site: URL) throws -> URL {

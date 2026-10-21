@@ -16,8 +16,21 @@ enum FieldHelp: String, CaseIterable, Identifiable {
     case delivery
     case points
     case stakeout
+    case alignment
+    case sima
+    case arbitrary
 
     var id: String { rawValue }
+
+    static let groups: [FieldHelpGroup] = [
+        FieldHelpGroup(title: "GPS精度", items: [.gps, .accuracy, .benchmark]),
+        FieldHelpGroup(title: "図面合わせ", items: [.alignment]),
+        FieldHelpGroup(title: "SIMA", items: [.sima]),
+        FieldHelpGroup(title: "丁張", items: [.batter, .stakeout, .arbitrary]),
+        FieldHelpGroup(title: "記録", items: [.points, .delivery]),
+        FieldHelpGroup(title: "測り方", items: [.coordinates, .level, .ar, .stature, .pace]),
+        FieldHelpGroup(title: "その他", items: [.extras])
+    ]
 
     var title: String {
         switch self {
@@ -34,6 +47,9 @@ enum FieldHelp: String, CaseIterable, Identifiable {
         case .delivery: return "書き出し"
         case .points: return "点の記録"
         case .stakeout: return "測設"
+        case .alignment: return "2点合わせ"
+        case .sima: return "SIMA"
+        case .arbitrary: return "任意点"
         }
     }
 
@@ -65,6 +81,12 @@ enum FieldHelp: String, CaseIterable, Identifiable {
             return "下の記録は、今の緯度・経度・楕円体高・精度・時刻を残します。場所と日付のフォルダと、出す画面の座標簿に入ります。場所は設定で直せます。測る画面の点名は、頭のアルファベットと連番です。"
         case .stakeout:
             return "追加距離を張り、現在地を No.23+5.0m 左 3.2m のように出します。座標簿で合わせてある図面は cm で出します。この点がオペの目標です。作業半径の内と外を色で出します。声は画面の上を前にし、方向が変わったときだけです。"
+        case .alignment:
+            return "図面の2点と SIMA の2点で、移動・回転・縮尺を決めます。図面の距離と SIMA の距離、差（mm）、比を出します。許容は mm と 1/N です。両方に入ると OK、外れると要確認です。保存は止めません。合わせた図面は、その系で地図に載ります。"
+        case .sima:
+            return "A01 の北・東を、現場の系（既定は VII）で緯度経度にします。点名の GL / FH、別の点、高さの列から地盤高と計画高を分けます。列の意味が決まらないときは、取り込みのときに選びます。地図の札に FH を出せます。丁張では FH、GL、その差を盛土または切土で出します。"
+        case .arbitrary:
+            return "合わせた図面で、端点・交点・線上、または長押しの位置に任意点を置けます。平面直角の X Y と、入れた計画高を現場に残します。丁張へで、距離と方向の案内に送ります。"
         }
     }
 }
@@ -131,6 +153,12 @@ struct HelpPage: View {
     }
 }
 
+struct FieldHelpGroup: Identifiable {
+    var title: String
+    var items: [FieldHelp]
+    var id: String { title }
+}
+
 enum FieldMenuNext {
     case stature
     case extras
@@ -153,69 +181,72 @@ struct FieldMenuSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    placeEditor
-                    WorkBar(field: field)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let position = field.reading.position, position.isPlottable {
-                        Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
-                            .font(SurveyType(16, .heavy))
-                            .foregroundStyle(SurveyColor.text)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.horizontal, 12)
-                    }
-                    menuButton(field.statureNotice ?? "身長") { handoff(.stature) }
-                    menuButton("記録一覧") {
-                        field.tab = .measure
+                    functionRow("プロジェクト", icon: "folder") {
+                        field.showsProjects = true
                         dismiss()
                     }
-                    menuButton("水準器") { handoff(.crosshair) }
-                    menuButton("丁張") { handoff(.batter) }
-                    menuButton("AR位置出し") { handoff(.ar) }
-                    menuButton("歩測") { handoff(.pace) }
-                    menuButton(field.isDownloading ? "保存を中止" : "この範囲を保存") {
-                        if field.isDownloading {
-                            field.cancelDownload()
-                        } else {
-                            handoff(.download)
-                        }
+                    functionLink("表示", icon: "circle.lefthalf.filled") {
+                        DisplaySettings(field: field, appearance: appearance)
                     }
+                    functionRow(field.statureNotice ?? "身長", icon: "figure.stand") { handoff(.stature) }
+                    functionLink("許容範囲", icon: "ruler") {
+                        ToleranceSettings(drawing: field.drawing)
+                    }
+                    functionLink("場所名", icon: "mappin") {
+                        PlaceSettings(field: field)
+                    }
+                    functionRow("追加機能", icon: "switch.2") { handoff(.extras) }
+                    functionRow("ボタンの並び", icon: "square.grid.2x2") { handoff(.tools) }
+                    functionRow("位置の共有", icon: "location") { handoff(.privacy) }
                     if field.extras.disaster {
-                        menuButton("災害") {
+                        functionRow("災害", icon: "exclamationmark.triangle") {
                             field.showsDisaster = true
                             dismiss()
                         }
                     }
                     if field.extras.stats || field.extras.accidentReport {
-                        menuButton(field.extras.stats ? "統計" : "事故報告") {
+                        functionRow(field.extras.stats ? "統計" : "事故報告", icon: "chart.bar") {
                             field.showsIncidentStats = true
                             dismiss()
                         }
                     }
                     if field.extras.pushToTalk {
-                        menuButton(field.radio.spaceAudio ? "定位オン" : "定位") {
-                            field.radio.setSpaceAudio(!field.radio.spaceAudio)
+                        Toggle(isOn: Binding(
+                            get: { field.radio.spaceAudio },
+                            set: { field.radio.setSpaceAudio($0) }
+                        )) {
+                            Label("定位", systemImage: "ear")
+                                .font(SurveyType(18, .heavy))
                         }
+                        .tint(SurveyColor.blue)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
-                    menuButton(appearance.label) { appearance.cycle() }
-                    menuButton("追加機能") { handoff(.extras) }
-                    menuButton("ボタンの並び") { handoff(.tools) }
-                    menuButton("位置の共有") { handoff(.privacy) }
                     Text("説明")
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.muted)
-                        .padding(.top, 8)
-                    ForEach(FieldHelp.allCases) { help in
-                        NavigationLink {
-                            HelpPage(help: help)
-                        } label: {
-                            Text(help.title)
-                                .font(SurveyType(16, .heavy))
-                                .foregroundStyle(SurveyColor.text)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .padding(.horizontal, 12)
-                                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .padding(.top, 12)
+                    ForEach(FieldHelp.groups) { group in
+                        DisclosureGroup(group.title) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(group.items) { help in
+                                    Text(help.title)
+                                        .font(SurveyType(15, .heavy))
+                                        .foregroundStyle(SurveyColor.text)
+                                    Text(help.body)
+                                        .font(SurveyType(14, .semibold))
+                                        .foregroundStyle(SurveyColor.muted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.top, 6)
                         }
-                        .buttonStyle(.plain)
+                        .font(SurveyType(17, .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
                 .padding(16)
@@ -233,12 +264,110 @@ struct FieldMenuSheet: View {
         .modifier(SurveyScheme())
     }
 
-    private var placeEditor: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("場所")
-                .font(SurveyType(15, .heavy))
+    private func functionRow(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            functionLabel(title, icon: icon, trailing: "chevron.right")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func functionLink<Destination: View>(_ title: String, icon: String, @ViewBuilder destination: () -> Destination) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            functionLabel(title, icon: icon, trailing: "chevron.right")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func functionLabel(_ title: String, icon: String, trailing: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(SurveyType(18, .bold))
+                .frame(width: 28)
+            Text(title)
+                .font(SurveyType(18, .heavy))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Spacer(minLength: 8)
+            Image(systemName: trailing)
+                .font(SurveyType(14, .bold))
                 .foregroundStyle(SurveyColor.muted)
-            TextField("未設定なら座標", text: Binding(
+        }
+        .foregroundStyle(SurveyColor.text)
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func handoff(_ next: FieldMenuNext) {
+        self.next = next
+        dismiss()
+    }
+}
+
+private struct DisplaySettings: View {
+    @ObservedObject var field: FieldModel
+    @ObservedObject var appearance: SurveyAppearance
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Button(appearance.label) { appearance.cycle() }
+                    .buttonStyle(SurveyPlainButton())
+                if let position = field.reading.position, position.isPlottable {
+                    Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
+                        .font(SurveyType(18, .heavy, mono: true))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+            }
+            .padding(16)
+        }
+        .background(SurveyColor.background)
+        .navigationTitle("表示")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ToleranceSettings: View {
+    @ObservedObject var drawing: DrawingSession
+    @State private var millimeters = ""
+    @State private var denominator = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("mm", text: $millimeters)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.decimalPad)
+            TextField("1/N", text: $denominator)
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.numberPad)
+            Spacer()
+        }
+        .padding(16)
+        .background(SurveyColor.background)
+        .navigationTitle("許容範囲")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            millimeters = String(format: "%g", drawing.tolerance.millimeters)
+            denominator = String(format: "%g", drawing.tolerance.denominator)
+        }
+        .onChange(of: millimeters) { _, _ in commit() }
+        .onChange(of: denominator) { _, _ in commit() }
+    }
+
+    private func commit() {
+        guard let mm = Double(millimeters), let ratio = Double(denominator) else { return }
+        drawing.setTolerance(millimeters: mm, denominator: ratio)
+    }
+}
+
+private struct PlaceSettings: View {
+    @ObservedObject var field: FieldModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("場所名", text: Binding(
                 get: { field.recordPlace },
                 set: { field.setRecordPlace($0) }
             ))
@@ -246,31 +375,12 @@ struct FieldMenuSheet: View {
             .padding(10)
             .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Button("現在地") { field.useNearbyPlaceName() }
-                .font(SurveyType(16, .heavy))
-                .foregroundStyle(SurveyColor.text)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .padding(.horizontal, 12)
-                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .buttonStyle(.plain)
+                .buttonStyle(SurveyPlainButton())
+            Spacer()
         }
-    }
-
-    private func menuButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(SurveyType(18, .heavy))
-                .foregroundStyle(SurveyColor.text)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .padding(.horizontal, 12)
-                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func handoff(_ next: FieldMenuNext) {
-        self.next = next
-        dismiss()
+        .padding(16)
+        .background(SurveyColor.background)
+        .navigationTitle("場所名")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

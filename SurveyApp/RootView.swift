@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 import SurveyCore
 
 #if !SURVEY_PLAYGROUND && canImport(AVFoundation)
@@ -13,6 +15,7 @@ struct RootView: View {
     @StateObject private var appearance = SurveyAppearance()
     @State private var showsMenu = false
     @State private var menuNext: FieldMenuNext?
+    @State private var modeHandoff: ModeHandoff?
 
     init(
         source: any PositionSource,
@@ -50,21 +53,17 @@ struct RootView: View {
                     .padding(.top, 6)
             }
             HStack(spacing: 8) {
-                if field.tab != .seat {
-                    AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: true)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    Spacer(minLength: 0)
-                }
+                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: true)
+                    .frame(maxWidth: .infinity)
                 settingsButton
             }
             .padding(.horizontal, 12)
             .padding(.top, 4)
             .padding(.bottom, 4)
-            if field.tab != .seat, let correction = field.correctionStore.active {
+            if let correction = field.correctionStore.active {
                 CorrectionStatusBar(correction: correction)
             }
-            if field.tab != .seat, let progress = field.benchmarkProgressLabel {
+            if let progress = field.benchmarkProgressLabel {
                 Text(progress)
                     .font(SurveyType(16, .heavy))
                     .foregroundStyle(SurveyColor.amber)
@@ -79,20 +78,40 @@ struct RootView: View {
                     .accessibilityHidden(field.tab != .map)
                 if field.tab == .drawing {
                     DrawingTabView(field: field, drawing: field.drawing)
-                } else if field.tab == .measure {
+                } else if field.tab == .survey {
                     MeasureLogView(field: field)
-                } else if field.tab == .export {
-                    ExportTabView(field: field)
-                } else if field.tab == .seat {
+                } else if field.tab == .build {
                     OperatorView(field: field, drawing: field.drawing)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if field.tab != .seat {
-                SurveyTabBar(selection: $field.tab) {
-                    field.recordHere()
+            .overlay(alignment: .top) {
+                if let banner = field.recordBanner {
+                    Button {
+                        openRecordBanner()
+                    } label: {
+                        Text(banner.text)
+                            .font(SurveyType(16, .heavy))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .foregroundStyle(Color.black)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .background(Color.white.opacity(0.94), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .accessibilityLabel(banner.text)
+                    .accessibilityHint(banner.folderURL == nil ? "閉じる" : "フォルダを開く")
                 }
             }
+            SurveyTabBar(
+                selection: $field.tab,
+                onRecord: { field.recordHere() },
+                onList: { field.showRecordList() },
+                onReselect: { field.modeMenu = $0 }
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SurveyColor.background.ignoresSafeArea())
@@ -127,6 +146,8 @@ struct RootView: View {
             field.setSightForeground(phase == .active)
             syncVolume()
         }
+        .sensoryFeedback(.success, trigger: field.recordSuccessTick)
+        .sensoryFeedback(.warning, trigger: field.recordWarningTick)
         .onChange(of: field.operation.level) { _, _ in syncVolume() }
         .onChange(of: field.operation.eyesFree) { _, _ in syncVolume() }
         .onReceive(NotificationCenter.default.publisher(for: .surveyConfirmObservation)) { _ in
@@ -135,6 +156,9 @@ struct RootView: View {
         .modifier(MeshPresenceWatcher(field: field))
         .sheet(isPresented: $showsMenu, onDismiss: openMenuNext) {
             FieldMenuSheet(field: field, appearance: appearance, next: $menuNext)
+        }
+        .sheet(item: $field.modeMenu, onDismiss: openModeHandoff) { mode in
+            ModeMenuSheet(field: field, mode: mode, handoff: $modeHandoff)
         }
         .sheet(isPresented: $field.showsPrivacy) {
             LocationPrivacySheet(field: field)
@@ -181,9 +205,83 @@ struct RootView: View {
             }
             .modifier(SurveyScheme())
         }
+        .sheet(isPresented: $field.showsProjects) {
+            ProjectListSheet(field: field, drawing: field.drawing)
+        }
+        .sheet(isPresented: $field.showsCadOpacity) {
+            NavigationStack {
+                Slider(
+                    value: Binding(get: { field.mapCadOpacity }, set: { field.setMapCadOpacity($0) }),
+                    in: 0.15...1
+                )
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(SurveyColor.background)
+                .navigationTitle("濃さ")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("閉じる") { field.showsCadOpacity = false }
+                            .font(SurveyType(17, .heavy))
+                    }
+                }
+            }
+            .modifier(SurveyScheme())
+        }
+        .fileImporter(isPresented: $field.asksImport, allowedContentTypes: surveyImportTypes()) { result in
+            switch result {
+            case let .success(url):
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else {
+                    field.drawing.report("ファイルを読めませんでした。")
+                    return
+                }
+                field.drawing.importFile(data: data, fileName: url.lastPathComponent)
+                field.tab = .drawing
+            case .failure:
+                field.drawing.report("ファイルを読めませんでした。")
+            }
+        }
+    }
+
+    private func openRecordBanner() {
+        guard let folder = field.takeRecordFolder() else { return }
+        RecordFolderOpener.open(folder) { opened in
+            if !opened {
+                field.showRecordList()
+            }
+        }
+    }
+
+    private func openModeHandoff() {
+        let next = modeHandoff
+        modeHandoff = nil
+        switch next {
+        case .projects:
+            field.showsProjects = true
+        case .fileImport:
+            field.asksImport = true
+        case .crosshair:
+            field.showsCrosshair = true
+        case .pace:
+            field.showsPace = true
+        case .ar:
+            field.showsARStakeout = true
+        case .batter:
+            field.showsBatter = true
+        case .download:
+            field.downloadVisibleArea()
+        case nil:
+            break
+        }
     }
 
     private func openMenuNext() {
+        if field.importAfterMenu {
+            field.importAfterMenu = false
+            field.asksImport = true
+        }
         let next = menuNext
         menuNext = nil
         switch next {
@@ -239,7 +337,7 @@ struct RootView: View {
     }
 }
 
-/// 地図と図面で、画面の上を前にした方向が変わったときだけ読む。オペ画面では読まない。実機の声は未確認。
+/// 地図と図面で、画面の上を前にした方向が変わったときだけ読む。施工では読まない。実機の声は未確認。
 private struct StakeoutSpeaker: View {
     @ObservedObject var field: FieldModel
     @State private var spoken = ""
@@ -261,7 +359,7 @@ private struct StakeoutSpeaker: View {
                 StakeoutVoice.say(field.stakeoutUtterance?.speech ?? next)
             }
             .onChange(of: field.tab) { _, tab in
-                if tab == .seat {
+                if tab == .build {
                     spoken = ""
                     StakeoutVoice.stop()
                 }

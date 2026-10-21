@@ -4,12 +4,14 @@ public enum SnapKind: String, Sendable, Equatable {
     case endpoint
     case point
     case intersection
+    case along
 
     public var label: String {
         switch self {
         case .endpoint: return "端点"
         case .point: return "点"
         case .intersection: return "交点"
+        case .along: return "線上"
         }
     }
 }
@@ -93,6 +95,40 @@ public enum DrawingSnap {
         }
     }
 
+    /// タップは端点・点・交点、外れたら線上。長押しの free は吸わない。
+    public static func place(
+        in document: DrawingDocument,
+        to point: PlanarPoint,
+        tolerance: Double,
+        free: Bool
+    ) -> (point: PlanarPoint, label: String) {
+        if !free, let hit = nearest(in: document, to: point, tolerance: tolerance) {
+            return (hit.point, hit.kind.label)
+        }
+        if !free, let foot = along(in: document, to: point, tolerance: max(tolerance * 4, tolerance)) {
+            return (foot, SnapKind.along.label)
+        }
+        return (point, "任意")
+    }
+
+    /// 線分への垂線の足。許容の中でいちばん近いもの。
+    public static func along(in document: DrawingDocument, to point: PlanarPoint, tolerance: Double) -> PlanarPoint? {
+        guard tolerance > 0 else { return nil }
+        let visible = Set(document.layers.filter(\.isVisible).map(\.name))
+        let query = DrawingBounds(minX: point.x, minY: point.y, maxX: point.x, maxY: point.y).padded(tolerance)
+        var best: (point: PlanarPoint, distance: Double)?
+        for id in document.index.entityIDs(in: query) {
+            guard document.entities.indices.contains(id), visible.contains(document.entities[id].layer) else { continue }
+            for segment in segments(of: document.entities[id]) {
+                guard let foot = foot(point, on: segment), foot.distance <= tolerance else { continue }
+                if best == nil || foot.distance < best!.distance {
+                    best = (foot.point, foot.distance)
+                }
+            }
+        }
+        return best?.point
+    }
+
     private static func midpoint(_ segment: Segment2D) -> PlanarPoint {
         PlanarPoint(x: (segment.start.x + segment.end.x) / 2, y: (segment.start.y + segment.end.y) / 2)
     }
@@ -102,7 +138,47 @@ public enum DrawingSnap {
         case .endpoint: return 0
         case .point: return 1
         case .intersection: return 2
+        case .along: return 3
         }
+    }
+
+    private static func segments(of entity: DrawingEntity) -> [Segment2D] {
+        switch entity.primitive {
+        case let .line(start, end):
+            return [Segment2D(start: start, end: end)]
+        case let .polyline(vertices, closed, _):
+            return chain(vertices, closed: closed)
+        case let .arc(_, _, _, _, display):
+            return chain(display, closed: false)
+        case let .circle(center, radius):
+            return chain(DrawingCurve.circle(center: center, radius: radius), closed: true)
+        case .text, .point:
+            return []
+        }
+    }
+
+    private static func chain(_ vertices: [PlanarPoint], closed: Bool) -> [Segment2D] {
+        guard vertices.count >= 2 else { return [] }
+        var segments: [Segment2D] = []
+        for index in 1..<vertices.count {
+            segments.append(Segment2D(start: vertices[index - 1], end: vertices[index]))
+        }
+        if closed, let first = vertices.first, let last = vertices.last, first.distance(to: last) > 1e-9 {
+            segments.append(Segment2D(start: last, end: first))
+        }
+        return segments
+    }
+
+    private static func foot(_ point: PlanarPoint, on segment: Segment2D) -> (point: PlanarPoint, distance: Double)? {
+        let vx = segment.end.x - segment.start.x
+        let vy = segment.end.y - segment.start.y
+        let lengthSquared = vx * vx + vy * vy
+        if lengthSquared < 1e-18 { return nil }
+        var t = ((point.x - segment.start.x) * vx + (point.y - segment.start.y) * vy) / lengthSquared
+        if t < 0 { t = 0 }
+        if t > 1 { t = 1 }
+        let foot = PlanarPoint(x: segment.start.x + t * vx, y: segment.start.y + t * vy)
+        return (foot, point.distance(to: foot))
     }
 
     private static func consider(

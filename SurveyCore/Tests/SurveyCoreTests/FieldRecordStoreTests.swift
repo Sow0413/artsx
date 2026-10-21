@@ -45,6 +45,38 @@ final class FieldRecordStoreTests: XCTestCase {
         XCTAssertEqual(decoded.ellipsoidalHeightMeters, 24.5)
         XCTAssertEqual(decoded.horizontalAccuracyMeters, 5)
     }
+
+    func testPinsAreTodaysPointsInTimeOrder() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("records-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let morning = calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 1, minute: 0, second: 0))!
+        let later = calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 9, minute: 0, second: 0))!
+        let otherDay = calendar.date(from: DateComponents(year: 2026, month: 10, day: 20, hour: 12, minute: 0, second: 0))!
+        _ = try FieldRecordStore.write(sample("B", at: later, latitude: 35.2), root: root, place: "港区", calendar: calendar)
+        _ = try FieldRecordStore.write(sample("A", at: morning, latitude: 35.1), root: root, place: "千代田", calendar: calendar)
+        _ = try FieldRecordStore.write(sample("C", at: otherDay, latitude: 35.3), root: root, place: "千代田", calendar: calendar)
+        let pins = FieldRecordStore.pins(in: root, on: morning, calendar: calendar)
+        XCTAssertEqual(pins.map(\.number), [1, 2])
+        XCTAssertEqual(pins.map(\.name), ["A", "B"])
+        XCTAssertEqual(pins.map(\.place), ["千代田", "港区"])
+        XCTAssertEqual(pins[0].caption, "記録 #1 ・千代田/2026-10-21")
+        XCTAssertEqual(pins[1].day, "2026-10-21")
+        XCTAssertEqual(pins[0].folderURL.lastPathComponent, "2026-10-21")
+    }
+
+    private func sample(_ name: String, at date: Date, latitude: Double) -> FieldPointFile {
+        FieldPointFile(
+            name: name,
+            latitude: latitude,
+            longitude: 139.7,
+            ellipsoidalHeightMeters: 1,
+            horizontalAccuracyMeters: 3,
+            verticalAccuracyMeters: nil,
+            timestamp: date
+        )
+    }
 }
 
 private extension JSONDecoder {

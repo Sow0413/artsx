@@ -101,6 +101,9 @@ struct AccuracyDetailSheet: View {
 struct SurveyTabBar: View {
     @Binding var selection: FieldTab
     var onRecord: () -> Void
+    var onList: () -> Void
+    var onReselect: (FieldTab) -> Void
+    @State private var suppressRecordTap = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -109,30 +112,61 @@ struct SurveyTabBar: View {
             Color.clear
                 .frame(width: 76, height: 68)
                 .accessibilityHidden(true)
-            tabButton(.export)
-            tabButton(.seat)
+            tabButton(.survey)
+            tabButton(.build)
         }
         .background(SurveyColor.bar)
         .overlay(alignment: .top) {
             Rectangle().fill(SurveyColor.line).frame(height: SurveyColor.stroke)
         }
         .overlay {
-            Button(action: onRecord) {
-                Text("記録")
-                    .font(SurveyType(18, .heavy))
-                    .foregroundStyle(SurveyColor.onAccent)
-                    .frame(width: 76, height: 76)
-                    .background(SurveyColor.blue, in: Circle())
+            recordButton
+                .offset(y: -18)
+        }
+        .overlay {
+            Button(action: onList) {
+                Text("一覧")
+                    .font(SurveyType(13, .heavy))
+                    .foregroundStyle(Color.black)
+                    .frame(width: 44, height: 44)
+                    .background(Color.white, in: Circle())
             }
             .buttonStyle(.plain)
-            .offset(y: -18)
-            .accessibilityLabel("記録")
+            .offset(x: 58, y: -48)
+            .accessibilityLabel("記録一覧")
         }
+    }
+
+    private var recordButton: some View {
+        Text("記録")
+            .font(SurveyType(18, .heavy))
+            .foregroundStyle(SurveyColor.onAccent)
+            .frame(width: 76, height: 76)
+            .background(SurveyColor.blue, in: Circle())
+            .contentShape(Circle())
+            .onTapGesture {
+                if suppressRecordTap {
+                    suppressRecordTap = false
+                    return
+                }
+                onRecord()
+            }
+            .onLongPressGesture(minimumDuration: 0.45) {
+                suppressRecordTap = true
+                onList()
+            }
+            .accessibilityLabel("記録")
+            .accessibilityHint("長押しで記録一覧")
+            .accessibilityAction(named: "記録一覧") { onList() }
     }
 
     private func tabButton(_ tab: FieldTab) -> some View {
         Button {
-            selection = tab
+            if selection == tab {
+                onReselect(tab)
+            } else {
+                selection = tab
+            }
         } label: {
             VStack(spacing: 4) {
                 Image(systemName: tab.symbol)

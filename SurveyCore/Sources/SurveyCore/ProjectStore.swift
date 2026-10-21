@@ -54,6 +54,14 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var siteFence: SiteFence?
     /// 位置を共有してよい時間。無いプロジェクトは共有しない。
     public var workHours: WorkHours?
+    /// 記録フォルダの場所。Documents/records/<place>/<date>/ と揃える。
+    public var place: String?
+    /// 現場の日付。YYYY-MM-DD。無いときは作成日。
+    public var workDate: String?
+    /// 2点合わせの距離差の許容。ミリ。無いときは 20。
+    public var alignToleranceMillimeters: Double?
+    /// 距離差の比の分母。1/N の N。無いときは 5000。
+    public var alignToleranceDenominator: Double?
 
     public init(
         id: String = UUID().uuidString,
@@ -78,7 +86,11 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         weather: String? = nil,
         siteAid: SiteAid? = nil,
         siteFence: SiteFence? = nil,
-        workHours: WorkHours? = nil
+        workHours: WorkHours? = nil,
+        place: String? = nil,
+        workDate: String? = nil,
+        alignToleranceMillimeters: Double? = nil,
+        alignToleranceDenominator: Double? = nil
     ) {
         self.id = id
         self.name = name
@@ -103,6 +115,18 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.siteAid = siteAid
         self.siteFence = siteFence
         self.workHours = workHours
+        self.place = place
+        self.workDate = workDate
+        self.alignToleranceMillimeters = alignToleranceMillimeters
+        self.alignToleranceDenominator = alignToleranceDenominator
+    }
+
+    public var listDate: String {
+        if let workDate {
+            let trimmed = workDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return FieldRecordStore.dayFolder(createdAt)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -110,7 +134,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         case machinePreset, machineRadiusMeters, eyeHeightMeters, sightDatum, phoneAtEyes
         case stationIntervalMeters, stationOrigin, stationLine
         case cautionMeters, proximityMarginMeters, approachLeadMeters, approachRepeatSeconds, weather
-        case siteAid, siteFence, workHours
+        case siteAid, siteFence, workHours, place, workDate
+        case alignToleranceMillimeters, alignToleranceDenominator
     }
 
     public init(from decoder: Decoder) throws {
@@ -138,6 +163,10 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         siteAid = try container.decodeIfPresent(SiteAid.self, forKey: .siteAid)
         siteFence = try container.decodeIfPresent(SiteFence.self, forKey: .siteFence)
         workHours = try container.decodeIfPresent(WorkHours.self, forKey: .workHours)
+        place = try container.decodeIfPresent(String.self, forKey: .place)
+        workDate = try container.decodeIfPresent(String.self, forKey: .workDate)
+        alignToleranceMillimeters = try container.decodeIfPresent(Double.self, forKey: .alignToleranceMillimeters)
+        alignToleranceDenominator = try container.decodeIfPresent(Double.self, forKey: .alignToleranceDenominator)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -165,6 +194,10 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(siteAid, forKey: .siteAid)
         try container.encodeIfPresent(siteFence, forKey: .siteFence)
         try container.encodeIfPresent(workHours, forKey: .workHours)
+        try container.encodeIfPresent(place, forKey: .place)
+        try container.encodeIfPresent(workDate, forKey: .workDate)
+        try container.encodeIfPresent(alignToleranceMillimeters, forKey: .alignToleranceMillimeters)
+        try container.encodeIfPresent(alignToleranceDenominator, forKey: .alignToleranceDenominator)
     }
 }
 
@@ -323,6 +356,20 @@ public enum ProjectStore {
             guard FileManager.default.fileExists(atPath: json.path) else { return nil }
             return try read(SurveyProject.self, from: json)
         }.sorted { $0.name < $1.name }
+    }
+
+    public static func rename(_ project: inout SurveyProject, to rawName: String, at root: URL) throws {
+        guard let safe = safeComponent(rawName) else { throw ProjectStoreError.emptyName }
+        let from = try projectDirectory(project.name, at: root)
+        if safe != project.name {
+            let destination = root.appendingPathComponent(safe, isDirectory: true)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                throw ProjectStoreError.alreadyExists
+            }
+            try FileManager.default.moveItem(at: from, to: destination)
+            project.name = safe
+        }
+        try save(project, at: root)
     }
 
     public static func save(_ project: SurveyProject, at root: URL) throws {

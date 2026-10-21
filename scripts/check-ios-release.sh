@@ -37,6 +37,8 @@ required = [
 missing = [key for key in required if not plist.get(key)]
 if missing:
     raise SystemExit("missing " + ", ".join(missing))
+if plist.get("UIFileSharingEnabled") is not True or plist.get("LSSupportsOpeningDocumentsInPlace") is not True:
+    raise SystemExit("documents file sharing")
 if plist["CFBundleDisplayName"] != "artsx" or plist["CFBundleName"] != "artsx":
     raise SystemExit("display name")
 if "Captain X" in plist["CFBundleDisplayName"] or "Captain X" in plist["CFBundleName"]:

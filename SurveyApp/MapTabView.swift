@@ -3,14 +3,19 @@ import SurveyCore
 
 struct MapTabView: View {
     @ObservedObject var field: FieldModel
+    @State private var suppressCadPress = false
 
     var body: some View {
         SurveyMapView(field: field)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay(alignment: .top) { topStack }
-            .overlay(alignment: .bottomLeading) { coordinateStack }
-            .overlay(alignment: .bottomTrailing) { mapButtons }
-            .overlay { recordFlash }
+            .overlay(alignment: .bottomLeading) {
+                coordinateStack.padding(.bottom, mapSendPoint == nil ? 0 : 96)
+            }
+            .overlay(alignment: .bottomTrailing) {
+                mapButtons.padding(.bottom, mapSendPoint == nil ? 0 : 96)
+            }
+            .overlay(alignment: .bottom) { mapSendButton }
             .background(SurveyColor.mapBackdrop)
             .overlay { safetyWash }
             .sheet(isPresented: $field.showsIncidentStats) {
@@ -23,6 +28,36 @@ struct MapTabView: View {
 
     private var topStack: some View {
         VStack(spacing: 0) {
+            if let name = field.drawing.project?.name {
+                HStack {
+                    Button {
+                        field.showsProjects = true
+                    } label: {
+                        Text(name)
+                            .font(SurveyType(13, .heavy))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .foregroundStyle(Color.black.opacity(0.8))
+                            .padding(.horizontal, 10)
+                            .frame(minHeight: 44)
+                            .background(Color.white.opacity(0.72), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("現場 \(name)")
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 6)
+            }
+            if let point = field.drawing.stakeoutPoint {
+                stakeoutHeights(point)
+            }
+            if let id = field.drawing.selectedPointID,
+               field.drawing.pending == nil,
+               let point = field.drawing.fieldPoints.first(where: { $0.id == id }),
+               field.drawing.stakeoutPointID != id {
+                selectedPointCard(point)
+            }
             if let guide = field.stakeoutGuide {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(guide.speech)
@@ -104,6 +139,28 @@ struct MapTabView: View {
 
     private var mapButtons: some View {
         VStack(spacing: 8) {
+            if field.drawing.hasMapOverlay {
+                Button {
+                    if suppressCadPress {
+                        suppressCadPress = false
+                        return
+                    }
+                    field.toggleMapCad()
+                } label: {
+                    Image(systemName: field.mapCadOn ? "ruler.fill" : "ruler")
+                        .font(SurveyType(16, .bold))
+                        .frame(width: 44, height: 44)
+                        .background(Color.white, in: Circle())
+                        .foregroundStyle(Color.black)
+                }
+                .buttonStyle(.plain)
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    suppressCadPress = true
+                    field.showsCadOpacity = true
+                }
+                .accessibilityLabel(field.mapCadOn ? "図面オン" : "図面オフ")
+                .accessibilityHint("長押しで濃さ")
+            }
             Button {
                 field.toggleMapHeading()
             } label: {
@@ -122,17 +179,67 @@ struct MapTabView: View {
         .padding(8)
     }
 
-    @ViewBuilder
-    private var recordFlash: some View {
-        if let flash = field.recordFlash {
-            Text(flash)
-                .font(SurveyType(28, .heavy))
-                .foregroundStyle(Color.black)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .allowsHitTesting(false)
+    private func stakeoutHeights(_ point: FieldPoint) -> some View {
+        let fill = CutFill.make(formation: point.formationHeightMeters, ground: point.groundLevelMeters)
+        return VStack(alignment: .leading, spacing: 0) {
+            if let formation = fill.formationMeters {
+                Text("FH \(FieldPoint.meters(formation))")
+            }
+            if let ground = fill.groundMeters {
+                Text("GL \(FieldPoint.meters(ground))")
+            }
+            if let word = fill.word, let difference = fill.differenceText {
+                Text(word)
+                Text(difference)
+                    .font(SurveyType(40, .heavy, mono: true))
+            } else if let design = point.designHeightMeters {
+                Text("計画 \(FieldPoint.meters(design))")
+                    .font(SurveyType(34, .heavy, mono: true))
+            }
         }
+        .font(SurveyType(22, .heavy, mono: true))
+        .foregroundStyle(SurveyColor.text)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .background(SurveyColor.card.opacity(0.94))
+    }
+
+    private var mapSendPoint: FieldPoint? {
+        guard let id = field.drawing.selectedPointID,
+              field.drawing.pending == nil,
+              field.drawing.stakeoutPointID != id else { return nil }
+        return field.drawing.fieldPoints.first { $0.id == id }
+    }
+
+    @ViewBuilder
+    private var mapSendButton: some View {
+        if let point = mapSendPoint {
+            Button("丁張へ") {
+                if field.drawing.sendToStakeout(point.id) {
+                    field.selectWork("stakeout")
+                    field.tab = .build
+                }
+            }
+            .buttonStyle(FlowNextButton())
+            .padding(.horizontal, 12)
+            .padding(.bottom, 28)
+        }
+    }
+
+    private func selectedPointCard(_ point: FieldPoint) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(point.mapLabel)
+                .lineLimit(1)
+            Text("X \(FieldPoint.meters(point.northingMeters))  Y \(FieldPoint.meters(point.eastingMeters))")
+                .font(SurveyType(14, .heavy, mono: true))
+        }
+        .font(SurveyType(18, .heavy))
+        .foregroundStyle(SurveyColor.text)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(SurveyColor.card.opacity(0.94))
     }
 
     private var safetyWash: some View {

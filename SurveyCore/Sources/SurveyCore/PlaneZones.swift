@@ -152,6 +152,12 @@ public struct PlanePlacement: Sendable, Equatable {
 public enum PlanePlacementChooser {
     public static let originLimitMeters = 180_000.0
 
+    /// 手合わせがあるか、図面の数値がその系の公共座標として日本に載るか。
+    public static func isGeoreferenced(midX: Double, midY: Double, zone: Int, hasTransform: Bool) -> Bool {
+        if hasTransform { return true }
+        return landings(x: midX, y: midY).contains { $0.zone == zone }
+    }
+
     public static func landings(x: Double, y: Double, limit: Double = originLimitMeters) -> [PlaneLanding] {
         var hits: [PlaneLanding] = []
         for zone in PlaneRectangular.zones {

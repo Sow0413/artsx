@@ -29,6 +29,43 @@ public struct FieldPointFile: Codable, Equatable, Sendable {
     }
 }
 
+/// 今日の記録を地図に出す1点。番号は同じ日の時刻順。
+public struct FieldRecordPin: Equatable, Sendable {
+    public var number: Int
+    public var name: String
+    public var latitude: Double
+    public var longitude: Double
+    public var place: String
+    public var day: String
+    public var fileURL: URL
+
+    public init(
+        number: Int,
+        name: String,
+        latitude: Double,
+        longitude: Double,
+        place: String,
+        day: String,
+        fileURL: URL
+    ) {
+        self.number = number
+        self.name = name
+        self.latitude = latitude
+        self.longitude = longitude
+        self.place = place
+        self.day = day
+        self.fileURL = fileURL
+    }
+
+    public var caption: String {
+        "記録 #\(number) ・\(place)/\(day)"
+    }
+
+    public var folderURL: URL {
+        fileURL.deletingLastPathComponent()
+    }
+}
+
 public enum FieldRecordStore {
     public static func coordinatePlace(latitude: Double, longitude: Double) -> String {
         String(format: "%.2f_%.2f", locale: posix, latitude, longitude)
@@ -75,6 +112,71 @@ public enum FieldRecordStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(point).write(to: url, options: .atomic)
         return url
+    }
+
+    /// その場所の日付フォルダ。空の場所は空。
+    public static func dayFolders(in root: URL, place raw: String) -> [String] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return [] }
+        let folder = root.appendingPathComponent(placeFolder(trimmed, latitude: 0, longitude: 0), isDirectory: true)
+        guard let days = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        return days.compactMap { url in
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+            let name = url.lastPathComponent
+            guard name.count == 10 else { return nil }
+            return name
+        }.sorted()
+    }
+
+    /// その日の記録だけ。場所フォルダを横断し、時刻順に 1 から番号を振る。
+    public static func pins(in root: URL, on day: Date, calendar: Calendar = .current) -> [FieldRecordPin] {
+        let dayName = dayFolder(day, calendar: calendar)
+        let manager = FileManager.default
+        guard let places = try? manager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var found: [(point: FieldPointFile, place: String, url: URL)] = []
+        for placeURL in places {
+            var isDirectory: ObjCBool = false
+            guard manager.fileExists(atPath: placeURL.path, isDirectory: &isDirectory), isDirectory.boolValue else { continue }
+            let folder = placeURL.appendingPathComponent(dayName, isDirectory: true)
+            guard let files = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else {
+                continue
+            }
+            for file in files where file.pathExtension.lowercased() == "json" {
+                guard let data = try? Data(contentsOf: file),
+                      let point = try? decoder.decode(FieldPointFile.self, from: data) else { continue }
+                found.append((point, placeURL.lastPathComponent, file))
+            }
+        }
+        found.sort { lhs, rhs in
+            if lhs.point.timestamp != rhs.point.timestamp {
+                return lhs.point.timestamp < rhs.point.timestamp
+            }
+            return lhs.point.name < rhs.point.name
+        }
+        return found.enumerated().map { index, item in
+            FieldRecordPin(
+                number: index + 1,
+                name: item.point.name,
+                latitude: item.point.latitude,
+                longitude: item.point.longitude,
+                place: item.place,
+                day: dayName,
+                fileURL: item.url
+            )
+        }
     }
 
     static func fileName(for point: FieldPointFile, calendar: Calendar = .current) -> String {

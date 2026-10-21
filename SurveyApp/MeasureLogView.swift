@@ -6,64 +6,33 @@ struct MeasureLogView: View {
     @ObservedObject var field: FieldModel
 
     var body: some View {
+        VStack(spacing: 0) {
+            Text("測量")
+                .font(SurveyType(28, .heavy))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+            WorkBar(field: field, ids: FieldFlow.surveyWorkIDs)
+            surveyList
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(SurveyColor.background)
+        .foregroundStyle(SurveyColor.text)
+        .safeAreaInset(edge: .bottom) {
+            Button(FieldFlow.title(FieldFlow.surveyStep(field), field: field)) {
+                FieldFlow.perform(FieldFlow.surveyStep(field), field: field, fromMenu: false)
+            }
+            .buttonStyle(FlowNextButton())
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+            .background(SurveyColor.bar)
+        }
+    }
+
+    private var surveyList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("測る")
-                    .font(SurveyType(28, .heavy))
-                Button {
-                    field.showsStature = true
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(PersonalProfile.title)
-                            .font(SurveyType(18, .heavy))
-                        if let notice = field.statureNotice {
-                            Text(notice)
-                                .font(SurveyType(15, .semibold))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .background(SurveyColor.card)
-                    .foregroundStyle(SurveyColor.text)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
-                    )
-                }
-                .buttonStyle(.plain)
-                Button {
-                    field.showsCrosshair = true
-                } label: {
-                    Text("水準器")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                Button {
-                    field.showsBatter = true
-                } label: {
-                    Text("丁張")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                Button {
-                    field.showsPace = true
-                } label: {
-                    Text("歩測")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
                 if field.stature.style == .sight {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }
@@ -109,9 +78,6 @@ struct MeasureLogView: View {
             }
             .padding(20)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(SurveyColor.background)
-        .foregroundStyle(SurveyColor.text)
     }
 
     private func observationRow(_ observation: FieldObservation) -> some View {
