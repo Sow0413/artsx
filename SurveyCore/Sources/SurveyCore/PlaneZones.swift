@@ -132,6 +132,33 @@ public enum PlaneZoneCatalog {
         return areaRecord(in: record, named: rawArea)?.name
     }
 
+    /// 取り込みの一行。「三重 VI系」。区域がある県だけ区域名を足す。
+    public static func toastPlace(prefecture raw: String, area: String?, zone: Int) -> String {
+        let record = named(raw)
+        let full = record?.name ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let roman = PlaneRectangular.zone(zone)?.roman ?? "\(zone)"
+        if record?.needsArea == true, let canonical = canonicalArea(prefecture: full, area: area), !canonical.isEmpty {
+            return "\(shortPlace(full)) \(shortArea(canonical)) \(roman)系"
+        }
+        return "\(shortPlace(full)) \(roman)系"
+    }
+
+    /// トースト一行に収める。括弧の中の市町村列は省く。
+    public static func shortArea(_ name: String) -> String {
+        guard let mark = name.firstIndex(of: "（") else { return name }
+        let head = name[..<mark].trimmingCharacters(in: .whitespacesAndNewlines)
+        return head.isEmpty ? name : String(head)
+    }
+
+    /// 北海道はそのまま。都府県は末尾を省く。
+    public static func shortPlace(_ name: String) -> String {
+        if name == "北海道" { return name }
+        if name.hasSuffix("県") || name.hasSuffix("都") || name.hasSuffix("府") {
+            return String(name.dropLast())
+        }
+        return name
+    }
+
     /// 「三重県 → VI系」。区域があるときは県名のあとに置く。
     public static func summary(prefecture raw: String, area: String?, zone: Int) -> String {
         let name = named(raw)?.name ?? raw.trimmingCharacters(in: .whitespacesAndNewlines)

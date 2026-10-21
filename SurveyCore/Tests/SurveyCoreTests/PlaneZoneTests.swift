@@ -14,6 +14,9 @@ final class PlaneZoneTests: XCTestCase {
         XCTAssertFalse(PlaneZoneCatalog.named("東京都")?.zones.contains(1) == true)
         XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "三重県", area: nil), 6)
         XCTAssertEqual(PlaneZoneCatalog.summary(prefecture: "三重", area: nil, zone: 6), "三重県 → VI系")
+        XCTAssertEqual(PlaneZoneCatalog.toastPlace(prefecture: "三重県", area: nil, zone: 6), "三重 VI系")
+        XCTAssertEqual(PlaneZoneCatalog.toastPlace(prefecture: "北海道", area: "札幌市", zone: 12), "北海道 札幌・旭川など XII系")
+        XCTAssertEqual(PlaneZoneCatalog.toastPlace(prefecture: "東京都", area: "大島町", zone: 9), "東京 伊豆諸島 IX系")
         XCTAssertFalse(PlaneZoneCatalog.named("三重県")?.needsArea == true)
     }
 
@@ -104,6 +107,14 @@ final class SFCFeatureModeTests: XCTestCase {
         XCTAssertEqual(document.unsupportedCounts["sfig_org_feature"], 1)
         XCTAssertNil(document.unsupportedCounts["text_string_feature"])
         XCTAssertTrue(document.unitWarning?.contains("ミリメートル") == true)
+        XCTAssertEqual(document.entities[0].lineWeight, 11, accuracy: 1e-9)
+        XCTAssertEqual(DrawingStroke.screenPoints(weight: document.entities[0].lineWeight), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(document.skippedElements.first { $0.label == "図枠" }?.count, 1)
+        XCTAssertEqual(document.skippedElements.first { $0.label == "記号" }?.count, 1)
+        XCTAssertFalse(document.skippedElements.contains { $0.label.contains("_") || $0.label.contains("feature") })
+        XCTAssertEqual(document.unitNote, "座標はミリメートルだったので、メートルに直しました。")
+        let contour = document.entities.filter { DrawingStroke.isContour($0.layer) }
+        XCTAssertTrue(contour.isEmpty || contour.allSatisfy { DrawingStroke.displayColor($0.color, layer: $0.layer) == DrawingStroke.contour })
 
         guard case let .polyline(vertices, _, _) = document.entities[0].primitive else {
             return XCTFail("折線がない")

@@ -79,6 +79,7 @@ struct DrawingTabView: View {
             NavigationStack {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        drawingFacts
                         stationSection
                         machineSection
                         eyeSection
@@ -146,69 +147,39 @@ struct DrawingTabView: View {
 
     private var actionBar: some View {
         let step = FieldFlow.drawingStep(drawing)
-        let showsEarlier = drawing.project != nil || drawing.document != nil || drawing.pdfData != nil
-        return VStack(spacing: 8) {
-            if showsEarlier {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    if step != .importFile, drawing.project != nil {
-                        actionButton("取り込む") { importing = true }
-                    }
-                    if step != .align, drawing.document != nil {
-                        actionButton("2点合わせ") {
-                            FieldFlow.perform(.align, field: field, fromMenu: false)
-                        }
-                    }
-                    if step != .arbitrary, drawing.canPlaceArbitrary || drawing.placingArbitrary {
-                        Button {
-                            drawing.placingArbitrary.toggle()
-                        } label: {
-                            Text("任意点")
-                                .font(SurveyType(16, .heavy))
-                                .padding(.horizontal, 12)
-                                .frame(minHeight: 44)
-                                .background(drawing.placingArbitrary ? SurveyColor.blue : SurveyColor.card)
-                                .foregroundStyle(drawing.placingArbitrary ? SurveyColor.onAccent : SurveyColor.text)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if drawing.document != nil || drawing.pdfData != nil {
-                        actionButton("全体") { drawing.showWholeDrawing() }
-                    }
-                    if drawing.project != nil {
-                        actionButton("数値") { showsSetup = true }
-                    }
+        return HStack(spacing: 6) {
+            compactAction("取り込む", accent: false) { importing = true }
+            compactAction("全体", accent: false) { drawing.showWholeDrawing() }
+            compactAction("数値", accent: false) { showsSetup = true }
+            if drawing.document != nil {
+                compactAction(drawing.twoPointMode ? "合わせ中" : "① 2点合わせ", accent: step == .align) {
+                    FieldFlow.perform(.align, field: field, fromMenu: false)
                 }
-                .padding(.horizontal, 12)
             }
-            }
-            if let step {
-                Button(FieldFlow.title(step, field: field)) {
-                    if step == .importFile {
-                        importing = true
-                    } else {
-                        FieldFlow.perform(step, field: field, fromMenu: false)
-                    }
+            if let step, step != .align, step != .importFile, step != .projects {
+                compactAction(FieldFlow.title(step, field: field), accent: true) {
+                    FieldFlow.perform(step, field: field, fromMenu: false)
                 }
-                .buttonStyle(FlowNextButton())
-                .padding(.horizontal, 12)
             }
         }
-        .padding(.top, 8)
-        .padding(.bottom, 24)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background(SurveyColor.bar)
     }
 
-    private func actionButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .font(SurveyType(16, .heavy))
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .background(SurveyColor.card)
-            .foregroundStyle(SurveyColor.text)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .buttonStyle(.plain)
+    private func compactAction(_ title: String, accent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(SurveyType(15, .heavy))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .padding(.horizontal, 4)
+                .background(accent ? SurveyColor.blue : SurveyColor.card)
+                .foregroundStyle(accent ? SurveyColor.onAccent : SurveyColor.text)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -218,15 +189,9 @@ struct DrawingTabView: View {
         } else {
             VStack(spacing: 0) {
                 projectBar
-                if let message = drawing.message, !message.isEmpty {
-                    Text(message)
-                        .font(SurveyType(16, .heavy))
-                        .foregroundStyle(SurveyColor.amber)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                }
-                canvas.frame(maxWidth: .infinity, maxHeight: .infinity)
+                canvas
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .top) { drawingToast }
                 if drawing.twoPointMode {
                     TwoPointPanel(field: field, drawing: drawing)
                 } else {
@@ -268,12 +233,6 @@ struct DrawingTabView: View {
             .accessibilityLabel("現場")
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    if let message = drawing.message, !message.isEmpty {
-                        Text(message)
-                            .font(SurveyType(16, .heavy))
-                            .foregroundStyle(SurveyColor.amber)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                     FlowRow(title: "取り込む", icon: "square.and.arrow.down") {
                         if drawing.project == nil {
                             field.showsProjects = true
@@ -302,6 +261,7 @@ struct DrawingTabView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(SurveyColor.background)
+        .overlay(alignment: .top) { drawingToast }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let step = FieldFlow.drawingStep(drawing) {
                 Button(FieldFlow.title(step, field: field)) {
@@ -731,6 +691,63 @@ struct DrawingTabView: View {
         )
     }
 
+    @ViewBuilder
+    private var drawingToast: some View {
+        if let message = drawing.message, !message.isEmpty {
+            Text(message)
+                .font(SurveyType(16, .heavy))
+                .lineLimit(message.hasPrefix("取り込みました") ? 1 : 2)
+                .minimumScaleFactor(0.55)
+                .foregroundStyle(Color.black)
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Color.white.opacity(0.94), in: Capsule())
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// 読めなかった要素と単位は、数値の中だけ。feature 名は出さない。
+    @ViewBuilder
+    private var drawingFacts: some View {
+        let skips = drawing.document?.skippedElements ?? []
+        let unit = drawing.document?.unitNote
+        let note = drawing.placementNote
+        let hasNote = note?.isEmpty == false
+        if skips.isEmpty, unit == nil, !hasNote, !drawing.overlayCapped {
+            EmptyView()
+        } else {
+            DisclosureGroup("図面の情報") {
+                if let note, !note.isEmpty {
+                    Text(note)
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let unit {
+                    Text(unit)
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(skips) { item in
+                    Text("\(item.label) \(item.count)")
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                }
+                if drawing.overlayCapped {
+                    Text("線が多いので、地図への重ねは途中までです。")
+                        .font(SurveyType(14, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(SurveyType(15, .heavy))
+            .foregroundStyle(SurveyColor.text)
+        }
+    }
+
     private var projectSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("プロジェクト")
@@ -788,27 +805,7 @@ struct DrawingTabView: View {
                     .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
-            if let document = drawing.document, !document.unsupportedSummary.isEmpty {
-                Text("読めない要素: \(document.unsupportedSummary)")
-                    .font(SurveyType(13, .semibold))
-                    .foregroundStyle(SurveyColor.yellow)
-            }
-            if let unit = drawing.document?.unitWarning {
-                Text(unit)
-                    .font(SurveyType(13, .semibold))
-                    .foregroundStyle(SurveyColor.yellow)
-            }
-            if drawing.overlayCapped {
-                Text("線が多すぎるので、地図への重ねは途中までです。図面の画面は、見えている範囲だけ描きます。")
-                    .font(SurveyType(13, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-            }
-            if let note = drawing.placementNote {
-                Text(note)
-                    .font(SurveyType(13, .semibold))
-                    .foregroundStyle(SurveyColor.yellow)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            drawingFacts
             stationSection
             TextField("計画高 m（床掘底。空なら高さそのもの）", text: designHeightBinding)
                 .textFieldStyle(.roundedBorder)

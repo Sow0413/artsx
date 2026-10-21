@@ -93,7 +93,7 @@ struct DrawingCanvasView: View {
     }
 
     private var zoomButtons: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             canvasButton("＋") { camera.pointsPerUnit *= 1.25 }
             canvasButton("−") { camera.pointsPerUnit /= 1.25 }
             canvasButton("90°") { camera.rotationDegrees += 90 }
@@ -103,14 +103,14 @@ struct DrawingCanvasView: View {
     private func canvasButton(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(SurveyType(20, .heavy))
-                .frame(width: OutdoorContrast.primaryPoints, height: OutdoorContrast.primaryPoints)
+                .font(SurveyType(title == "90°" ? 13 : 17, .heavy))
+                .frame(width: 44, height: 44)
                 .background(SurveyColor.card)
                 .foregroundStyle(SurveyColor.text)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(SurveyColor.line, lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
@@ -127,25 +127,18 @@ struct DrawingCanvasView: View {
             for point in stroke.points.dropFirst() {
                 path.addLine(to: screen(point, size: size))
             }
-            let ink = outdoor
-                ? OutdoorContrast.ink(red: stroke.red, green: stroke.green, blue: stroke.blue)
-                : ContrastColor(red: stroke.red, green: stroke.green, blue: stroke.blue)
-            let color = Color(red: ink.red, green: ink.green, blue: ink.blue)
-            context.stroke(path, with: .color(color), lineWidth: SurveyColor.stroke)
+            let color = featureColor(red: stroke.red, green: stroke.green, blue: stroke.blue, outdoor: outdoor)
+            let width = CGFloat(min(DrawingStroke.maximumPoints, max(DrawingStroke.minimumPoints, stroke.width)))
+            context.stroke(path, with: .color(color), lineWidth: width)
         }
         for mark in batch.points {
             let origin = screen(mark.point, size: size)
-            let rect = CGRect(x: origin.x - 3, y: origin.y - 3, width: 6, height: 6)
-            let ink = outdoor
-                ? OutdoorContrast.ink(red: mark.red, green: mark.green, blue: mark.blue)
-                : ContrastColor(red: mark.red, green: mark.green, blue: mark.blue)
-            context.fill(Path(rect), with: .color(Color(red: ink.red, green: ink.green, blue: ink.blue)))
+            let rect = CGRect(x: origin.x - 2, y: origin.y - 2, width: 4, height: 4)
+            let color = featureColor(red: mark.red, green: mark.green, blue: mark.blue, outdoor: outdoor)
+            context.fill(Path(rect), with: .color(color))
         }
         for label in batch.labels where label.height * camera.pointsPerUnit >= 8 {
-            let ink = outdoor
-                ? OutdoorContrast.ink(red: label.red, green: label.green, blue: label.blue)
-                : ContrastColor(red: label.red, green: label.green, blue: label.blue)
-            let color = Color(red: ink.red, green: ink.green, blue: ink.blue)
+            let color = featureColor(red: label.red, green: label.green, blue: label.blue, outdoor: outdoor)
             context.draw(
                 Text(label.text).font(SurveyType(12, .semibold)).foregroundStyle(color),
                 at: screen(label.origin, size: size),
@@ -201,6 +194,15 @@ struct DrawingCanvasView: View {
             let mark = Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16))
             context.stroke(mark, with: .color(reachColor(coverageOfHighlight(highlight))), lineWidth: 3)
         }
+    }
+
+    /// 紙の黒（SXF の白）だけ、明るい画面では細い黒にする。等高線の灰や赤青はそのまま。
+    private func featureColor(red: Double, green: Double, blue: Double, outdoor: Bool) -> Color {
+        let paper = red > 0.92 && green > 0.92 && blue > 0.92
+        if paper && outdoor {
+            return Color(red: 0.16, green: 0.17, blue: 0.18)
+        }
+        return Color(red: red, green: green, blue: blue)
     }
 
     private func coverageOfHighlight(_ point: PlanarPoint) -> ReachCoverage? {

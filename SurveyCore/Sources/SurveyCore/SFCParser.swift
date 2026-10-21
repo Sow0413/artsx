@@ -159,7 +159,14 @@ public enum SFCParser {
             maxX: entity.bounds.maxX * factor,
             maxY: entity.bounds.maxY * factor
         )
-        return DrawingEntity(id: entity.id, layer: entity.layer, color: entity.color, primitive: primitive, bounds: bounds)
+        return DrawingEntity(
+            id: entity.id,
+            layer: entity.layer,
+            color: entity.color,
+            primitive: primitive,
+            bounds: bounds,
+            lineWeight: entity.lineWeight
+        )
     }
 
     private static let supported: Set<String> = [
@@ -182,7 +189,8 @@ public enum SFCParser {
             return DrawingEntity(
                 id: id, layer: layer, color: color,
                 primitive: .line(start, end),
-                bounds: DrawingBounds(enclosing: [start, end])
+                bounds: DrawingBounds(enclosing: [start, end]),
+                lineWeight: widthCode(call.args)
             )
         case "polyline_feature":
             let vertices = polylineVertices(call.args)
@@ -191,7 +199,8 @@ public enum SFCParser {
             return DrawingEntity(
                 id: id, layer: layer, color: color,
                 primitive: .polyline(vertices: vertices, closed: closed, display: vertices),
-                bounds: DrawingBounds(enclosing: vertices)
+                bounds: DrawingBounds(enclosing: vertices),
+                lineWeight: widthCode(call.args)
             )
         case "circle_feature":
             guard call.args.count >= 7,
@@ -201,7 +210,8 @@ public enum SFCParser {
             return DrawingEntity(
                 id: id, layer: layer, color: color,
                 primitive: .circle(center: center, radius: radius),
-                bounds: DrawingBounds(minX: cx - radius, minY: cy - radius, maxX: cx + radius, maxY: cy + radius)
+                bounds: DrawingBounds(minX: cx - radius, minY: cy - radius, maxX: cx + radius, maxY: cy + radius),
+                lineWeight: widthCode(call.args)
             )
         case "arc_feature":
             guard call.args.count >= 10,
@@ -217,7 +227,8 @@ public enum SFCParser {
             return DrawingEntity(
                 id: id, layer: layer, color: color,
                 primitive: .arc(center: center, radius: radius, startDegrees: startDegrees, endDegrees: endDegrees, display: display),
-                bounds: DrawingBounds(enclosing: display)
+                bounds: DrawingBounds(enclosing: display),
+                lineWeight: widthCode(call.args)
             )
         case "text_string_feature":
             guard call.args.count >= 8,
@@ -249,6 +260,12 @@ public enum SFCParser {
         default:
             return nil
         }
+    }
+
+    /// 線種の次が線幅。無いときは 1。画面では 0.5〜1 pt の相対にする。
+    private static func widthCode(_ args: [SFCValue]) -> Double {
+        guard args.count > 3, let number = args[3].number, number > 0 else { return 1 }
+        return number
     }
 
     /// 色番号は SXF。1 は紙の上の黒なので、暗い画面では白にする。

@@ -404,13 +404,7 @@ final class DrawingSession: ObservableObject {
                     current.drawings[index].zone = current.zone
                     try ProjectStore.save(current, at: root)
                 }
-                var note = ext == "sfc"
-                    ? "設計に \(stored) を置きました。元の SFC は変えていません。"
-                    : "設計に \(stored) を置きました。元の DXF は変えていません。"
-                if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
-                if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
                 let draft = current
-                let base = note
                 DispatchQueue.main.async {
                     guard generation == self.loadGeneration else { return }
                     self.project = draft
@@ -419,11 +413,9 @@ final class DrawingSession: ObservableObject {
                     self.reload()
                     self.adopt(parsed, fileName: stored)
                     self.refreshPlacement(latitude: nil, longitude: nil, overrideZone: ext == "sfc")
-                    if let placementNote = self.placementNote {
-                        self.message = [base, placementNote].joined(separator: " ")
-                    } else {
-                        self.message = base
-                    }
+                    let notice = self.importNotice()
+                    self.message = notice
+                    self.dismissMessage(notice, after: 4)
                 }
             } catch let error as DXFError {
                 self.failImport(generation, error.description)
@@ -1079,6 +1071,31 @@ final class DrawingSession: ObservableObject {
         message = text
     }
 
+    /// 「取り込みました（三重 VI系）」。ローカル座標のときは 2点合わせへ一行で案内する。
+    private func importNotice() -> String {
+        if placementLooksLocal {
+            return "取り込みました。2点合わせで載せてください。"
+        }
+        let record = project?.drawings.first { $0.fileName == fileName }
+        let prefecture = record?.prefecture ?? project?.prefecture
+        let area = record?.prefecture != nil ? record?.area : project?.area
+        let number = record?.zone ?? project?.zone
+        if let prefecture, let number {
+            return "取り込みました（\(PlaneZoneCatalog.toastPlace(prefecture: prefecture, area: area, zone: number))）"
+        }
+        if let number, let roman = PlaneRectangular.zone(number)?.romanLabel {
+            return "取り込みました（\(roman)）"
+        }
+        return "取り込みました"
+    }
+
+    private func dismissMessage(_ expected: String, after seconds: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.message == expected else { return }
+            self.message = nil
+        }
+    }
+
     func beginMapPick() -> Bool {
         guard pending != nil else {
             message = "先に図面の点をタップしてください。"
@@ -1437,8 +1454,9 @@ final class DrawingSession: ObservableObject {
         guard camera.fittedID != token else { return }
         camera.centerX = document.bounds.isEmpty ? 0 : document.bounds.midX
         camera.centerY = document.bounds.isEmpty ? 0 : document.bounds.midY
-        let span = max(document.bounds.width, document.bounds.height, 1)
-        camera.pointsPerUnit = Double(min(size.width, size.height)) * 0.82 / span
+        let width = max(document.bounds.width, 1)
+        let height = max(document.bounds.height, 1)
+        camera.pointsPerUnit = min(Double(size.width) * 0.96 / width, Double(size.height) * 0.96 / height)
         camera.rotationDegrees = 0
         camera.fittedID = token
     }
