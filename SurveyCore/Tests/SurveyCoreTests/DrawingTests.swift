@@ -294,6 +294,56 @@ final class DrawingTests: XCTestCase {
         }
     }
 
+    func testProjectAndDrawingTrashLastsThirtyDays() throws {
+        let root = try TestFiles.directory()
+        defer { TestFiles.remove(root) }
+        var project = try ProjectStore.create(name: "亀山", at: root)
+        project.prefecture = "三重県"
+        project.zone = 6
+        try ProjectStore.save(project, at: root)
+        let original = Data([0x53, 0x46, 0x43])
+        let stored = try ProjectStore.importDXF(
+            data: original,
+            fileName: "基盤.sfc",
+            into: &project,
+            at: root,
+            codePage: "utf-8",
+            unsupported: [:]
+        )
+        project.drawings[0].displayName = "基盤地図"
+        project.drawings[0].prefecture = "三重県"
+        project.drawings[0].zone = 6
+        try ProjectStore.save(project, at: root)
+
+        let drawingTrash = try ProjectStore.trashDrawing(fileName: stored, in: &project, at: root)
+        XCTAssertTrue(project.drawings.isEmpty)
+        XCTAssertEqual(try ProjectStore.listTrash(at: root).map(\.id), [drawingTrash.id])
+        XCTAssertThrowsError(try ProjectStore.originalDXF(fileName: stored, projectName: project.name, at: root))
+        _ = try ProjectStore.restoreTrash(id: drawingTrash.id, at: root)
+        let restored = try XCTUnwrap(try ProjectStore.list(at: root).first { $0.id == project.id })
+        XCTAssertEqual(restored.drawings.map(\.title), ["基盤地図"])
+        XCTAssertEqual(restored.drawings.first?.zone, 6)
+        XCTAssertEqual(try ProjectStore.originalDXF(fileName: stored, projectName: restored.name, at: root), original)
+        XCTAssertTrue(try ProjectStore.listTrash(at: root).isEmpty)
+
+        let expired = try ProjectStore.trashProject(
+            restored,
+            at: root,
+            now: Date().addingTimeInterval(-(31 * 24 * 60 * 60))
+        )
+        XCTAssertEqual(expired.kind, .project)
+        ProjectStore.purgeTrash(at: root)
+        XCTAssertTrue(try ProjectStore.list(at: root).isEmpty)
+        XCTAssertTrue(try ProjectStore.listTrash(at: root).isEmpty)
+
+        let kept = try ProjectStore.create(name: "小川", at: root)
+        let fresh = try ProjectStore.trashProject(kept, at: root)
+        XCTAssertEqual(try ProjectStore.listTrash(at: root).map(\.name), ["小川"])
+        XCTAssertGreaterThan(fresh.daysLeft(at: Date()), 29)
+        _ = try ProjectStore.restoreTrash(id: fresh.id, at: root)
+        XCTAssertEqual(try ProjectStore.list(at: root).map(\.name), ["小川"])
+    }
+
     private func square(origin: PlanarPoint, size: Double) -> [Segment2D] {
         let a = origin
         let b = PlanarPoint(x: origin.x + size, y: origin.y)

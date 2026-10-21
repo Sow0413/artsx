@@ -429,7 +429,7 @@ struct DrawingTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             Picker("系", selection: zoneBinding) {
                 ForEach(drawing.zoneChoices, id: \.self) { number in
-                    Text("\(number)系").tag(number)
+                    Text(PlaneRectangular.zone(number)?.romanLabel ?? "\(number)系").tag(number)
                 }
             }
             .pickerStyle(.menu)
@@ -834,7 +834,7 @@ struct DrawingTabView: View {
             .tint(SurveyColor.text)
             Picker("系", selection: zoneBinding) {
                 ForEach(drawing.zoneChoices, id: \.self) { number in
-                    Text("\(number)系").tag(number)
+                    Text(PlaneRectangular.zone(number)?.romanLabel ?? "\(number)系").tag(number)
                 }
             }
             .pickerStyle(.menu)
