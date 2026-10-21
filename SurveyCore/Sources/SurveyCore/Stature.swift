@@ -557,6 +557,7 @@ extension FieldObservation {
             guard condition?.stature != nil else { return self }
             var cleared = self
             cleared.condition?.stature = nil
+            cleared.condition?.setElevation(from: cleared.captured, baseEllipsoidal: cleared.captured.ellipsoidalHeightMeters)
             return cleared
         }
         var copy = self
@@ -565,10 +566,13 @@ extension FieldObservation {
                 position: captured,
                 stage: stage,
                 durationSeconds: fixDurationSeconds,
-                epochCount: nil
+                epochCount: nil,
+                stature: profile,
+                sight: sight
             )
         }
         copy.condition?.stature = record
+        copy.condition?.setElevation(from: copy.captured, baseEllipsoidal: record.groundHeightMeters)
         return copy
     }
 }

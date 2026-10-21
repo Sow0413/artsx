@@ -18,6 +18,9 @@ let package = Package(
             dependencies: [
                 .target(name: "CSQLite", condition: .when(platforms: [.linux]))
             ],
+            resources: [
+                .copy("gsigeo2011.bin")
+            ],
             linkerSettings: [
                 .linkedLibrary("sqlite3", .when(platforms: [.iOS, .macOS, .watchOS, .tvOS]))
             ]

@@ -99,11 +99,19 @@ public enum CoordinateBookIndex {
 
     public static func entry(from observation: FieldObservation, kind: String? = nil, source: String = "観測") -> CoordinateBookEntry {
         let condition = observation.condition
+        let ellipsoidal = condition?.surveyEllipsoidalMeters ?? condition?.stature?.groundHeightMeters ?? observation.captured.ellipsoidalHeightMeters
+        let resolved = SurveyHeight.resolve(
+            ellipsoidalMeters: ellipsoidal,
+            latitudeDegrees: observation.captured.latitudeDegrees,
+            longitudeDegrees: observation.captured.longitudeDegrees,
+            meanSeaLevelMeters: observation.captured.meanSeaLevelMeters,
+            deviceEllipsoidalMeters: observation.captured.ellipsoidalHeightMeters
+        )
         return CoordinateBookEntry(
             name: observation.name,
             latitudeDegrees: observation.captured.latitudeDegrees,
             longitudeDegrees: observation.captured.longitudeDegrees,
-            ellipsoidalHeightMeters: observation.condition?.stature?.groundHeightMeters ?? observation.captured.ellipsoidalHeightMeters,
+            ellipsoidalHeightMeters: ellipsoidal,
             horizontalAccuracyMeters: observation.horizontalAccuracyAtCapture,
             verticalAccuracyMeters: observation.verticalAccuracyAtCapture,
             satelliteCount: condition?.satelliteCount ?? observation.captured.satelliteCount,
@@ -118,7 +126,10 @@ public enum CoordinateBookIndex {
             correctionSource: condition?.correctionSource ?? observation.captured.correctionSource,
             epochCount: condition?.epochCount,
             receiverLabel: (condition?.receiver ?? observation.captured.receiver).label,
-            satelliteNote: condition?.satelliteNote
+            satelliteNote: condition?.satelliteNote,
+            orthometricHeightMeters: condition?.orthometricHeightMeters ?? resolved.orthometricMeters,
+            geoidUndulationMeters: condition?.geoidUndulationMeters ?? resolved.geoidMeters,
+            geoidModel: condition?.geoidModel ?? resolved.model
         )
     }
 }
@@ -170,7 +181,7 @@ public enum CoordinateDelivery {
         var lines = ["G00,02,"]
         for (index, entry) in entries.enumerated() {
             let plane = projected(entry, zone: zone)
-            let height = entry.ellipsoidalHeightMeters.map { String(format: "%.3f", $0) } ?? ""
+            let height = entry.deliveredHeightMeters.map { String(format: "%.3f", $0) } ?? ""
             lines.append("A01,\(index + 1),\(entry.name),\(number(plane?.northing)),\(number(plane?.easting)),\(height),")
         }
         lines.append("A99,")
@@ -178,7 +189,7 @@ public enum CoordinateDelivery {
     }
 
     public static func csv(_ entries: [CoordinateBookEntry], zone: Int) -> String {
-        var lines = ["点名,種類,出典,解,段階,北,東,緯度,経度,楕円体高,水平精度m,高さ精度m,PDOP,衛星,補正遅れ秒,補正元,観測時刻,秒数,エポック,機器"]
+        var lines = ["点名,種類,出典,解,段階,北,東,緯度,経度,標高,水平精度m,高さ精度m,PDOP,衛星,補正遅れ秒,補正元,観測時刻,秒数,エポック,機器,楕円体高,ジオイドm,ジオイド"]
         for entry in entries {
             lines.append(csvRow(entry, zone: zone))
         }
@@ -209,7 +220,7 @@ public enum CoordinateDelivery {
         """
         for entry in entries {
             guard let plane = projected(entry, zone: zone) else { continue }
-            let height = entry.ellipsoidalHeightMeters ?? 0
+            let height = entry.deliveredHeightMeters ?? 0
             body += """
             0
             POINT
@@ -327,7 +338,11 @@ public enum CoordinateDelivery {
             durationSeconds: entry.fixDurationSeconds,
             epochCount: entry.epochCount,
             receiver: receiver,
-            stage: stage
+            stage: stage,
+            surveyEllipsoidalMeters: entry.ellipsoidalHeightMeters,
+            orthometricHeightMeters: entry.orthometricHeightMeters,
+            geoidUndulationMeters: entry.geoidUndulationMeters,
+            geoidModel: entry.geoidModel
         )
     }
 
@@ -335,7 +350,9 @@ public enum CoordinateDelivery {
         let plane = projected(entry, zone: zone)
         let solution = entry.solution.map { FixQualityLabel.of($0, receiver: entry.receiverLabel) } ?? ""
         let stage = entry.stage.map { "\($0.rawValue)" } ?? ""
-        let height = entry.ellipsoidalHeightMeters.map { String(format: "%.3f", $0) } ?? ""
+        let height = entry.deliveredHeightMeters.map { String(format: "%.3f", $0) } ?? ""
+        let ellipsoidal = entry.ellipsoidalHeightMeters.map { String(format: "%.3f", $0) } ?? ""
+        let geoid = entry.geoidUndulationMeters.map { String(format: "%.3f", $0) } ?? ""
         let vertical = entry.verticalAccuracyMeters.map { String(format: "%.3f", $0) } ?? ""
         let pdop = entry.pdop.map { String(format: "%.2f", $0) } ?? ""
         let satellites = entry.satelliteNote ?? entry.satelliteCount.map { "\($0)" } ?? ""
@@ -361,7 +378,10 @@ public enum CoordinateDelivery {
             ObservationCondition.stamp.string(from: entry.recordedAt),
             String(format: "%.0f", entry.fixDurationSeconds),
             epochs,
-            entry.receiverLabel ?? ""
+            entry.receiverLabel ?? "",
+            ellipsoidal,
+            geoid,
+            entry.geoidModel ?? ""
         ]
         return columns.joined(separator: ",")
     }

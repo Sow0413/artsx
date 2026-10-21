@@ -18,6 +18,12 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     public var stage: PositionStage
     /// 段階0の iPhone だけで付く。ポール高ではない。
     public var stature: StatureRecord?
+    /// アンテナ補正のあとの楕円体高。詳細記録に残す。
+    public var surveyEllipsoidalMeters: Double?
+    /// 標高。楕円体高からジオイド高を引いた値。
+    public var orthometricHeightMeters: Double?
+    public var geoidUndulationMeters: Double?
+    public var geoidModel: String?
 
     public init(
         solution: FixQuality,
@@ -34,7 +40,11 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         epochCount: Int?,
         receiver: ReceiverKind,
         stage: PositionStage,
-        stature: StatureRecord? = nil
+        stature: StatureRecord? = nil,
+        surveyEllipsoidalMeters: Double? = nil,
+        orthometricHeightMeters: Double? = nil,
+        geoidUndulationMeters: Double? = nil,
+        geoidModel: String? = nil
     ) {
         self.solution = solution
         self.solutionLabel = solutionLabel
@@ -51,6 +61,10 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         self.receiver = receiver
         self.stage = stage
         self.stature = stature
+        self.surveyEllipsoidalMeters = surveyEllipsoidalMeters
+        self.orthometricHeightMeters = orthometricHeightMeters
+        self.geoidUndulationMeters = geoidUndulationMeters
+        self.geoidModel = geoidModel
     }
 
     public init(from decoder: Decoder) throws {
@@ -70,6 +84,10 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         receiver = try container.decode(ReceiverKind.self, forKey: .receiver)
         stage = try container.decode(PositionStage.self, forKey: .stage)
         stature = try container.decodeIfPresent(StatureRecord.self, forKey: .stature)
+        surveyEllipsoidalMeters = try container.decodeIfPresent(Double.self, forKey: .surveyEllipsoidalMeters)
+        orthometricHeightMeters = try container.decodeIfPresent(Double.self, forKey: .orthometricHeightMeters)
+        geoidUndulationMeters = try container.decodeIfPresent(Double.self, forKey: .geoidUndulationMeters)
+        geoidModel = try container.decodeIfPresent(String.self, forKey: .geoidModel)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -89,12 +107,17 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         try container.encode(receiver, forKey: .receiver)
         try container.encode(stage, forKey: .stage)
         try container.encodeIfPresent(stature, forKey: .stature)
+        try container.encodeIfPresent(surveyEllipsoidalMeters, forKey: .surveyEllipsoidalMeters)
+        try container.encodeIfPresent(orthometricHeightMeters, forKey: .orthometricHeightMeters)
+        try container.encodeIfPresent(geoidUndulationMeters, forKey: .geoidUndulationMeters)
+        try container.encodeIfPresent(geoidModel, forKey: .geoidModel)
     }
 
     private enum CodingKeys: String, CodingKey {
         case solution, solutionLabel, satellites, satelliteCount, pdop
         case horizontalAccuracyMeters, verticalAccuracyMeters, correctionAgeSeconds, correctionSource
         case observedAt, durationSeconds, epochCount, receiver, stage, stature
+        case surveyEllipsoidalMeters, orthometricHeightMeters, geoidUndulationMeters, geoidModel
     }
 
     public static func snapshot(
@@ -107,6 +130,14 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     ) -> ObservationCondition {
         let record = profile.flatMap { StatureMath.record(profile: $0, deviceHeight: position.ellipsoidalHeightMeters, sight: sight) }
             .flatMap { StatureMath.applies(stage: stage, receiver: position.receiver) ? $0 : nil }
+        let base = record?.groundHeightMeters ?? position.ellipsoidalHeightMeters
+        let height = SurveyHeight.resolve(
+            ellipsoidalMeters: base,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            meanSeaLevelMeters: position.meanSeaLevelMeters,
+            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
+        )
         return ObservationCondition(
             solution: position.fixQuality,
             solutionLabel: position.solutionLabel,
@@ -122,8 +153,26 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
             epochCount: epochCount,
             receiver: position.receiver,
             stage: stage,
-            stature: record
+            stature: record,
+            surveyEllipsoidalMeters: height.ellipsoidalMeters,
+            orthometricHeightMeters: height.orthometricMeters,
+            geoidUndulationMeters: height.geoidMeters,
+            geoidModel: height.model
         )
+    }
+
+    public mutating func setElevation(from position: GeodeticPosition, baseEllipsoidal: Double?) {
+        let height = SurveyHeight.resolve(
+            ellipsoidalMeters: baseEllipsoidal,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            meanSeaLevelMeters: position.meanSeaLevelMeters,
+            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
+        )
+        surveyEllipsoidalMeters = height.ellipsoidalMeters
+        orthometricHeightMeters = height.orthometricMeters
+        geoidUndulationMeters = height.geoidMeters
+        geoidModel = height.model
     }
 
     public var satelliteNote: String {
@@ -156,9 +205,15 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
             if let note = stature.sightNote {
                 lines.append(note)
             }
-            if let ground = stature.groundHeightMeters {
-                lines.append("地盤高 \(String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), ground))m")
-            }
+        }
+        if let orthometric = orthometricHeightMeters {
+            lines.append("標高 \(SurveyHeight.meters(orthometric))m")
+        }
+        if let ellipsoidal = surveyEllipsoidalMeters ?? stature?.groundHeightMeters {
+            lines.append("楕円体高 \(SurveyHeight.meters(ellipsoidal))m")
+        }
+        if let geoidModel {
+            lines.append(geoidModel)
         }
         return lines
     }

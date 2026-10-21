@@ -145,7 +145,7 @@ struct CrosshairSheet: View {
                     .font(SurveyType(22, .heavy, mono: true))
                 Text("高低差 \(CrosshairMath.meterText(result.heightDifferenceMeters))m")
                     .font(SurveyType(28, .heavy, mono: true))
-                Text("相手の地盤高 \(CrosshairMath.meterText(result.targetHeightMeters))m")
+                Text("相手の標高 \(CrosshairMath.meterText(result.targetHeightMeters))m")
                     .font(SurveyType(16, .heavy, mono: true))
             } else {
                 Text(levelHint)
@@ -211,7 +211,7 @@ struct CrosshairSheet: View {
 
     private var levelHint: String {
         if StatureMath.eyeHeight(field.stature) == nil { return "身長が未登録です。" }
-        if field.crosshairGroundHeight() == nil { return "地盤高が無いので、器械高を出せません。" }
+        if field.crosshairGroundHeight() == nil { return "標高が無いので、器械高を出せません。" }
         return "スタッフの読み値を入れてください。"
     }
 
@@ -230,7 +230,7 @@ struct CrosshairSheet: View {
         let origin = field.reading.position
         let height = field.crosshairGroundHeight().flatMap { ground in
             StatureMath.eyeHeight(field.stature).map { ground + $0 }
-        } ?? origin?.ellipsoidalHeightMeters
+        } ?? origin.flatMap { field.liveSurveyHeight($0).orthometricMeters ?? $0.ellipsoidalHeightMeters }
         guard let height else { return nil }
         let sigma = CrosshairMath.angleSigmaRadians(calibrated: field.tiltZero.calibrated)
         return CrosshairMath.target(

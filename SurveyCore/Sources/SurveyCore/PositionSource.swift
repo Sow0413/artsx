@@ -39,7 +39,8 @@ public enum IPhonePosition {
         verticalAccuracyMeters: Double?,
         timestamp: Date,
         courseDegrees: Double? = nil,
-        headingDegrees: Double? = nil
+        headingDegrees: Double? = nil,
+        meanSeaLevelMeters: Double? = nil
     ) -> GeodeticPosition {
         GeodeticPosition(
             latitudeDegrees: latitudeDegrees,
@@ -53,7 +54,8 @@ public enum IPhonePosition {
             receiver: .iphoneGPS,
             frame: .wgs84ITRF,
             courseDegrees: courseDegrees,
-            headingDegrees: headingDegrees
+            headingDegrees: headingDegrees,
+            meanSeaLevelMeters: meanSeaLevelMeters
         )
     }
 }

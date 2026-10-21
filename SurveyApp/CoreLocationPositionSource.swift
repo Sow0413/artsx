@@ -44,6 +44,7 @@ final class CoreLocationPositionSource: NSObject, PositionSource, CLLocationMana
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         let height: Double? = location.verticalAccuracy >= 0 ? location.ellipsoidalAltitude : nil
+        let sea: Double? = location.verticalAccuracy >= 0 ? location.altitude : nil
         let vertical: Double? = location.verticalAccuracy >= 0 ? location.verticalAccuracy : nil
         lastCourse = location.course >= 0 ? location.course : nil
         let position = IPhonePosition.make(
@@ -54,7 +55,8 @@ final class CoreLocationPositionSource: NSObject, PositionSource, CLLocationMana
             verticalAccuracyMeters: vertical,
             timestamp: location.timestamp,
             courseDegrees: lastCourse,
-            headingDegrees: lastHeading
+            headingDegrees: lastHeading,
+            meanSeaLevelMeters: sea
         )
         lastPosition = position
         continuation.yield(PositionReading(position: position, availability: .available))

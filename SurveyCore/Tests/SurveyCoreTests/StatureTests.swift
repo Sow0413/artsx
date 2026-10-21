@@ -76,9 +76,14 @@ final class StatureTests: XCTestCase {
         XCTAssertEqual(observation.condition?.stature?.groundHeightMeters ?? 0, ground, accuracy: 1e-9)
         let entry = CoordinateBookIndex.entry(from: observation, kind: "下見")
         XCTAssertEqual(entry.ellipsoidalHeightMeters ?? 0, ground, accuracy: 1e-9)
+        let undulation = JapanGeoid.undulationMeters(latitudeDegrees: position.latitudeDegrees, longitudeDegrees: position.longitudeDegrees)
+        XCTAssertEqual(entry.orthometricHeightMeters ?? 0, ground - (undulation ?? 0), accuracy: 1e-6)
+        XCTAssertEqual(entry.geoidModel, JapanGeoid.modelName)
         let lines = condition.reportLines.joined(separator: "\n")
         XCTAssertTrue(lines.contains("身長補正 −1.23m（胸の前）"))
-        XCTAssertTrue(lines.contains("地盤高"))
+        XCTAssertTrue(lines.contains("標高"))
+        XCTAssertTrue(lines.contains("楕円体高"))
+        XCTAssertFalse(lines.contains("地盤高"))
 
         profile.statureMeters = 1.80
         profile.style = .eye

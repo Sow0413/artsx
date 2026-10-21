@@ -122,9 +122,11 @@ struct MapTabView: View {
     @ViewBuilder
     private var coordinateChip: some View {
         if let position = field.reading.position ?? field.navigationReading.position, position.isPlottable {
+            let height = field.liveSurveyHeight(position)
             VStack(alignment: .leading, spacing: 0) {
                 Text(CoordinateText.latitude(position.latitudeDegrees))
                 Text(CoordinateText.longitude(position.longitudeDegrees))
+                Text(height.primaryLine)
             }
             .font(SurveyType(14, .heavy, mono: true))
             .foregroundStyle(Color.black)
@@ -132,7 +134,7 @@ struct MapTabView: View {
             .padding(.vertical, 4)
             .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))")
+            .accessibilityLabel("緯度 \(CoordinateText.latitude(position.latitudeDegrees))、経度 \(CoordinateText.longitude(position.longitudeDegrees))、\(height.primaryLine)")
             .allowsHitTesting(false)
         }
     }
@@ -186,7 +188,7 @@ struct MapTabView: View {
                 Text("FH \(FieldPoint.meters(formation))")
             }
             if let ground = fill.groundMeters {
-                Text("GL \(FieldPoint.meters(ground))")
+                Text("標高 \(FieldPoint.meters(ground))")
             }
             if let word = fill.word, let difference = fill.differenceText {
                 Text(word)

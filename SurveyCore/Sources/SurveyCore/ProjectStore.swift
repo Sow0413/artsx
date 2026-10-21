@@ -267,8 +267,17 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
     public var epochCount: Int?
     public var receiverLabel: String?
     public var satelliteNote: String?
+    /// 標高。観測点はジオイドを引いた値。既知点は入れず、成果の高さを ellipsoidalHeightMeters に置く。
+    public var orthometricHeightMeters: Double?
+    public var geoidUndulationMeters: Double?
+    public var geoidModel: String?
 
     public var id: String { name }
+
+    /// 出す・SIMA に書く高さ。観測は標高、既知点は入っている成果。
+    public var deliveredHeightMeters: Double? {
+        orthometricHeightMeters ?? ellipsoidalHeightMeters
+    }
 
     public init(
         name: String,
@@ -289,7 +298,10 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         correctionSource: String? = nil,
         epochCount: Int? = nil,
         receiverLabel: String? = nil,
-        satelliteNote: String? = nil
+        satelliteNote: String? = nil,
+        orthometricHeightMeters: Double? = nil,
+        geoidUndulationMeters: Double? = nil,
+        geoidModel: String? = nil
     ) {
         self.name = name
         self.latitudeDegrees = latitudeDegrees
@@ -310,6 +322,9 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         self.epochCount = epochCount
         self.receiverLabel = receiverLabel
         self.satelliteNote = satelliteNote
+        self.orthometricHeightMeters = orthometricHeightMeters
+        self.geoidUndulationMeters = geoidUndulationMeters
+        self.geoidModel = geoidModel
     }
 }
 

@@ -317,8 +317,15 @@ struct BatterSheet: View {
     private var measured: Double? {
         switch field.batter.source {
         case .poleTip:
-            guard let device = position?.ellipsoidalHeightMeters else { return nil }
-            return BatterMath.poleTip(deviceEllipsoidal: device, poleMeters: field.poleHeight.meters)
+            guard let position, let device = position.ellipsoidalHeightMeters else { return nil }
+            guard let tip = BatterMath.poleTip(deviceEllipsoidal: device, poleMeters: field.poleHeight.meters) else { return nil }
+            return SurveyHeight.resolve(
+                ellipsoidalMeters: tip,
+                latitudeDegrees: position.latitudeDegrees,
+                longitudeDegrees: position.longitudeDegrees,
+                meanSeaLevelMeters: position.meanSeaLevelMeters,
+                deviceEllipsoidalMeters: device
+            ).orthometricMeters ?? tip
         case .crosshair:
             guard BatterMath.acceptsCrosshair(isLevel: crosshairLevel),
                   let ground = field.crosshairGroundHeight(),
@@ -436,7 +443,7 @@ struct BatterSheet: View {
         case .crosshair:
             if crosshairLevel == nil { return "傾きが無いので、十字線が水平かは出せません。" }
             if crosshairLevel == false { return "水平ではないので、十字線は高さになりません。" }
-            if field.crosshairGroundHeight() == nil { return "地盤高が無いので、十字線の高さは出せません。" }
+            if field.crosshairGroundHeight() == nil { return "標高が無いので、十字線の高さは出せません。" }
             if StatureMath.eyeHeight(field.stature) == nil { return "目の高さが無いので、十字線の高さは出せません。" }
         case .relative:
             if relative.fix == nil { return "既知の高さでゼロを合わせてください。" }

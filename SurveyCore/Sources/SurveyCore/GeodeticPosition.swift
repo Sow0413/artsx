@@ -85,6 +85,8 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
     public var latitudeDegrees: Double
     public var longitudeDegrees: Double
     public var ellipsoidalHeightMeters: Double?
+    /// CoreLocation.altitude。ジオイド格子の外で標高の代わりに使う。
+    public var meanSeaLevelMeters: Double?
     public var horizontalAccuracyMeters: Double
     public var verticalAccuracyMeters: Double?
     public var timestamp: Date
@@ -123,11 +125,13 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         correctionAgeSeconds: Double? = nil,
         correctionSource: String? = nil,
         courseDegrees: Double? = nil,
-        headingDegrees: Double? = nil
+        headingDegrees: Double? = nil,
+        meanSeaLevelMeters: Double? = nil
     ) {
         self.latitudeDegrees = latitudeDegrees
         self.longitudeDegrees = longitudeDegrees
         self.ellipsoidalHeightMeters = ellipsoidalHeightMeters
+        self.meanSeaLevelMeters = meanSeaLevelMeters
         self.horizontalAccuracyMeters = horizontalAccuracyMeters
         self.verticalAccuracyMeters = verticalAccuracyMeters
         self.timestamp = timestamp

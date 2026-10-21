@@ -6,6 +6,10 @@ public struct FieldPointFile: Codable, Equatable, Sendable {
     public var latitude: Double
     public var longitude: Double
     public var ellipsoidalHeightMeters: Double?
+    /// 標高。楕円体高からジオイド高を引いた値。
+    public var orthometricHeightMeters: Double?
+    /// 使ったジオイド。詳細記録に残す。
+    public var geoidModel: String?
     public var horizontalAccuracyMeters: Double?
     public var verticalAccuracyMeters: Double?
     public var timestamp: Date
@@ -17,12 +21,16 @@ public struct FieldPointFile: Codable, Equatable, Sendable {
         ellipsoidalHeightMeters: Double?,
         horizontalAccuracyMeters: Double?,
         verticalAccuracyMeters: Double?,
-        timestamp: Date
+        timestamp: Date,
+        orthometricHeightMeters: Double? = nil,
+        geoidModel: String? = nil
     ) {
         self.name = name
         self.latitude = latitude
         self.longitude = longitude
         self.ellipsoidalHeightMeters = ellipsoidalHeightMeters
+        self.orthometricHeightMeters = orthometricHeightMeters
+        self.geoidModel = geoidModel
         self.horizontalAccuracyMeters = horizontalAccuracyMeters
         self.verticalAccuracyMeters = verticalAccuracyMeters
         self.timestamp = timestamp

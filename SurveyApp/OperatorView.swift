@@ -18,8 +18,17 @@ struct OperatorView: View {
                 centerlineAzimuth: $0.forwardAzimuthDegrees
             )
         }
+        let phoneHeight = position.flatMap { here -> Double? in
+            SurveyHeight.resolve(
+                ellipsoidalMeters: here.ellipsoidalHeightMeters,
+                latitudeDegrees: here.latitudeDegrees,
+                longitudeDegrees: here.longitudeDegrees,
+                meanSeaLevelMeters: here.meanSeaLevelMeters,
+                deviceEllipsoidalMeters: here.ellipsoidalHeightMeters
+            ).orthometricMeters ?? here.ellipsoidalHeightMeters
+        }
         let height = OperatorStation.height(
-            ellipsoidalMeters: position?.ellipsoidalHeightMeters,
+            ellipsoidalMeters: phoneHeight,
             designMeters: drawing.designHeightMeters,
             eyeHeightMeters: drawing.eyeHeightMeters,
             phoneAtEyes: drawing.phoneAtEyes,
@@ -175,7 +184,7 @@ struct OperatorView: View {
                     Text("FH \(FieldPoint.meters(formation))")
                 }
                 if let ground = fill.groundMeters {
-                    Text("GL \(FieldPoint.meters(ground))")
+                    Text("標高 \(FieldPoint.meters(ground))")
                 }
                 if let word = fill.word, let difference = fill.differenceText {
                     Text(word)
@@ -251,7 +260,7 @@ struct OperatorView: View {
             if field.stature.style == .sight, drawing.phoneAtEyes {
                 LevelBubble(tiltRadians: field.sightTiltRadians, compact: true)
             }
-            Text(height.text)
+            Text(height.meters == nil && height.text != "—" ? "標高 \(height.text)" : height.text)
                 .font(SurveyType(64, .heavy))
                 .minimumScaleFactor(0.3)
                 .lineLimit(1)

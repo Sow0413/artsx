@@ -33,6 +33,16 @@ struct MeasureLogView: View {
     private var surveyList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if let position = field.reading.position, position.isPlottable {
+                    let height = field.liveSurveyHeight(position)
+                    Text(height.primaryLine)
+                        .font(SurveyType(28, .heavy, mono: true))
+                    ForEach(height.detailLines, id: \.self) { line in
+                        Text(line)
+                            .font(SurveyType(14, .semibold))
+                            .foregroundStyle(SurveyColor.muted)
+                    }
+                }
                 if field.stature.style == .sight {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }
@@ -96,7 +106,7 @@ struct MeasureLogView: View {
                     .font(SurveyType(14, .heavy))
             }
             if let condition = observation.condition {
-                Text(condition.reportLines.joined(separator: "\n"))
+                Text(observation.fieldReportLines().joined(separator: "\n"))
                     .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)

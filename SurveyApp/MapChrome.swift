@@ -224,8 +224,19 @@ struct LocationPanel: View {
                     .font(SurveyType(20, .heavy, mono: true))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
+                let height = SurveyHeight.resolve(
+                    ellipsoidalMeters: position.ellipsoidalHeightMeters,
+                    latitudeDegrees: position.latitudeDegrees,
+                    longitudeDegrees: position.longitudeDegrees,
+                    meanSeaLevelMeters: position.meanSeaLevelMeters
+                )
+                Text(height.primaryLine)
                     .font(SurveyType(15, .bold))
+                ForEach(height.detailLines, id: \.self) { line in
+                    Text(line)
+                        .font(SurveyType(13, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                }
                 if let statureNotice {
                     Button(action: { onStature?() }) {
                         Text(statureNotice)

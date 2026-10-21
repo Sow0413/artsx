@@ -1367,9 +1367,26 @@ final class FieldModel: ObservableObject {
         return tiltZero.corrected(crosshairTilt)
     }
 
-    /// 今の端末高から持ち高さを引いた地盤高。水準の器械高に使う。
+    /// アンテナ補正のあとの楕円体高を、標高へ直す。持ち高さの引き方は変えない。
+    func liveSurveyHeight(_ position: GeodeticPosition) -> SurveyHeight {
+        let record = StatureMath.record(
+            profile: stature,
+            deviceHeight: position.ellipsoidalHeightMeters,
+            sight: liveSight
+        ).flatMap { StatureMath.applies(stage: stageTransition.stage, receiver: position.receiver) ? $0 : nil }
+        let base = record?.groundHeightMeters ?? position.ellipsoidalHeightMeters
+        return SurveyHeight.resolve(
+            ellipsoidalMeters: base,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            meanSeaLevelMeters: position.meanSeaLevelMeters,
+            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
+        )
+    }
+
+    /// 今の端末高から持ち高さを引いた標高。持ち高さの引き方は変えない。
     func crosshairGroundHeight() -> Double? {
-        guard let device = reading.position?.ellipsoidalHeightMeters else { return nil }
+        guard let position = reading.position, let device = position.ellipsoidalHeightMeters else { return nil }
         let sight = liveSight ?? crosshairTilt.flatMap { tilt in
             SightSample.resolved(
                 tiltRadians: tilt,
@@ -1378,7 +1395,14 @@ final class FieldModel: ObservableObject {
             )
         }
         guard let hold = StatureMath.holdMeters(profile: stature, sight: sight) else { return nil }
-        return device - hold
+        let ellipsoidalGround = device - hold
+        return SurveyHeight.resolve(
+            ellipsoidalMeters: ellipsoidalGround,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            meanSeaLevelMeters: position.meanSeaLevelMeters,
+            deviceEllipsoidalMeters: device
+        ).orthometricMeters ?? ellipsoidalGround
     }
 
     @discardableResult
@@ -1868,6 +1892,14 @@ final class FieldModel: ObservableObject {
             latitude: position.latitudeDegrees,
             longitude: position.longitudeDegrees,
             ellipsoidalHeightMeters: position.ellipsoidalHeightMeters,
+            orthometricHeightMeters: SurveyHeight.resolve(
+                ellipsoidalMeters: condition.surveyEllipsoidalMeters ?? position.ellipsoidalHeightMeters,
+                latitudeDegrees: position.latitudeDegrees,
+                longitudeDegrees: position.longitudeDegrees,
+                meanSeaLevelMeters: position.meanSeaLevelMeters,
+                deviceEllipsoidalMeters: position.ellipsoidalHeightMeters
+            ).orthometricMeters,
+            geoidModel: condition.geoidModel,
             horizontalAccuracyMeters: position.hasValidHorizontalAccuracy ? position.horizontalAccuracyMeters : nil,
             verticalAccuracyMeters: position.verticalAccuracyMeters,
             timestamp: position.timestamp
@@ -2488,7 +2520,7 @@ final class FieldModel: ObservableObject {
     }
 
     func exportCutFill() {
-        var lines = ["name,FH,GL,diff,word"]
+        var lines = ["name,FH,標高,diff,word"]
         var count = 0
         for point in drawing.fieldPoints {
             let fill = CutFill.make(formation: point.formationHeightMeters, ground: point.groundLevelMeters)
@@ -2535,10 +2567,12 @@ final class FieldModel: ObservableObject {
             showExportNotice(empty, fileURL: nil)
             return
         }
-        var lines = ["name,work,lat,lon,h"]
+        var lines = ["name,work,lat,lon,標高,楕円体高,ジオイド"]
         for item in rows {
-            let height = item.captured.ellipsoidalHeightMeters.map(Self.plain) ?? ""
-            lines.append("\(Self.csv(item.name)),\(item.workID),\(item.captured.latitudeDegrees),\(item.captured.longitudeDegrees),\(height)")
+            let entry = CoordinateBookIndex.entry(from: item)
+            let orthometric = entry.orthometricHeightMeters.map(Self.plain) ?? ""
+            let ellipsoidal = entry.ellipsoidalHeightMeters.map(Self.plain) ?? ""
+            lines.append("\(Self.csv(item.name)),\(item.workID),\(item.captured.latitudeDegrees),\(item.captured.longitudeDegrees),\(orthometric),\(ellipsoidal),\(entry.geoidModel ?? "")")
         }
         writeExport(name: name, body: lines.joined(separator: "\n"))
     }
