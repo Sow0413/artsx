@@ -337,7 +337,7 @@ final class ExternalGNSS: NSObject, CBCentralManagerDelegate, CBPeripheralDelega
     private func writeRTCM(_ data: Data) {
         DispatchQueue.main.async { [weak self] in
             guard let self, let peripheral = self.peripheral, let rx = self.rx else { return }
-            let type: CBCharacteristicWriteType = rx.properties.contains(.writeWithoutResponse) ? .withoutResponse : .write
+            let type: CBCharacteristicWriteType = rx.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
             let limit = max(20, peripheral.maximumWriteValueLength(for: type == .withoutResponse ? .withoutResponse : .withResponse))
             var offset = 0
             let bytes = [UInt8](data)
