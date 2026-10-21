@@ -42,6 +42,10 @@ final class FieldModel: ObservableObject {
     @Published private(set) var reading: PositionReading
     @Published private(set) var viewport: MapViewport
     @Published var followUser: Bool
+    @Published var mapHeadingUp = UserDefaults.standard.bool(forKey: "survey.mapHeadingUp")
+    @Published private(set) var mapHeadingToken = 0
+    @Published var recordPlace = UserDefaults.standard.string(forKey: "survey.recordPlace") ?? ""
+    @Published private(set) var recordFlash: String?
     @Published var tab: FieldTab
     @Published private(set) var isDownloading = false
     @Published private(set) var downloadMessage = "表示中の範囲を、圏外用に保存します。"
@@ -205,6 +209,11 @@ final class FieldModel: ObservableObject {
     private var bridgeSeenX: Double?
     private var bridgeSeenZ: Double?
     private var paceYaw: Double?
+    private var recordPlaceEdited = UserDefaults.standard.bool(forKey: "survey.recordPlaceEdited")
+    private var lastGeocodedLatitude: Double?
+    private var lastGeocodedLongitude: Double?
+    private var geocodeTask: Task<Void, Never>?
+    private var recordFlashToken = UUID()
 
     init(
         source: any PositionSource,
@@ -1747,6 +1756,111 @@ final class FieldModel: ObservableObject {
         }
     }
 
+    func toggleMapHeading() {
+        mapHeadingUp.toggle()
+        UserDefaults.standard.set(mapHeadingUp, forKey: "survey.mapHeadingUp")
+        mapHeadingToken += 1
+    }
+
+    func setRecordPlace(_ raw: String) {
+        recordPlace = raw
+        recordPlaceEdited = true
+        UserDefaults.standard.set(raw, forKey: "survey.recordPlace")
+        UserDefaults.standard.set(true, forKey: "survey.recordPlaceEdited")
+    }
+
+    func useNearbyPlaceName() {
+        recordPlaceEdited = false
+        recordPlace = ""
+        lastGeocodedLatitude = nil
+        lastGeocodedLongitude = nil
+        UserDefaults.standard.set("", forKey: "survey.recordPlace")
+        UserDefaults.standard.set(false, forKey: "survey.recordPlaceEdited")
+        considerPlaceName(force: true)
+    }
+
+    /// 今の位置を1点残す。座標簿と Documents/records/<場所>/<日付>/ の両方へ書く。
+    @discardableResult
+    func recordHere() -> Bool {
+        guard let position = reading.position, position.isPlottable else {
+            showRecordFlash("位置なし")
+            return false
+        }
+        let name = nextPointName ?? "P\(observationCount + 1)"
+        let work = workCatalog.selected
+        let correction = correctionStore.active
+        let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: stageTransition.stage,
+            durationSeconds: epochWatch.duration(at: position.timestamp),
+            epochCount: epochWatch.count,
+            stature: stature,
+            sight: liveSight
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: work.id,
+            captured: position,
+            corrected: shifted,
+            appliedCorrectionID: shifted == nil ? nil : correction?.id,
+            condition: condition
+        )
+        store(observation)
+        remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
+        let point = FieldPointFile(
+            name: name,
+            latitude: position.latitudeDegrees,
+            longitude: position.longitudeDegrees,
+            ellipsoidalHeightMeters: position.ellipsoidalHeightMeters,
+            horizontalAccuracyMeters: position.hasValidHorizontalAccuracy ? position.horizontalAccuracyMeters : nil,
+            verticalAccuracyMeters: position.verticalAccuracyMeters,
+            timestamp: position.timestamp
+        )
+        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("records", isDirectory: true)
+        _ = try? FieldRecordStore.write(point, root: root, place: recordPlace)
+        showRecordFlash(name)
+        return true
+    }
+
+    private func showRecordFlash(_ text: String) {
+        let token = UUID()
+        recordFlashToken = token
+        recordFlash = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self, self.recordFlashToken == token else { return }
+            self.recordFlash = nil
+        }
+    }
+
+    private func considerPlaceName(force: Bool = false) {
+        guard !recordPlaceEdited else { return }
+        guard let position = navigationReading.position ?? reading.position, position.isPlottable else { return }
+        if !force,
+           let lastLatitude = lastGeocodedLatitude,
+           let lastLongitude = lastGeocodedLongitude,
+           abs(lastLatitude - position.latitudeDegrees) < 0.01,
+           abs(lastLongitude - position.longitudeDegrees) < 0.01 {
+            return
+        }
+        lastGeocodedLatitude = position.latitudeDegrees
+        lastGeocodedLongitude = position.longitudeDegrees
+        let latitude = position.latitudeDegrees
+        let longitude = position.longitudeDegrees
+        geocodeTask?.cancel()
+        geocodeTask = Task { [weak self] in
+            let name = await PlaceGeocoder.locality(latitude: latitude, longitude: longitude)
+            guard !Task.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, !self.recordPlaceEdited else { return }
+                guard let name, !name.isEmpty else { return }
+                self.recordPlace = name
+                UserDefaults.standard.set(name, forKey: "survey.recordPlace")
+            }
+        }
+    }
+
     func noteVisible(bounds: GeoBounds, zoom: Int) {
         visibleBounds = bounds
         visibleZoom = zoom
@@ -2297,6 +2411,7 @@ final class FieldModel: ObservableObject {
         }
         trackIncidents()
         refreshVisibleControlPoints()
+        considerPlaceName()
         guard followUser, let position = navigationReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
     }
