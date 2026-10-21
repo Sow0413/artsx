@@ -6,73 +6,49 @@ struct MeasureLogView: View {
     @ObservedObject var field: FieldModel
 
     var body: some View {
+        VStack(spacing: 0) {
+            Text("測量")
+                .font(SurveyType(28, .heavy))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+            WorkBar(field: field, ids: FieldFlow.surveyWorkIDs)
+            surveyList
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(SurveyColor.background)
+        .foregroundStyle(SurveyColor.text)
+        .safeAreaInset(edge: .bottom) {
+            Button(FieldFlow.title(FieldFlow.surveyStep(field), field: field)) {
+                FieldFlow.perform(FieldFlow.surveyStep(field), field: field, fromMenu: false)
+            }
+            .buttonStyle(FlowNextButton())
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
+            .background(SurveyColor.bar)
+        }
+    }
+
+    private var surveyList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("測る")
-                    .font(SurveyType(28, .heavy))
-                Button {
-                    field.showsStature = true
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(PersonalProfile.title)
-                            .font(SurveyType(18, .heavy))
-                        if let notice = field.statureNotice {
-                            Text(notice)
-                                .font(SurveyType(15, .semibold))
-                        }
+                if let position = field.reading.position, position.isPlottable {
+                    let height = field.liveSurveyHeight(position)
+                    Text(height.primaryLine)
+                        .font(SurveyType(28, .heavy, mono: true))
+                    ForEach(height.detailLines, id: \.self) { line in
+                        Text(line)
+                            .font(SurveyType(14, .semibold))
+                            .foregroundStyle(SurveyColor.muted)
                     }
-                    .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .background(SurveyColor.card)
-                    .foregroundStyle(SurveyColor.text)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
-                    )
                 }
-                .buttonStyle(.plain)
-                Button {
-                    field.showsCrosshair = true
-                } label: {
-                    Text("水準器")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                Button {
-                    field.showsBatter = true
-                } label: {
-                    Text("丁張")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                Button {
-                    field.showsPace = true
-                } label: {
-                    Text("歩測")
-                        .font(SurveyType(18, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.blue)
-                        .foregroundStyle(SurveyColor.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                .buttonStyle(.plain)
                 if field.stature.style == .sight {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }
                 OperationBar(field: field, showsSkill: true)
                 if field.operation.showsAdvanced {
-                    Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
-                        .font(SurveyType(16, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HelpLabel(title: field.workCatalog.selected.shortTitle, help: .points)
                     TextField("点名の頭（T）", text: prefixBinding)
                         .textFieldStyle(.roundedBorder)
                         .textInputAutocapitalization(.characters)
@@ -95,8 +71,8 @@ struct MeasureLogView: View {
                 if field.gnssAvailable, field.operation.showsAdvanced {
                     gnssSection
                 }
-                if field.observations.observations.isEmpty {
-                    Text(field.observationCount == 0 ? "まだ点がありません。" : "点は端末に残しています。")
+                if surveyGroups.isEmpty {
+                    Text("まだ点がありません。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
@@ -106,15 +82,27 @@ struct MeasureLogView: View {
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                ForEach(field.observations.observations.reversed()) { observation in
-                    observationRow(observation)
+                ForEach(surveyGroups) { group in
+                    Text(group.title)
+                        .font(SurveyType(16, .heavy))
+                    ForEach(group.rows) { observation in
+                        observationRow(observation)
+                    }
                 }
             }
             .padding(20)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(SurveyColor.background)
-        .foregroundStyle(SurveyColor.text)
+    }
+
+    private var surveyGroups: [SurveyPointGroup] {
+        let rows = field.observations.observations
+        let kinds = field.journal.bookKinds(for: rows.map(\.name))
+        return SurveyList.grouped(
+            rows,
+            groups: SurveyList.surveyGroups,
+            bookKinds: kinds,
+            projectID: field.drawing.project?.id
+        )
     }
 
     private func observationRow(_ observation: FieldObservation) -> some View {
@@ -127,13 +115,27 @@ struct MeasureLogView: View {
             Text(accuracyLine(observation))
                 .font(SurveyType(14, .semibold))
                 .foregroundStyle(SurveyColor.muted)
+            if let average = observation.phoneAverage {
+                Text("平均 \(average.sampleCount)点  ばらつき \(PhoneAverage.spread(average.horizontalStdMeters))  \(Int(average.durationSeconds.rounded()))秒")
+                    .font(SurveyType(14, .heavy))
+                Text(average.label)
+                    .font(SurveyType(13, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+            }
+            if let shift = observation.knownShift {
+                Text("既知点 \(shift.sourceName)  \(shift.deltaText)")
+                    .font(SurveyType(14, .heavy))
+                Text(shift.label)
+                    .font(SurveyType(13, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+            }
             if let seconds = observation.fixDurationSeconds {
                 let satellites = observation.captured.satelliteCount.map { "衛星 \($0)" } ?? "衛星 —"
                 Text("基準点　FIX \(Int(seconds.rounded()))秒、\(satellites)")
                     .font(SurveyType(14, .heavy))
             }
             if let condition = observation.condition {
-                Text(condition.reportLines.joined(separator: "\n"))
+                Text(observation.fieldReportLines().joined(separator: "\n"))
                     .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -209,8 +211,7 @@ struct MeasureLogView: View {
 
     private var controlSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("基準点")
-                .font(SurveyType(18, .heavy))
+            HelpLabel(title: "基準点", help: .points)
             Text(controlStatus)
                 .font(SurveyType(15, .semibold))
                 .foregroundStyle(field.controlFix.restarted ? SurveyColor.amber : SurveyColor.muted)
@@ -233,10 +234,6 @@ struct MeasureLogView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            Text("段階2の RTK FIX のあいだだけ残せます。解が落ちて段階が下がると記録は止まり、測位は続きます。iPhone の GPS では衛星数・PDOP・補正の遅れは出ません。")
-                .font(SurveyType(13, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

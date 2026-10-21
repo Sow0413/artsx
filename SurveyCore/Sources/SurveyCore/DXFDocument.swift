@@ -139,13 +139,23 @@ public struct DrawingEntity: Sendable, Equatable, Identifiable {
     public var color: DrawingColor
     public var primitive: DrawingPrimitive
     public var bounds: DrawingBounds
+    /// SXF や DXF の線幅。画面の太さはその相対だけを見て、0.5〜1 pt に収める。
+    public var lineWeight: Double
 
-    public init(id: Int, layer: String, color: DrawingColor, primitive: DrawingPrimitive, bounds: DrawingBounds) {
+    public init(
+        id: Int,
+        layer: String,
+        color: DrawingColor,
+        primitive: DrawingPrimitive,
+        bounds: DrawingBounds,
+        lineWeight: Double = 1
+    ) {
         self.id = id
         self.layer = layer
         self.color = color
         self.primitive = primitive
         self.bounds = bounds
+        self.lineWeight = lineWeight
     }
 
     public var samplePoints: [PlanarPoint] {
@@ -242,6 +252,42 @@ public struct DrawingHit: Sendable, Equatable {
     }
 }
 
+/// 図面の情報に出す、読めなかった要素。名前は画面の言葉だけ。
+public struct DrawingSkip: Sendable, Equatable, Identifiable {
+    public var label: String
+    public var count: Int
+    public var id: String { label }
+
+    public init(label: String, count: Int) {
+        self.label = label
+        self.count = count
+    }
+}
+
+public enum DrawingSkipLabel {
+    public static func japanese(_ feature: String) -> String {
+        let key = feature.lowercased()
+        switch key {
+        case "drawing_sheet_feature": return "図枠"
+        case "sfig_org_feature", "sfig_locate_feature", "symbol_feature": return "記号"
+        case "hatch_feature", "solid_feature", "fill_feature": return "塗り"
+        case "spline_feature", "bezier_feature", "clothoid_feature": return "曲線"
+        case "ellipse_feature", "ellipse": return "楕円"
+        case "dimension_feature", "dim_feature": return "寸法"
+        case "image_feature", "raster_feature", "pixel_feature": return "画像"
+        case "text_font_feature", "font_feature": return "フォント"
+        default:
+            if key.contains("sheet") { return "図枠" }
+            if key.contains("hatch") || key.contains("fill") { return "塗り" }
+            if key.contains("spline") || key.contains("curve") { return "曲線" }
+            if key.contains("symbol") || key.contains("sfig") { return "記号" }
+            if key.contains("dim") { return "寸法" }
+            if key.contains("text") || key.contains("font") { return "文字" }
+            return "その他"
+        }
+    }
+}
+
 public struct DrawingDocument: Sendable, Equatable {
     public var layers: [DrawingLayer]
     public var entities: [DrawingEntity]
@@ -271,6 +317,25 @@ public struct DrawingDocument: Sendable, Equatable {
 
     public var unsupportedSummary: String {
         unsupportedCounts.keys.sorted().map { "\($0) \(unsupportedCounts[$0] ?? 0)" }.joined(separator: "、")
+    }
+
+    /// 数値の折りたたみに出す本数。内部の feature 名はまとめない。
+    public var skippedElements: [DrawingSkip] {
+        var grouped: [String: Int] = [:]
+        for (name, count) in unsupportedCounts where count > 0 {
+            grouped[DrawingSkipLabel.japanese(name), default: 0] += count
+        }
+        return grouped.keys.sorted().map { DrawingSkip(label: $0, count: grouped[$0] ?? 0) }
+    }
+
+    /// 図面の情報に出す単位の一文。公共座標の案内はトースト側に置く。
+    public var unitNote: String? {
+        guard let unitWarning, !unitWarning.isEmpty else { return nil }
+        if unitWarning.contains("ミリメートル") {
+            return "座標はミリメートルだったので、メートルに直しました。"
+        }
+        if unitWarning.contains("公共座標") { return nil }
+        return unitWarning
     }
 
     public func entities(in query: DrawingBounds) -> [DrawingEntity] {
@@ -1120,6 +1185,26 @@ public enum DrawingPlacement {
         let scale = abs(transform?.scale ?? 1)
         let radius = scale > 1e-15 ? horizontalAccuracyMeters / scale : horizontalAccuracyMeters
         return UserOnDrawing(point: drawing, accuracyRadius: radius)
+    }
+
+    /// 緯度経度を図面の点に戻す。現在地と同じ写像で、精度円は付けない。
+    public static func point(
+        latitudeDegrees: Double,
+        longitudeDegrees: Double,
+        zone: Int,
+        axis: DrawingAxis,
+        transform: Similarity2D?,
+        composesAxis: Bool = false
+    ) -> PlanarPoint? {
+        user(
+            latitudeDegrees: latitudeDegrees,
+            longitudeDegrees: longitudeDegrees,
+            horizontalAccuracyMeters: 0,
+            zone: zone,
+            axis: axis,
+            transform: transform,
+            composesAxis: composesAxis
+        )?.point
     }
 
     public static func inspect(

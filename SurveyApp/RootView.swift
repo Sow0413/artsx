@@ -1,6 +1,8 @@
 import Combine
 import Foundation
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 import SurveyCore
 
 #if !SURVEY_PLAYGROUND && canImport(AVFoundation)
@@ -11,6 +13,9 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var field: FieldModel
     @StateObject private var appearance = SurveyAppearance()
+    @State private var showsMenu = false
+    @State private var menuNext: FieldMenuNext?
+    @State private var modeHandoff: ModeHandoff?
 
     init(
         source: any PositionSource,
@@ -47,16 +52,35 @@ struct RootView: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
             }
-            if field.tab != .seat {
-                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+            if let notice = field.gnssNotice {
+                Text(notice)
+                    .font(SurveyType(14, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 8)
+                    .padding(.top, 4)
             }
-            if field.tab != .seat, let correction = field.correctionStore.active {
+            HStack(spacing: 8) {
+                AccuracyBadgeView(
+                    badge: field.badge,
+                    knownOffsetMeters: field.knownShift?.horizontalOffsetMeters,
+                    compact: true
+                )
+                    .frame(maxWidth: .infinity)
+                settingsButton
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 4)
+            if let correction = field.correctionStore.active {
                 CorrectionStatusBar(correction: correction)
             }
-            if field.tab != .seat, let progress = field.benchmarkProgressLabel {
+            if field.phoneRun != nil || field.knownShift?.enabled == true {
+                PhoneAccuracyBar(field: field)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+            }
+            if let progress = field.benchmarkProgressLabel {
                 Text(progress)
                     .font(SurveyType(16, .heavy))
                     .foregroundStyle(SurveyColor.amber)
@@ -71,19 +95,48 @@ struct RootView: View {
                     .accessibilityHidden(field.tab != .map)
                 if field.tab == .drawing {
                     DrawingTabView(field: field, drawing: field.drawing)
-                } else if field.tab == .measure {
+                } else if field.tab == .survey {
                     MeasureLogView(field: field)
-                } else if field.tab == .export {
-                    ExportTabView(field: field)
-                } else if field.tab == .seat {
+                } else if field.tab == .build {
                     OperatorView(field: field, drawing: field.drawing)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            themeButton
-            if field.tab != .seat {
-                SurveyTabBar(selection: $field.tab)
+            .background(SurveyColor.background)
+            .overlay(alignment: .top) {
+                VStack(spacing: 8) {
+                    if let banner = field.recordBanner {
+                        Button {
+                            openRecordBanner()
+                        } label: {
+                            Text(banner.text)
+                                .font(SurveyType(16, .heavy))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.55)
+                                .foregroundStyle(Color.black)
+                                .padding(.horizontal, 14)
+                                .frame(minHeight: 44)
+                                .background(Color.white.opacity(0.94), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(banner.text)
+                        .accessibilityHint(banner.folderURL == nil ? "閉じる" : "フォルダを開く")
+                    }
+                    if field.modeMenu == nil, let notice = field.exportNotice {
+                        ExportNoticeButton(notice: notice) {
+                            field.dismissExportNotice()
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
             }
+            SurveyTabBar(
+                selection: $field.tab,
+                onRecord: { field.recordHere() },
+                onList: { field.showRecordList() },
+                onReselect: { field.modeMenu = $0 }
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SurveyColor.background.ignoresSafeArea())
@@ -118,12 +171,20 @@ struct RootView: View {
             field.setSightForeground(phase == .active)
             syncVolume()
         }
+        .sensoryFeedback(.success, trigger: field.recordSuccessTick)
+        .sensoryFeedback(.warning, trigger: field.recordWarningTick)
         .onChange(of: field.operation.level) { _, _ in syncVolume() }
         .onChange(of: field.operation.eyesFree) { _, _ in syncVolume() }
         .onReceive(NotificationCenter.default.publisher(for: .surveyConfirmObservation)) { _ in
             field.consumePendingConfirm()
         }
         .modifier(MeshPresenceWatcher(field: field))
+        .sheet(isPresented: $showsMenu, onDismiss: openMenuNext) {
+            FieldMenuSheet(field: field, appearance: appearance, next: $menuNext)
+        }
+        .sheet(item: $field.modeMenu, onDismiss: openModeHandoff) { mode in
+            ModeMenuSheet(field: field, mode: mode, handoff: $modeHandoff)
+        }
         .sheet(isPresented: $field.showsPrivacy) {
             LocationPrivacySheet(field: field)
         }
@@ -151,6 +212,149 @@ struct RootView: View {
         .sheet(isPresented: $field.showsARStakeout) {
             ARStakeoutSheet(field: field)
         }
+        .sheet(isPresented: $field.showsPhoneAverage) {
+            PhoneAverageSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsKnownShift) {
+            KnownShiftSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsManualPoint) {
+            ManualPointSheet(field: field)
+                .id(field.manualPointToken)
+        }
+        .sheet(isPresented: $field.showsPaperCapture) {
+            PaperCaptureSheet(field: field)
+        }
+        .sheet(isPresented: Binding(
+            get: { field.drawing.pointTable != nil },
+            set: { if !$0 { field.drawing.pointTable = nil } }
+        )) {
+            PointTableSheet(drawing: field.drawing) {
+                field.ensureMapCad()
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { field.selectedControlPoint != nil },
+            set: { if !$0 { field.dismissBenchmark() } }
+        )) {
+            NavigationStack {
+                BenchmarkCard(field: field)
+                    .background(SurveyColor.background)
+                    .navigationTitle("三角点")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("閉じる") { field.dismissBenchmark() }
+                                .font(SurveyType(17, .heavy))
+                        }
+                    }
+            }
+            .modifier(SurveyScheme())
+        }
+        .sheet(isPresented: $field.showsPointList) {
+            PointListSheet(field: field)
+        }
+        .sheet(isPresented: $field.showsProjects) {
+            ProjectListSheet(field: field, drawing: field.drawing)
+        }
+        .sheet(isPresented: $field.showsCadOpacity) {
+            NavigationStack {
+                Slider(
+                    value: Binding(get: { field.mapCadOpacity }, set: { field.setMapCadOpacity($0) }),
+                    in: 0.15...1
+                )
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(SurveyColor.background)
+                .navigationTitle("濃さ")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("閉じる") { field.showsCadOpacity = false }
+                            .font(SurveyType(17, .heavy))
+                    }
+                }
+            }
+            .modifier(SurveyScheme())
+        }
+        .fileImporter(isPresented: $field.asksImport, allowedContentTypes: surveyImportTypes()) { result in
+            switch result {
+            case let .success(url):
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else {
+                    field.drawing.report("ファイルを読めませんでした。")
+                    return
+                }
+                field.drawing.importFile(data: data, fileName: url.lastPathComponent)
+                field.tab = .drawing
+            case .failure:
+                field.drawing.report("ファイルを読めませんでした。")
+            }
+        }
+    }
+
+    private func openRecordBanner() {
+        guard let folder = field.takeRecordFolder() else { return }
+        RecordFolderOpener.open(folder) { opened in
+            if !opened {
+                field.showRecordList()
+            }
+        }
+    }
+
+    private func openModeHandoff() {
+        let next = modeHandoff
+        modeHandoff = nil
+        switch next {
+        case .projects:
+            field.showsProjects = true
+        case .fileImport:
+            field.asksImport = true
+        case .crosshair:
+            field.showsCrosshair = true
+        case .pace:
+            field.showsPace = true
+        case .ar:
+            field.showsARStakeout = true
+        case .batter:
+            field.showsBatter = true
+        case .download:
+            field.downloadVisibleArea()
+        case nil:
+            break
+        }
+    }
+
+    private func openMenuNext() {
+        if field.importAfterMenu {
+            field.importAfterMenu = false
+            field.asksImport = true
+        }
+        let next = menuNext
+        menuNext = nil
+        switch next {
+        case .stature:
+            field.showsStature = true
+        case .extras:
+            field.showsExtras = true
+        case .tools:
+            field.showsToolOrder = true
+        case .privacy:
+            field.showsPrivacy = true
+        case .crosshair:
+            field.showsCrosshair = true
+        case .batter:
+            field.showsBatter = true
+        case .ar:
+            field.showsARStakeout = true
+        case .pace:
+            field.showsPace = true
+        case .download:
+            field.downloadVisibleArea()
+        case nil:
+            break
+        }
     }
 
     private func syncVolume() {
@@ -163,26 +367,26 @@ struct RootView: View {
         }
     }
 
-    private var themeButton: some View {
-        Button(action: appearance.cycle) {
-            Text(appearance.label)
-                .font(SurveyType(18, .heavy))
-                .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
-                .background(appearance.outdoor ? SurveyColor.color(OutdoorContrast.yellow) : SurveyColor.card)
-                .foregroundStyle(appearance.outdoor ? SurveyColor.color(OutdoorContrast.black) : SurveyColor.text)
+    private var settingsButton: some View {
+        Button {
+            showsMenu = true
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(SurveyType(18, .bold))
+                .frame(width: 44, height: 44)
+                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .foregroundStyle(SurveyColor.text)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
                 )
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .accessibilityLabel(appearance.label)
+        .accessibilityLabel("設定")
     }
 }
 
-/// 地図と図面で、画面の上を前にした方向が変わったときだけ読む。オペ画面では読まない。実機の声は未確認。
+/// 地図と図面で、画面の上を前にした方向が変わったときだけ読む。施工では読まない。実機の声は未確認。
 private struct StakeoutSpeaker: View {
     @ObservedObject var field: FieldModel
     @State private var spoken = ""
@@ -204,7 +408,7 @@ private struct StakeoutSpeaker: View {
                 StakeoutVoice.say(field.stakeoutUtterance?.speech ?? next)
             }
             .onChange(of: field.tab) { _, tab in
-                if tab == .seat {
+                if tab == .build {
                     spoken = ""
                     StakeoutVoice.stop()
                 }

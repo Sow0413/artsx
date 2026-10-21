@@ -8,10 +8,11 @@ final class CoordinateAndMapTests: XCTestCase {
         XCTAssertEqual(CoordinateText.longitude(139.76712), "139.76712")
         XCTAssertEqual(CoordinateText.ellipsoidalHeight(12.4), "楕円体高 12.4m")
         XCTAssertEqual(CoordinateText.ellipsoidalHeight(nil), "楕円体高 —")
-        XCTAssertEqual(
-            CoordinateText.currentLocationLine(position),
-            "35.68123, 139.76712　楕円体高 12.4m"
-        )
+        let line = CoordinateText.currentLocationLine(position)
+        XCTAssertTrue(line.hasPrefix("35.68123, 139.76712"))
+        XCTAssertTrue(line.contains("標高"))
+        XCTAssertTrue(line.contains("楕円体高"))
+        XCTAssertTrue(line.contains(JapanGeoid.modelName))
         XCTAssertEqual(CoordinateText.previewNote, "JGD2024・下見／概略用")
         XCTAssertEqual(CoordinateText.storageNote, "保持は WGS84/ITRF。変換は出口で一回")
         XCTAssertEqual(CoordinateText.accuracyMeters(3.2), "±3.2m")

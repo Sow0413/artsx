@@ -21,6 +21,10 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
     public var caution: String
     /// FIX / FLOAT / 単独 / CLAS。位置が無いときは「—」。
     public var solutionLabel: String
+    /// 常時出す1行。iPhone は「単独 推定±2m」。足りない長さは guidance に残し、画面ではタップで出す。
+    public var compactText: String
+    /// iPhone の horizontalAccuracy。68% 半径の自己推定で、既知点で確かめた誤差ではない。
+    public var isPhoneSelfEstimate: Bool
 
     public init(
         tone: AccuracyTone,
@@ -29,7 +33,9 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
         isStakeoutGrade: Bool,
         guidance: String = "",
         caution: String = "",
-        solutionLabel: String = "—"
+        solutionLabel: String = "—",
+        compactText: String = "",
+        isPhoneSelfEstimate: Bool = false
     ) {
         self.tone = tone
         self.text = text
@@ -38,6 +44,8 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
         self.guidance = guidance
         self.caution = caution
         self.solutionLabel = solutionLabel
+        self.compactText = compactText.isEmpty ? text : compactText
+        self.isPhoneSelfEstimate = isPhoneSelfEstimate
     }
 }
 
@@ -56,6 +64,51 @@ public enum AccuracyFormat {
             centimeters = 1
         }
         return "\(prefix)\(centimeters)cm"
+    }
+
+    /// iPhone の ± は端末の見積もり。測位シートにこの1行を出す。
+    public static let phoneEstimateNote = "iPhoneの自己推定。実際の誤差は既知点で確認"
+
+    /// 既知点に立って測った水平のずれ。1m 以上は小数1桁。
+    public static func knownOffsetLine(meters: Double) -> String {
+        guard meters.isFinite, meters >= 0 else { return "既知点差 —" }
+        if meters >= 1 {
+            let text = String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), meters)
+            return "既知点差 \(text)m"
+        }
+        var centimeters = Int((meters * 100).rounded(.toNearestOrAwayFromZero))
+        if centimeters == 0, meters > 0 { centimeters = 1 }
+        return "既知点差 \(centimeters)cm"
+    }
+
+    /// 常時バナー用。約は付けず、±で幅だけ出す。
+    public static func plusMinus(meters: Double) -> String {
+        guard meters.isFinite, meters >= 0 else { return "±—m" }
+        if meters >= 1 {
+            let rounded = Int(meters.rounded(.toNearestOrAwayFromZero))
+            return "±\(rounded)m"
+        }
+        var centimeters = Int((meters * 100).rounded(.toNearestOrAwayFromZero))
+        if centimeters == 0, meters > 0 {
+            centimeters = 1
+        }
+        return "±\(centimeters)cm"
+    }
+
+    /// 常時の1行。外部受信機は補正の古さと衛星数も付ける。
+    public static func statusLine(for position: GeodeticPosition) -> String {
+        let span = plusMinus(meters: position.horizontalAccuracyMeters)
+        let accuracy = position.receiver == .iphoneGPS ? "推定\(span)" : span
+        var parts = [position.solutionLabel, accuracy]
+        if position.receiver != .iphoneGPS {
+            if let age = position.correctionAgeSeconds, age.isFinite, age >= 0 {
+                parts.append("補正\(max(0, Int(age.rounded())))秒")
+            }
+            if let count = position.satelliteCount, count >= 0 {
+                parts.append("衛星\(count)")
+            }
+        }
+        return parts.joined(separator: " ")
     }
 }
 
@@ -97,7 +150,9 @@ public enum AccuracyPolicy {
                     text: "精度不明",
                     accessibilityText: "\(work.shortTitle)。段階\(position.stage.rawValue)。精度不明",
                     isStakeoutGrade: false,
-                    solutionLabel: position.solutionLabel
+                    solutionLabel: position.solutionLabel,
+                    compactText: "\(position.solutionLabel) 精度不明",
+                    isPhoneSelfEstimate: position.receiver == .iphoneGPS
                 )
             }
             let judged = judgment(
@@ -117,10 +172,15 @@ public enum AccuracyPolicy {
                 guidance = [stageNotice, guidance].filter { !$0.isEmpty }.joined(separator: " ")
             }
             let text = "\(position.solutionLabel)　\(detail(for: position))"
+            let compactText = AccuracyFormat.statusLine(for: position)
+            let phoneEstimate = position.receiver == .iphoneGPS
             let stage = operatingStage ?? position.stage
+            let spoken = phoneEstimate
+                ? "\(compactText)。\(AccuracyFormat.phoneEstimateNote)"
+                : "段階\(stage.rawValue)。\(text)"
             let accessibility = [
                 work.shortTitle,
-                "段階\(stage.rawValue)。\(text)",
+                spoken,
                 guidance,
                 judged.caution
             ].filter { !$0.isEmpty }.joined(separator: "。")
@@ -131,7 +191,9 @@ public enum AccuracyPolicy {
                 isStakeoutGrade: position.isTrustedRTKFix && tone == .green,
                 guidance: guidance,
                 caution: judged.caution,
-                solutionLabel: position.solutionLabel
+                solutionLabel: position.solutionLabel,
+                compactText: compactText,
+                isPhoneSelfEstimate: phoneEstimate
             )
         }
     }

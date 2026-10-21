@@ -104,7 +104,7 @@ struct OperationBar: View {
     @ViewBuilder
     private func commandButton(_ command: SurveyCommand) -> some View {
         if command == .capture {
-            CaptureControl(title: command.title) { input in
+            CaptureControl(title: command.title, minHeight: controlHeight) { input in
                 field.receiveOperation(input)
             }
         } else {
@@ -113,7 +113,7 @@ struct OperationBar: View {
             } label: {
                 Text(command.title)
                     .font(SurveyType(18, .heavy))
-                    .frame(maxWidth: .infinity, minWidth: 160, minHeight: OutdoorContrast.primaryPoints)
+                    .frame(minWidth: 160, maxWidth: .infinity, minHeight: controlHeight)
                     .background(filled(command) ? SurveyColor.blue : SurveyColor.card)
                     .foregroundStyle(filled(command) ? SurveyColor.onAccent : SurveyColor.text)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -129,6 +129,8 @@ struct OperationBar: View {
         default: return false
         }
     }
+
+    private var controlHeight: CGFloat { compact ? 44 : OutdoorContrast.primaryPoints }
 
     private var stroke: some View {
         RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -153,13 +155,14 @@ struct OperationBar: View {
 /// タップは確認、長押しと横スワイプは慣れたら即確定。
 private struct CaptureControl: View {
     var title: String
+    var minHeight: CGFloat = OutdoorContrast.primaryPoints
     var onInput: (OperationInput) -> Void
     @State private var suppressTap = false
 
     var body: some View {
             Text(title)
             .font(SurveyType(18, .heavy))
-            .frame(maxWidth: .infinity, minWidth: 160, minHeight: OutdoorContrast.primaryPoints)
+            .frame(minWidth: 160, maxWidth: .infinity, minHeight: minHeight)
             .background(SurveyColor.blue)
             .foregroundStyle(SurveyColor.onAccent)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

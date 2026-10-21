@@ -2,6 +2,41 @@ import XCTest
 @testable import SurveyCore
 
 final class TileTests: XCTestCase {
+    func testOverzoomUsesTheNativeParentAndQuadrant() {
+        let range = GSITileCatalog.standardZoomRange
+        let native = TileMath.tileID(latitude: 35.68123, longitude: 139.76712, zoom: 18)
+        let deeperX = native.x * 2 + 1
+        let deeperY = native.y * 2
+        let coverage = TileSampler.coverage(z: 19, x: deeperX, y: deeperY, style: .gsiStandard, range: range)
+        XCTAssertEqual(
+            coverage,
+            .crop(source: native, column: 1, row: 0, factor: 2)
+        )
+        let twoLevels = TileSampler.coverage(z: 20, x: deeperX * 2, y: deeperY * 2 + 1, style: .gsiStandard, range: range)
+        XCTAssertEqual(
+            twoLevels,
+            .crop(source: native, column: 2, row: 1, factor: 4)
+        )
+        let inside = TileSampler.coverage(z: 15, x: 29105, y: 12903, style: .gsiStandard, range: range)
+        XCTAssertEqual(inside, .native(TileID(style: .gsiStandard, z: 15, x: 29105, y: 12903)))
+    }
+
+    func testUnderzoomBuildsAChildMosaic() {
+        let coverage = TileSampler.coverage(z: 0, x: 0, y: 0, style: .gsiStandard, range: 2...18)
+        var expected: [TileID] = []
+        for row in 0..<4 {
+            for column in 0..<4 {
+                expected.append(TileID(style: .gsiStandard, z: 2, x: column, y: row))
+            }
+        }
+        XCTAssertEqual(coverage, .mosaic(tiles: expected, grid: 4))
+        let wide = TileSampler.coverage(z: 0, x: 0, y: 0, style: .gsiStandard, range: 5...18)
+        XCTAssertEqual(
+            wide,
+            .crop(source: TileID(style: .gsiStandard, z: 5, x: 16, y: 16), column: 0, row: 0, factor: 1)
+        )
+    }
+
     func testTokyoTileAndAttribution() {
         let tile = TileMath.tileID(latitude: 35.68123, longitude: 139.76712, zoom: 15)
         XCTAssertEqual(tile, TileID(style: .gsiStandard, z: 15, x: 29105, y: 12903))
@@ -17,6 +52,22 @@ final class TileTests: XCTestCase {
         )
         XCTAssertEqual(GSITileCatalog.attribution, "地理院タイル")
         XCTAssertEqual(GSITileCatalog.sourceCredit, "出典：国土地理院")
+    }
+
+    func testPhotoTilesAreJPEGAndPaleStaysPNG() {
+        let photo = TileID(style: .gsiPhoto, z: 15, x: 29105, y: 12903)
+        XCTAssertEqual(
+            GSITileCatalog.url(for: photo).absoluteString,
+            "https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/15/29105/12903.jpg"
+        )
+        XCTAssertTrue(GSITileCatalog.urlTemplate(for: .gsiPhoto).hasSuffix(".jpg"))
+        let pale = TileID(style: .gsiPale, z: 15, x: 29105, y: 12903)
+        let paleURL = GSITileCatalog.url(for: pale).absoluteString
+        XCTAssertTrue(paleURL.contains("/pale/"))
+        XCTAssertTrue(paleURL.hasSuffix(".png"))
+        XCTAssertEqual(GSITileCatalog.sourceZoomRange(for: .gsiStandard), 0...18)
+        XCTAssertEqual(GSITileCatalog.sourceZoomRange(for: .gsiPale), 5...18)
+        XCTAssertEqual(GSITileCatalog.sourceZoomRange(for: .gsiPhoto), 2...18)
     }
 
     func testOtherReferenceTilesAndYAxis() {

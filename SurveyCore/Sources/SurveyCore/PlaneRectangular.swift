@@ -14,6 +14,9 @@ public struct PlaneZone: Sendable, Equatable, Identifiable {
     public var id: Int { number }
 
     public var label: String { "\(number)系" }
+
+    /// 告示のローマ数字。画面では「VI系」。
+    public var romanLabel: String { "\(roman)系" }
 }
 
 public struct PlaneCoordinate: Sendable, Equatable {

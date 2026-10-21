@@ -74,6 +74,87 @@ final class DrawingFollowupTests: XCTestCase {
         }
     }
 
+    func testHairlineWidthStaysPutAndContoursRecede() {
+        XCTAssertEqual(DrawingStroke.screenPoints(weight: 1), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(DrawingStroke.screenPoints(weight: 8), 1, accuracy: 1e-9)
+        XCTAssertEqual(DrawingStroke.screenPoints(weight: 100), 1, accuracy: 1e-9)
+        XCTAssertGreaterThan(DrawingStroke.screenPoints(weight: 5), DrawingStroke.screenPoints(weight: 1))
+        XCTAssertLessThanOrEqual(DrawingStroke.screenPoints(weight: 500), DrawingStroke.maximumPoints)
+
+        let contour = DrawingEntity(
+            id: 0,
+            layer: "等高線",
+            color: .white,
+            primitive: .line(PlanarPoint(x: 0, y: 0), PlanarPoint(x: 80, y: 1)),
+            bounds: DrawingBounds(minX: 0, minY: 0, maxX: 80, maxY: 1),
+            lineWeight: 11
+        )
+        let design = DrawingEntity(
+            id: 1,
+            layer: "D-STR",
+            color: DrawingColor(red: 1, green: 0, blue: 0),
+            primitive: .line(PlanarPoint(x: 0, y: 10), PlanarPoint(x: 80, y: 12)),
+            bounds: DrawingBounds(minX: 0, minY: 10, maxX: 80, maxY: 12),
+            lineWeight: 1
+        )
+        let entities = [contour, design]
+        let document = DrawingDocument(
+            layers: [
+                DrawingLayer(name: "等高線", color: .white, isVisible: true, role: .background),
+                DrawingLayer(name: "D-STR", color: .white, isVisible: true, role: .design)
+            ],
+            entities: entities,
+            bounds: DrawingBounds(minX: 0, minY: 0, maxX: 80, maxY: 12),
+            unsupportedCounts: ["drawing_sheet_feature": 1, "sfig_org_feature": 2, "mystery_feature": 1],
+            codePage: "test",
+            unitWarning: "座標はミリメートルだったので、メートルに直しました。公共座標として読みました。",
+            index: DrawingSpatialIndex(entities: entities)
+        )
+        let far = DrawingLOD.batch(document: document, view: document.bounds.padded(10), pointsPerUnit: 0.05)
+        let near = DrawingLOD.batch(document: document, view: document.bounds.padded(10), pointsPerUnit: 30)
+        XCTAssertEqual(far.strokes.map(\.width), near.strokes.map(\.width))
+        XCTAssertEqual(far.strokes.count, 2)
+        for stroke in far.strokes {
+            XCTAssertGreaterThanOrEqual(stroke.width, DrawingStroke.minimumPoints)
+            XCTAssertLessThanOrEqual(stroke.width, DrawingStroke.maximumPoints)
+        }
+        XCTAssertTrue(far.strokes.contains { $0.red == DrawingStroke.contour.red && $0.green == DrawingStroke.contour.green })
+        XCTAssertTrue(far.strokes.contains { $0.red == 1 && $0.green == 0 && $0.blue == 0 })
+        let counts = Dictionary(uniqueKeysWithValues: document.skippedElements.map { ($0.label, $0.count) })
+        XCTAssertEqual(counts["図枠"], 1)
+        XCTAssertEqual(counts["記号"], 2)
+        XCTAssertEqual(counts["その他"], 1)
+        XCTAssertFalse(document.skippedElements.contains { $0.label.contains("feature") })
+        XCTAssertEqual(document.unitNote, "座標はミリメートルだったので、メートルに直しました。")
+
+        var dense: [DrawingEntity] = []
+        dense.reserveCapacity(3_000)
+        for index in 0..<3_000 {
+            let y = Double(index)
+            dense.append(DrawingEntity(
+                id: index,
+                layer: "等高線",
+                color: .white,
+                primitive: .line(PlanarPoint(x: 0, y: y), PlanarPoint(x: 40, y: y)),
+                bounds: DrawingBounds(minX: 0, minY: y, maxX: 40, maxY: y),
+                lineWeight: 1
+            ))
+        }
+        let crowd = DrawingDocument(
+            layers: [DrawingLayer(name: "等高線", color: .white, isVisible: true, role: .background)],
+            entities: dense,
+            bounds: DrawingBounds(minX: 0, minY: 0, maxX: 40, maxY: 2_999),
+            unsupportedCounts: [:],
+            codePage: "test",
+            unitWarning: nil,
+            index: DrawingSpatialIndex(entities: dense)
+        )
+        let overview = DrawingLOD.batch(document: crowd, view: crowd.bounds, pointsPerUnit: 900 / 2_999)
+        XCTAssertGreaterThan(overview.strokes.count, 0)
+        XCTAssertLessThan(overview.strokes.count, dense.count / 2)
+        XCTAssertLessThanOrEqual(overview.strokes.count, DrawingLOD.maxStrokes)
+    }
+
     func testBackgroundMatchShiftAndMiss() throws {
         let same = square(origin: PlanarPoint(x: 0, y: 0), size: 20)
         let matched = BackgroundChecker.compare(drawing: same, reference: same, axis: .cadEastNorth)

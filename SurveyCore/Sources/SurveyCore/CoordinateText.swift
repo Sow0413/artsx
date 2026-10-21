@@ -19,7 +19,14 @@ public enum CoordinateText {
     }
 
     public static func currentLocationLine(_ position: GeodeticPosition) -> String {
-        "\(latitude(position.latitudeDegrees)), \(longitude(position.longitudeDegrees))　\(ellipsoidalHeight(position.ellipsoidalHeightMeters))"
+        let height = SurveyHeight.resolve(
+            ellipsoidalMeters: position.ellipsoidalHeightMeters,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            meanSeaLevelMeters: position.receiver == .iphoneGPS ? position.meanSeaLevelMeters : nil
+        )
+        let place = "\(latitude(position.latitudeDegrees)), \(longitude(position.longitudeDegrees))"
+        return ([place, height.primaryLine] + height.detailLines).joined(separator: "　")
     }
 
     /// 現在地の大きな数字の横に出す精度。1m 以上は小数1桁。

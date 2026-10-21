@@ -13,16 +13,19 @@ struct PaceSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    PaceStageBadge(badge: field.paceBadge)
+                    HStack(spacing: 0) {
+                        PaceStageBadge(badge: field.paceBadge)
+                        InfoButton(help: .pace)
+                    }
                     if !StepHardware.available {
-                        notice("歩数は実機で数えます。ここでは歩数を手で入れます。この端末では歩行推測は始めません。")
+                        notice("歩数は手入力")
                     }
                     if field.walkMode == .bridge {
                         notice("GNSSが弱いので、歩行推測で位置をつないでいます。\(field.navigationNote ?? "")")
                     } else if let bridgeNotice = field.bridgeNotice {
                         notice(bridgeNotice)
                     }
-                    notice(PersonalProfile.strideLine(field.pace) + "　校正は「自分の校正」です。")
+                    notice(PersonalProfile.strideLine(field.pace))
                     measure
                     if let message = field.captureMessage {
                         Text(message)
@@ -57,14 +60,14 @@ struct PaceSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("歩測")
                 .font(SurveyType(22, .heavy))
-            labeled("勾配（1mあたり。平らなら 0）", text: $slopeText)
+            labeled("勾配 /m", text: $slopeText)
                 .onChange(of: slopeText) { _, value in
                     guard let slope = Double(value), slope.isFinite else { return }
                     var next = field.pace
                     next.slope = slope
                     field.savePace(next)
                 }
-            labeled("補正係数（空なら勾配から）", text: $factorText)
+            labeled("補正係数", text: $factorText)
                 .onChange(of: factorText) { _, value in
                     var next = field.pace
                     let trimmed = value.trimmingCharacters(in: .whitespaces)

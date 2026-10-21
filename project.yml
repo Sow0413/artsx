@@ -1,6 +1,6 @@
 name: Survey
 options:
-  bundleIdPrefix: jp.oshiro
+  bundleIdPrefix: com.artshome
   deploymentTarget:
     iOS: "17.0"
   developmentLanguage: ja
@@ -9,9 +9,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: 9PT57JQMVT
 packages:
   SurveyCore:
     path: SurveyCore
@@ -26,19 +27,20 @@ targets:
     dependencies:
       - package: SurveyCore
         product: SurveyCore
+      - sdk: PushToTalk.framework
+        weak: true
+        embed: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: jp.oshiro.survey
-        PRODUCT_NAME: Survey
+        PRODUCT_BUNDLE_IDENTIFIER: com.artshome.artsx
+        PRODUCT_NAME: artsx
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_FILE: SurveyApp/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "押して話す無線で、同じプロジェクトの端末へ声を送ります。"
-        INFOPLIST_KEY_NSNearbyInteractionUsageDescription: "近くの端末との距離を、作業半径の警報に使います。UWB が無い端末では使いません。"
-        INFOPLIST_KEY_UIBackgroundModes: push-to-talk
     scheme:
       gatherCoverageData: false
   SurveyWatch:
@@ -51,11 +53,11 @@ targets:
         product: SurveyCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: jp.oshiro.survey.watch
-        PRODUCT_NAME: SurveyWatch
+        PRODUCT_BUNDLE_IDENTIFIER: com.artshome.artsx.watch
+        PRODUCT_NAME: artsxWatch
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: 測量
-        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: jp.oshiro.survey
+        INFOPLIST_KEY_CFBundleDisplayName: artsx
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.artshome.artsx
         INFOPLIST_KEY_NSMotionUsageDescription: "転倒と強い衝撃を、加速度から補助的に見るために使います。緊急通報の代わりではありません。"
         INFOPLIST_KEY_NSFallDetectionUsageDescription: "Apple Watch の転倒を受け取り、近くの端末に知らせます。緊急通報の代わりではありません。"
         SWIFT_VERSION: "5.9"

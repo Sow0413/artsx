@@ -28,7 +28,10 @@ struct ARStakeoutSheet: View {
                 camera
                 staffCanvas(picture)
                 VStack(spacing: 8) {
-                    AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                    AccuracyBadgeView(
+                        badge: field.badge,
+                        knownOffsetMeters: field.knownShift?.horizontalOffsetMeters
+                    )
                         .padding(10)
                         .background(SurveyColor.card.opacity(0.94))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -139,41 +142,34 @@ struct ARStakeoutSheet: View {
                 .font(SurveyType(14, .semibold))
                 .foregroundStyle(SurveyColor.muted)
             if targets.isEmpty {
-                Text("座標簿の点か、図面でタップした点がありません。")
+                Text("点がありません")
                     .font(SurveyType(16, .heavy))
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(Array(targets.prefix(8).enumerated()), id: \.element.id) { offset, target in
-                            Button(target.name) { model.index = offset }
-                                .buttonStyle(.plain)
-                                .font(SurveyType(16, .heavy))
-                                .padding(.horizontal, 12)
-                                .frame(minHeight: OutdoorContrast.primaryPoints)
-                                .background(model.index == offset ? SurveyColor.blue : SurveyColor.card)
-                                .foregroundStyle(model.index == offset ? SurveyColor.onAccent : SurveyColor.text)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            Button(target.name) {
+                                model.index = offset
+                                model.pending = target
+                            }
+                            .buttonStyle(.plain)
+                            .font(SurveyType(16, .heavy))
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                            .background(model.pending?.name == target.name ? SurveyColor.color(OutdoorContrast.yellow) : SurveyColor.card)
+                            .foregroundStyle(model.pending?.name == target.name ? SurveyColor.color(OutdoorContrast.black) : SurveyColor.text)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                     }
                 }
             }
-            Text(model.pending == nil ? "既知点を選び、その点の地面を画面でタップします。2点以上が推奨です。" : "\(model.pending?.name ?? "")の地面をタップしてください。")
-                .font(SurveyType(15, .semibold))
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(Array(targets.prefix(8))) { target in
-                        Button(target.name) { model.pending = target }
-                            .buttonStyle(.plain)
-                            .font(SurveyType(15, .heavy))
-                            .padding(.horizontal, 10)
-                            .frame(minHeight: 48)
-                            .background(model.pending?.name == target.name ? SurveyColor.color(OutdoorContrast.yellow) : SurveyColor.card)
-                            .foregroundStyle(model.pending?.name == target.name ? SurveyColor.color(OutdoorContrast.black) : SurveyColor.text)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                }
+            HStack(spacing: 0) {
+                Text(model.pending == nil ? "地面をタップ" : "\(model.pending?.name ?? "")の地面")
+                    .font(SurveyType(15, .heavy))
+                InfoButton(help: .ar)
+                Spacer(minLength: 0)
             }
-            Text(model.pairs.isEmpty ? "まだ対応点がありません。" : "対応 \(model.pairs.count)点")
+            Text("対応 \(model.pairs.count)点")
                 .font(SurveyType(15, .heavy))
             HStack(spacing: 8) {
                 Button("既知点で合わせる") { model.alignKnown() }
@@ -202,10 +198,7 @@ struct ARStakeoutSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
-            Text("声は画面の上を前にします。方向が変わったときだけです。")
-                .font(SurveyType(14, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-            Text("切替 \(String(format: "%g", field.arHandoff.meters))m。\(String(format: "%g", field.arHandoff.resumeMeters))mでARに戻ります。")
+            Text("切替 \(String(format: "%g", field.arHandoff.meters))m　戻す \(String(format: "%g", field.arHandoff.resumeMeters))m")
                 .font(SurveyType(15, .heavy))
             HStack(spacing: 8) {
                 TextField("切替距離 m", text: $handoffText)
@@ -225,9 +218,6 @@ struct ARStakeoutSheet: View {
                 Text(handoffNote)
                     .font(SurveyType(14, .semibold))
             }
-            Text("RTK FIXのあいだは、向きを保って位置を足し続けます。切替の振動と音、実機のARは未確認です。")
-                .font(SurveyType(13, .semibold))
-                .foregroundStyle(SurveyColor.muted)
         }
         .padding(12)
         .background(SurveyColor.card.opacity(0.94))
@@ -312,7 +302,7 @@ struct ARStakeoutSheet: View {
                 frame: frame,
                 easting: plane?.eastingMeters,
                 northing: plane?.northingMeters,
-                rtk: position?.solution == .rtkFix,
+                rtk: position?.fixQuality == .rtkFix,
                 gnssMeters: position?.horizontalAccuracyMeters ?? 0
             )
         }

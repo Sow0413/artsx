@@ -11,6 +11,99 @@ final class PlaneZoneTests: XCTestCase {
         XCTAssertEqual(PlaneZoneCatalog.prefectures.count, 47)
         XCTAssertTrue(PlaneZoneCatalog.named("茨城県")?.decidesZone == true)
         XCTAssertTrue(PlaneZoneCatalog.named("北海道")?.decidesZone == false)
+        XCTAssertFalse(PlaneZoneCatalog.named("東京都")?.zones.contains(1) == true)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "三重県", area: nil), 6)
+        XCTAssertEqual(PlaneZoneCatalog.summary(prefecture: "三重", area: nil, zone: 6), "三重県 → VI系")
+        XCTAssertEqual(PlaneZoneCatalog.toastPlace(prefecture: "三重県", area: nil, zone: 6), "三重 VI系")
+        XCTAssertEqual(PlaneZoneCatalog.toastPlace(prefecture: "北海道", area: "札幌市", zone: 12), "北海道 札幌・旭川など XII系")
+        XCTAssertEqual(PlaneZoneCatalog.toastPlace(prefecture: "東京都", area: "大島町", zone: 9), "東京 伊豆諸島 IX系")
+        XCTAssertFalse(PlaneZoneCatalog.named("三重県")?.needsArea == true)
+    }
+
+    func testSplitPrefecturesFollowTheGSIAreas() {
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "北海道", area: "函館市"), 11)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "北海道", area: "札幌市"), 12)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "北海道", area: "美幌町"), 13)
+        XCTAssertNil(PlaneZoneCatalog.zone(prefecture: "北海道", area: nil))
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "東京都", area: "大島町"), 9)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "東京都", area: "父島"), 14)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "東京都", area: "沖ノ鳥島"), 18)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "東京都", area: "南鳥島"), 19)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "鹿児島県", area: "名瀬市"), 1)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "鹿児島県", area: "与論町"), 1)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "鹿児島県", area: "西之表市"), 2)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "沖縄", area: "那覇市"), 15)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "沖縄県", area: "宮古島市"), 16)
+        XCTAssertEqual(PlaneZoneCatalog.zone(prefecture: "沖縄県", area: "北大東村"), 17)
+        XCTAssertTrue(PlaneZoneCatalog.summary(prefecture: "北海道", area: "函館市", zone: 11).contains("XI系"))
+    }
+
+    func testCaptainBaseMapIsPublicMillimetresInZoneSix() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/captain-site.sfc")
+        let document = try SFCParser.parse(Data(contentsOf: url))
+        XCTAssertGreaterThan(document.unsupportedCounts["sfig_locate_feature"] ?? 0, 0)
+        XCTAssertFalse(document.entities.contains { entity in
+            GeoMath.hypotenuse(entity.bounds.midX, entity.bounds.midY) < 1_000
+        })
+        let sample = try XCTUnwrap(document.entities.lazy.compactMap { entity -> PlanarPoint? in
+            entity.samplePoints.first { point in
+                abs(point.x - 37_999.999956) < 0.01 && abs(point.y + 123_705.59998) < 0.01
+            }
+        }.first)
+        XCTAssertEqual(sample.x, 37_999.999956, accuracy: 0.01)
+        XCTAssertEqual(sample.y, -123_705.59998, accuracy: 0.01)
+        let placement = PlanePlacementChooser.choose(
+            x: document.bounds.midX,
+            y: document.bounds.midY,
+            prefecture: "三重県",
+            latitude: nil,
+            longitude: nil,
+            zone: 6,
+            area: nil
+        )
+        XCTAssertFalse(placement.looksLocal)
+        XCTAssertFalse(placement.note.contains("2点合わせ"))
+        XCTAssertTrue(placement.note.contains("VI系"))
+        XCTAssertTrue(PlanePlacementChooser.isGeoreferenced(
+            midX: document.bounds.midX,
+            midY: document.bounds.midY,
+            zone: 6,
+            hasTransform: false,
+            prefecture: "三重県"
+        ))
+        let geo = try XCTUnwrap(DrawingPlacement.geographic(
+            PlanarPoint(x: document.bounds.midX, y: document.bounds.midY),
+            zone: 6,
+            axis: .cadEastNorth,
+            transform: nil
+        ))
+        XCTAssertEqual(geo.latitudeDegrees, 34.883, accuracy: 0.01)
+        XCTAssertEqual(geo.longitudeDegrees, 136.427, accuracy: 0.01)
+        let swapped = try XCTUnwrap(DrawingPlacement.geographic(
+            PlanarPoint(x: document.bounds.midX, y: document.bounds.midY),
+            zone: 6,
+            axis: .surveyNorthEast,
+            transform: nil
+        ))
+        XCTAssertFalse(PlaneZoneCatalog.named("三重県")?.contains(
+            latitude: swapped.latitudeDegrees,
+            longitude: swapped.longitudeDegrees
+        ) == true)
+    }
+
+    func testLocalDrawingCoordinatesAskForTwoPointAlignment() {
+        let near = PlanePlacementChooser.gridFit(x: 12, y: -4, zone: 6, prefecture: "三重県")
+        XCTAssertTrue(near.looksLocal)
+        XCTAssertTrue(near.note.contains("2点合わせ"))
+        XCTAssertFalse(near.note.contains("公共座標として読みました"))
+        let outside = PlanePlacementChooser.gridFit(x: 400_000, y: 400_000, zone: 6, prefecture: "三重県")
+        XCTAssertTrue(outside.looksLocal)
+        XCTAssertTrue(outside.note.contains("2点合わせ"))
+        XCTAssertFalse(PlanePlacementChooser.isGeoreferenced(midX: 0, midY: 0, zone: 9, hasTransform: false, prefecture: "三重県"))
+        XCTAssertTrue(PlanePlacementChooser.isGeoreferenced(midX: 0, midY: 0, zone: 9, hasTransform: true, prefecture: "三重県"))
     }
 
     func testIbarakiPicksZoneNineForThePublishedExample() throws {
@@ -46,7 +139,16 @@ final class PlaneZoneTests: XCTestCase {
         decoder.dateDecodingStrategy = .iso8601
         let project = try decoder.decode(SurveyProject.self, from: json)
         XCTAssertNil(project.prefecture)
+        XCTAssertNil(project.area)
+        XCTAssertNil(project.manualZone)
         XCTAssertEqual(project.zone, 9)
+        let drawingJSON = """
+        {"codePage":"shift_jis","fileName":"a.sfc","importedAt":"2026-10-20T00:00:00Z","unsupported":{}}
+        """.data(using: .utf8)!
+        let drawing = try decoder.decode(ProjectDrawing.self, from: drawingJSON)
+        XCTAssertEqual(drawing.title, "a.sfc")
+        XCTAssertNil(drawing.prefecture)
+        XCTAssertNil(drawing.zone)
     }
 }
 
@@ -61,6 +163,14 @@ final class SFCFeatureModeTests: XCTestCase {
         XCTAssertEqual(document.unsupportedCounts["sfig_org_feature"], 1)
         XCTAssertNil(document.unsupportedCounts["text_string_feature"])
         XCTAssertTrue(document.unitWarning?.contains("ミリメートル") == true)
+        XCTAssertEqual(document.entities[0].lineWeight, 11, accuracy: 1e-9)
+        XCTAssertEqual(DrawingStroke.screenPoints(weight: document.entities[0].lineWeight), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(document.skippedElements.first { $0.label == "図枠" }?.count, 1)
+        XCTAssertEqual(document.skippedElements.first { $0.label == "記号" }?.count, 1)
+        XCTAssertFalse(document.skippedElements.contains { $0.label.contains("_") || $0.label.contains("feature") })
+        XCTAssertEqual(document.unitNote, "座標はミリメートルだったので、メートルに直しました。")
+        let contour = document.entities.filter { DrawingStroke.isContour($0.layer) }
+        XCTAssertTrue(contour.isEmpty || contour.allSatisfy { DrawingStroke.displayColor($0.color, layer: $0.layer) == DrawingStroke.contour })
 
         guard case let .polyline(vertices, _, _) = document.entities[0].primitive else {
             return XCTFail("折線がない")

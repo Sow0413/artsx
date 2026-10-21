@@ -18,8 +18,12 @@ struct OperatorView: View {
                 centerlineAzimuth: $0.forwardAzimuthDegrees
             )
         }
+        let phoneHeight = position.flatMap { here -> Double? in
+            field.surveyHeight(ellipsoidal: here.ellipsoidalHeightMeters, at: here).orthometricMeters
+                ?? here.ellipsoidalHeightMeters
+        }
         let height = OperatorStation.height(
-            ellipsoidalMeters: position?.ellipsoidalHeightMeters,
+            ellipsoidalMeters: phoneHeight,
             designMeters: drawing.designHeightMeters,
             eyeHeightMeters: drawing.eyeHeightMeters,
             phoneAtEyes: drawing.phoneAtEyes,
@@ -46,6 +50,7 @@ struct OperatorView: View {
                 }
                 if landscape {
                     VStack(spacing: 4) {
+                        guidanceBlock
                         HStack(spacing: 8) {
                             stationLabel(station)
                             arrowMark(arrow, size: min(geo.size.height * 0.42, 220))
@@ -56,9 +61,10 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 28)
-                    .padding(.bottom, busy ? 300 : 24)
+                    .padding(.bottom, busy ? 300 : 88)
                 } else {
                     VStack(spacing: 6) {
+                        guidanceBlock
                         stationLabel(station)
                         arrowMark(arrow, size: min(geo.size.width * 0.42, geo.size.height * 0.28))
                         heightLabel(height)
@@ -66,7 +72,7 @@ struct OperatorView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 28)
-                    .padding(.bottom, busy ? 340 : 24)
+                    .padding(.bottom, busy ? 340 : 88)
                 }
                 VStack {
                     HStack {
@@ -75,18 +81,6 @@ struct OperatorView: View {
                             .frame(width: 14, height: 14)
                             .accessibilityLabel(field.badge.accessibilityText)
                         Spacer()
-                        Button("戻る") {
-                            field.tab = .map
-                        }
-                        .font(SurveyType(18, .heavy))
-                        .foregroundStyle(SurveyColor.text)
-                        .padding(.horizontal, 16)
-                        .frame(minWidth: OutdoorContrast.primaryPoints, minHeight: OutdoorContrast.primaryPoints)
-                        .background(SurveyColor.card)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
-                        )
                     }
                     Spacer()
                     if field.extras.proximity {
@@ -119,10 +113,14 @@ struct OperatorView: View {
                     if field.extras.pushToTalk {
                         talkButton
                     }
+                    Button(FieldFlow.title(FieldFlow.buildStep(field), field: field)) {
+                        FieldFlow.perform(FieldFlow.buildStep(field), field: field, fromMenu: false)
+                    }
+                    .buttonStyle(FlowNextButton())
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 10)
-                .padding(.bottom, 8)
+                .padding(.bottom, 24)
             }
         }
         .background(SurveyColor.background)
@@ -152,7 +150,7 @@ struct OperatorView: View {
 
     private var directionHeadline: some View {
         let fallLine = field.crew.fallSpeech
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             Text(fallLine ?? field.crew.threats.headline)
                 .font(SurveyType(40, .black))
                 .minimumScaleFactor(0.4)
@@ -166,6 +164,52 @@ struct OperatorView: View {
         }
         .frame(maxWidth: .infinity)
         .accessibilityLabel(fallLine ?? field.crew.threats.cues.first.map { "\($0.text)。\($0.speech)" } ?? field.crew.threats.headline)
+    }
+
+    @ViewBuilder
+    private var guidanceBlock: some View {
+        if let point = drawing.stakeoutPoint {
+            let fill = CutFill.make(formation: point.formationHeightMeters, ground: point.groundLevelMeters)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(point.mapLabel)
+                    .font(SurveyType(22, .heavy))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                if let formation = fill.formationMeters {
+                    Text("FH \(FieldPoint.meters(formation))")
+                }
+                if let ground = fill.groundMeters {
+                    Text("標高 \(FieldPoint.meters(ground))")
+                }
+                if let word = fill.word, let difference = fill.differenceText {
+                    Text(word)
+                    Text(difference)
+                        .font(SurveyType(40, .heavy, mono: true))
+                } else if let design = point.designHeightMeters {
+                    Text("計画 \(FieldPoint.meters(design))")
+                        .font(SurveyType(34, .heavy, mono: true))
+                }
+            }
+            .font(SurveyType(22, .heavy, mono: true))
+            .foregroundStyle(SurveyColor.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let guide = field.stakeoutGuide {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(guide.speech)
+                    .font(SurveyType(40, .heavy))
+                    .minimumScaleFactor(0.4)
+                    .lineLimit(2)
+                if let detail = guide.detail {
+                    Text(detail)
+                        .font(SurveyType(20, .heavy))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                }
+            }
+            .foregroundStyle(SurveyColor.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func stationText(position: GeodeticPosition?, guide: OperatorGuide?) -> String {
@@ -211,7 +255,7 @@ struct OperatorView: View {
             if field.stature.style == .sight, drawing.phoneAtEyes {
                 LevelBubble(tiltRadians: field.sightTiltRadians, compact: true)
             }
-            Text(height.text)
+            Text(height.meters == nil && height.text != "—" ? "標高 \(height.text)" : height.text)
                 .font(SurveyType(64, .heavy))
                 .minimumScaleFactor(0.3)
                 .lineLimit(1)

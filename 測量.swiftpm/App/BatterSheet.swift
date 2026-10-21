@@ -434,7 +434,7 @@ struct BatterSheet: View {
             if field.poleHeight.meters == nil { return "ポール高が無いので、先端の高さは出せません。" }
             if measured == nil { return "ポール高が範囲外です。" }
         case .crosshair:
-            if crosshairLevel == nil { return "傾きが無いので、十字線の水平は未確認です。" }
+            if crosshairLevel == nil { return "傾きが無いので、十字線が水平かは出せません。" }
             if crosshairLevel == false { return "水平ではないので、十字線は高さになりません。" }
             if field.crosshairGroundHeight() == nil { return "地盤高が無いので、十字線の高さは出せません。" }
             if StatureMath.eyeHeight(field.stature) == nil { return "目の高さが無いので、十字線の高さは出せません。" }

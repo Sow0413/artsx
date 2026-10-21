@@ -354,10 +354,10 @@ public enum PaceMath {
     }
 
     public static func badge(distanceMeters: Double?, sigmaMeters: Double?) -> PaceBadge {
-        var parts = ["段階0"]
+        var parts: [String] = []
         if let distanceMeters, distanceMeters.isFinite { parts.append(distanceText(distanceMeters)) }
         if let sigmaMeters, sigmaMeters.isFinite { parts.append(estimateText(sigmaMeters)) }
-        let text = parts.joined(separator: "　")
+        let text = parts.isEmpty ? "—" : parts.joined(separator: "　")
         return PaceBadge(
             text: text,
             accessibilityText: "歩測。段階0。\(text)。測設の合格にはしません。",

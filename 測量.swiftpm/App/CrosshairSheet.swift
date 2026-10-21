@@ -172,7 +172,7 @@ struct CrosshairSheet: View {
                 .font(SurveyType(20, .heavy, mono: true))
                 .padding(10)
                 .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text("空欄のときは、LiDAR か ARKit の距離を使います。実機の距離は未確認です。")
+            Text("空欄のときは、LiDAR か ARKit の距離を使います。")
                 .font(SurveyType(14, .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .fixedSize(horizontal: false, vertical: true)

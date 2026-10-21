@@ -14,18 +14,4 @@ struct HiyariIntent: AppIntent {
         return .result()
     }
 }
-
-struct SurveyShortcuts: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: HiyariIntent(),
-            phrases: [
-                "\(.applicationName)でヒヤリ",
-                "ヒヤリを\(.applicationName)に残して"
-            ],
-            shortTitle: "ヒヤリ",
-            systemImageName: "exclamationmark.triangle"
-        )
-    }
-}
 #endif

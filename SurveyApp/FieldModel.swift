@@ -7,22 +7,40 @@ struct SealedIncidentRow: Identifiable, Equatable {
     var title: String
 }
 
+struct RecordBanner: Equatable {
+    var text: String
+    var folderURL: URL?
+}
+
+struct ExportNotice: Equatable {
+    var text: String
+    var fileURL: URL?
+}
+
 enum FieldTab: String, CaseIterable, Identifiable {
     case map
     case drawing
-    case measure
-    case export
-    case seat
+    case survey
+    case build
 
     var id: String { rawValue }
+
+    /// 以前の画面名。measure は測量、seat は施工、export は測量のメニューに戻す。
+    static func restored(_ raw: String) -> FieldTab {
+        switch raw {
+        case "survey", "measure", "export": return .survey
+        case "build", "seat": return .build
+        case "drawing": return .drawing
+        default: return .map
+        }
+    }
 
     var title: String {
         switch self {
         case .map: return "地図"
         case .drawing: return "図面"
-        case .measure: return "測る"
-        case .export: return "出す"
-        case .seat: return "オペ"
+        case .survey: return "測量"
+        case .build: return "施工"
         }
     }
 
@@ -30,9 +48,8 @@ enum FieldTab: String, CaseIterable, Identifiable {
         switch self {
         case .map: return "map"
         case .drawing: return "ruler"
-        case .measure: return "mappin"
-        case .export: return "square.and.arrow.up"
-        case .seat: return "steeringwheel"
+        case .survey: return "mappin.and.ellipse"
+        case .build: return "hammer"
         }
     }
 }
@@ -42,7 +59,24 @@ final class FieldModel: ObservableObject {
     @Published private(set) var reading: PositionReading
     @Published private(set) var viewport: MapViewport
     @Published var followUser: Bool
+    @Published var mapHeadingUp = UserDefaults.standard.bool(forKey: "survey.mapHeadingUp")
+    @Published private(set) var mapHeadingToken = 0
+    @Published var mapCadOn = (UserDefaults.standard.object(forKey: "survey.mapCadOn") as? Bool) ?? true
+    @Published var mapCadOpacity = UserDefaults.standard.object(forKey: "survey.mapCadOpacity") as? Double ?? 0.85
+    @Published var showsProjects = false
+    @Published var showsCadOpacity = false
+    @Published var asksImport = false
+    @Published var importAfterMenu = false
+    @Published var recordPlace = UserDefaults.standard.string(forKey: "survey.recordPlace") ?? ""
+    @Published private(set) var recordPins: [FieldRecordPin] = []
+    /// 地理院 DEM。無いとき、または通信が無いときは nil で、地図の行は出さない。
+    @Published private(set) var gsiElevationMeters: Double?
+    @Published private(set) var recordBanner: RecordBanner?
+    @Published private(set) var recordSuccessTick = 0
+    @Published private(set) var recordWarningTick = 0
     @Published var tab: FieldTab
+    /// 同じタブをもう一度押したときのメニュー。
+    @Published var modeMenu: FieldTab?
     @Published private(set) var isDownloading = false
     @Published private(set) var downloadMessage = "表示中の範囲を、圏外用に保存します。"
     @Published private(set) var savedAreaCount = 0
@@ -59,6 +93,10 @@ final class FieldModel: ObservableObject {
     @Published private(set) var instrumentTrust: InstrumentTrust
     @Published private(set) var observations: FieldObservationLog
     @Published var showsWorkSettings = false
+    @Published var showsPointList = false
+    @Published var showsTrash = false
+    @Published var selectedPointListID: String?
+    @Published private(set) var retakeName: String?
     @Published private(set) var captureMessage: String?
     @Published var plannedRounds = 3
     @Published private(set) var rounds: [BenchmarkRound] = []
@@ -72,6 +110,8 @@ final class FieldModel: ObservableObject {
     @Published var enclosingBook = false
     @Published private(set) var exportMessage: String?
     @Published private(set) var exportURL: URL?
+    /// 書き出しの結果。数秒で消す。メニューの中には残さない。
+    @Published private(set) var exportNotice: ExportNotice?
     @Published var operation = OperationDesk.load()
     @Published var showsToolOrder = false
     @Published var stature = StatureProfile.load()
@@ -81,6 +121,17 @@ final class FieldModel: ObservableObject {
     @Published var showsBatter = false
     @Published var showsPace = false
     @Published var showsARStakeout = false
+    @Published var showsPhoneAverage = false
+    @Published var showsKnownShift = false
+    @Published var showsManualPoint = false
+    @Published var showsPaperCapture = false
+    @Published var manualPointName = ""
+    @Published var manualPointCoordinate = ""
+    @Published var manualPointToken = UUID()
+    @Published var averageSpan = PhoneAverageSpan(rawValue: UserDefaults.standard.string(forKey: "survey.averageSpan") ?? "") ?? .halfMinute
+    @Published private(set) var phoneRun: PhoneAverageRun?
+    @Published private(set) var knownShift: KnownPointShift?
+    @Published private(set) var phoneClock = Date()
     @Published var pace = PaceProfile.load()
     @Published var stakeoutUnit = StakeoutPacePreference.load()
     @Published var stakeoutSpeechStyle = StakeoutSpeechPreference.load()
@@ -131,16 +182,16 @@ final class FieldModel: ObservableObject {
     #endif
     @Published var disasterMode = false
     @Published var batterySaver = false
-    @Published private(set) var disasterSites: [DisasterSite] = []
-    @Published private(set) var disasterSegments: [PassageSegment] = []
-    @Published private(set) var disasterPeers: [DisasterPosition] = []
-    @Published private(set) var disasterTexts: [DisasterText] = []
-    @Published private(set) var disasterPending = 0
-    @Published private(set) var disasterMessage: String?
+    @Published var disasterSites: [DisasterSite] = []
+    @Published var disasterSegments: [PassageSegment] = []
+    @Published var disasterPeers: [DisasterPosition] = []
+    @Published var disasterTexts: [DisasterText] = []
+    @Published var disasterPending = 0
+    @Published var disasterMessage: String?
     @Published var showsDisaster = false
-    @Published private(set) var meshBattery: Int?
-    @Published private(set) var meshCharging = false
-    @Published private(set) var meshPresence: MeshDuty.Presence = .active
+    @Published var meshBattery: Int?
+    @Published var meshCharging = false
+    @Published var meshPresence: MeshDuty.Presence = .active
     @Published private(set) var firstEpisode: FirstEpisode?
     @Published private(set) var firstView: FirstView?
     @Published private(set) var aidArrows: [AidArrow] = []
@@ -164,7 +215,12 @@ final class FieldModel: ObservableObject {
     @Published var extras: ExtraSwitches
     @Published var showsExtras = false
     @Published private(set) var gnssState: GNSSLinkState = .idle
+    @Published private(set) var gnssNotice: String?
     @Published private(set) var gnssChoices: [GNSSChoice] = []
+    @Published private(set) var receiverChoices: [GNSSChoice] = []
+    @Published private(set) var receiverStatus = "未接続"
+    @Published private(set) var receiverFirmware = ""
+    @Published private(set) var rtcmLine = ""
     @Published private(set) var observationCount = 0
     @Published private(set) var incidentStatRows: [IncidentStatRow] = []
     @Published private(set) var sealedIncidents: [SealedIncidentRow] = []
@@ -172,6 +228,13 @@ final class FieldModel: ObservableObject {
     @Published private(set) var statMessage: String?
     private let statsRelay = IncidentStatsRelayStub(reachable: false)
     private var incidentTimer: Timer?
+    private var phoneAccuracyTimer: Timer?
+    @Published private(set) var geoid2024Meters: Double?
+    private var geoidAnchorLat: Double?
+    private var geoidAnchorLon: Double?
+    private var geoidCache = GSIGeoid2024Cache()
+    private var geoidTask: Task<Void, Never>?
+    private var geoidGeneration = 0
     private var restoredIncidentProject: String?
     let controlPoints: [ControlPoint]
     let journal: FieldJournal
@@ -182,6 +245,13 @@ final class FieldModel: ObservableObject {
     private let source: any PositionSource
     private var camera: MapCameraFollow
     private var readTask: Task<Void, Never>?
+    private let external = ExternalGNSS()
+    private var phoneReading = PositionReading.waiting
+    private var radioReading: PositionReading?
+    private var radioAt: Date?
+    private var correctionAt: Date?
+    private var positionTier: PositioningTier = .phone
+    private var gnssNoticeToken = UUID()
     private var downloadTask: Task<Void, Never>?
     private var benchmarkTask: Task<Void, Never>?
     private var visibleBounds: GeoBounds?
@@ -205,6 +275,16 @@ final class FieldModel: ObservableObject {
     private var bridgeSeenX: Double?
     private var bridgeSeenZ: Double?
     private var paceYaw: Double?
+    private var recordPlaceEdited = UserDefaults.standard.bool(forKey: "survey.recordPlaceEdited")
+    private var lastGeocodedLatitude: Double?
+    private var lastGeocodedLongitude: Double?
+    private var geocodeTask: Task<Void, Never>?
+    private var gsiCache = GSIElevationCache()
+    private var gsiShown: GSIElevationCache.Entry?
+    private var gsiTask: Task<Void, Never>?
+    private var gsiGeneration = 0
+    private var recordBannerToken = UUID()
+    private var exportNoticeToken = UUID()
 
     init(
         source: any PositionSource,
@@ -234,7 +314,13 @@ final class FieldModel: ObservableObject {
         let prefixes = PointPrefixStore.load(from: siteDirectory)
         self.prefixStore = prefixes
         self.pointPrefix = prefixes.prefix(for: prefixes.activeKey)
-        self.drawing = DrawingSession(projectsRoot: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true))
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let projectsRoot = documents.appendingPathComponent("projects", isDirectory: true)
+        ProjectStore.migrateProjects(
+            from: siteDirectory.appendingPathComponent("プロジェクト", isDirectory: true),
+            to: projectsRoot
+        )
+        self.drawing = DrawingSession(projectsRoot: projectsRoot)
         self.extras = ExtraSwitchStore.load(from: siteDirectory)
         let nearby = NearbyLink()
         self.nearby = nearby
@@ -290,13 +376,15 @@ final class FieldModel: ObservableObject {
         }
         drawing.onProjectCommitted = { [weak self] in
             self?.rememberSession()
+            self?.adoptProjectPlace()
+            self?.loadKnownShift()
         }
         $tab.dropFirst().sink { [weak self] _ in
             self?.rememberSession()
         }.store(in: &cancellables)
         let saved = journal.session()
-        if let tab = FieldTab(rawValue: saved.tab) {
-            self.tab = tab
+        if !saved.tab.isEmpty {
+            self.tab = FieldTab.restored(saved.tab)
         }
         if let workID = saved.workID, workCatalog.works.contains(where: { $0.id == workID }) {
             workCatalog = workCatalog.selecting(workID)
@@ -305,6 +393,7 @@ final class FieldModel: ObservableObject {
         if let name = saved.projectName, let project = drawing.projects.first(where: { $0.name == name }) {
             drawing.select(project)
         }
+        loadKnownShift()
         gnss.onState = { [weak self] state in
             self?.gnssState = state
         }
@@ -319,6 +408,7 @@ final class FieldModel: ObservableObject {
         paceSession.onSteps = { [weak self] slot, count in
             self?.ingestSteps(slot, count)
         }
+        external.attach(self)
     }
 
     func cancelFall() {
@@ -415,7 +505,7 @@ final class FieldModel: ObservableObject {
                 selfLongitude: plottable ? position?.longitudeDegrees : nil,
                 courseDegrees: position?.courseDegrees,
                 headingDegrees: position?.headingDegrees,
-                facing: tab == .seat ? .machine : .own,
+                facing: tab == .build ? .machine : .own,
                 now: Date()
             )
             if heard.beacon.active {
@@ -592,7 +682,7 @@ final class FieldModel: ObservableObject {
             selfLongitude: plottable ? position?.longitudeDegrees : nil,
             courseDegrees: position?.courseDegrees,
             headingDegrees: position?.headingDegrees,
-            facing: tab == .seat ? .machine : .own
+            facing: tab == .build ? .machine : .own
         )
         firstView = view
         let line = view.nearestOpen || view.greeterOpen ? view.headline : view.progress
@@ -611,7 +701,7 @@ final class FieldModel: ObservableObject {
             selfLongitude: plottable ? position?.longitudeDegrees : nil,
             courseDegrees: position?.courseDegrees,
             headingDegrees: position?.headingDegrees,
-            facing: tab == .seat ? .machine : .own
+            facing: tab == .build ? .machine : .own
         )
     }
 
@@ -910,7 +1000,7 @@ final class FieldModel: ObservableObject {
             selfLongitude: plottable ? position?.longitudeDegrees : nil,
             courseDegrees: position?.courseDegrees,
             headingDegrees: position?.headingDegrees,
-            facing: tab == .seat ? .machine : .own,
+            facing: tab == .build ? .machine : .own,
             now: Date()
         )
     }
@@ -1021,7 +1111,7 @@ final class FieldModel: ObservableObject {
         return StakeoutPace.guide(
             distanceMeters: inverse.distanceMeters,
             azimuthDegrees: inverse.azimuthDegrees,
-            facingDegrees: facing?.degrees,
+            facingDegrees: facing,
             strideMeters: pace.strideMeters,
             unit: stakeoutUnit.unit,
             precision: StakeoutPrecision.decide(drawing.stakeoutAccuracy)
@@ -1158,15 +1248,17 @@ final class FieldModel: ObservableObject {
             captureMessage = "位置が無いので残せません。"
             return false
         }
-        guard let name = nextPointName else {
+        guard let name = nameForCapture() else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
         let work = workCatalog.selected
         let correction = correctionStore.active
-        let shifted = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
-        let condition = ObservationCondition.snapshot(
-            position: position,
+        let control = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let prepared = preparedPhonePoint(position)
+        let stored = prepared.position
+        let condition = stamped(
+            position: stored,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
             epochCount: epochWatch.count,
@@ -1176,14 +1268,19 @@ final class FieldModel: ObservableObject {
         let observation = FieldObservation(
             name: name,
             workID: work.id,
-            captured: position,
-            corrected: shifted,
-            appliedCorrectionID: shifted == nil ? nil : correction?.id,
-            condition: condition
+            captured: stored,
+            corrected: control,
+            appliedCorrectionID: control == nil ? nil : correction?.id,
+            condition: condition,
+            projectID: drawing.project?.id,
+            knownShift: prepared.stamp
         )
         store(observation)
-        remember(CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work)))
-        captureMessage = shifted == nil
+        noteRetakeSaved(name)
+        var entry = CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work))
+        entry.knownShift = prepared.stamp
+        remember(entry)
+        captureMessage = control == nil
             ? "\(observation.name)を残しました。下見の座標は捨てません。"
             : "\(observation.name)を残しました。補正を引いた座標も残し、取得時の位置は捨てません。"
         return true
@@ -1205,11 +1302,11 @@ final class FieldModel: ObservableObject {
                 : "RTK FIX のときだけ基準点を記録できます。FLOAT と単独は残せません。"
             return false
         }
-        guard let name = nextPointName else {
+        guard let name = nameForCapture() else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: fix.position,
             stage: stageTransition.stage,
             durationSeconds: fix.fixDurationSeconds,
@@ -1220,9 +1317,11 @@ final class FieldModel: ObservableObject {
             workID: "boundary",
             captured: fix.position,
             fixDurationSeconds: fix.fixDurationSeconds,
-            condition: condition
+            condition: condition,
+            projectID: drawing.project?.id
         )
         store(observation)
+        noteRetakeSaved(name)
         remember(CoordinateBookIndex.entry(from: observation, kind: "基準点"))
         let satellites = condition.satelliteNote
         let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
@@ -1294,7 +1393,7 @@ final class FieldModel: ObservableObject {
             return false
         }
         position.ellipsoidalHeightMeters = record.heightMeters
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: position,
             stage: record.stage,
             durationSeconds: nil,
@@ -1326,9 +1425,135 @@ final class FieldModel: ObservableObject {
         return tiltZero.corrected(crosshairTilt)
     }
 
-    /// 今の端末高から持ち高さを引いた地盤高。水準の器械高に使う。
+    /// 地図にいるあいだ、地理院の標高を 10 m か 30 秒ごとに取る。失敗したら行を消す。
+    func refreshTerrainElevation(now: Date = Date()) {
+        guard tab == .map else { return }
+        guard let position = reading.position ?? navigationReading.position, position.isPlottable else { return }
+        let latitude = position.latitudeDegrees
+        let longitude = position.longitudeDegrees
+        if let fresh = gsiCache.fresh(latitudeDegrees: latitude, longitudeDegrees: longitude, now: now) {
+            gsiShown = fresh
+            gsiElevationMeters = fresh.meters
+            return
+        }
+        guard gsiCache.shouldRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, now: now) else { return }
+        if let shown = gsiShown,
+           GeoDistance.meters(
+               latitude1: shown.latitudeDegrees,
+               longitude1: shown.longitudeDegrees,
+               latitude2: latitude,
+               longitude2: longitude
+           ) > GSIElevationPolicy.moveMeters {
+            gsiShown = nil
+            gsiElevationMeters = nil
+        }
+        gsiCache.noteRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, at: now)
+        gsiGeneration += 1
+        let generation = gsiGeneration
+        gsiTask?.cancel()
+        gsiTask = Task { [weak self] in
+            let meters = await GSIElevationAPI.fetch(latitudeDegrees: latitude, longitudeDegrees: longitude)
+            guard !Task.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, generation == self.gsiGeneration else { return }
+                if let meters {
+                    let entry = GSIElevationCache.Entry(
+                        latitudeDegrees: latitude,
+                        longitudeDegrees: longitude,
+                        meters: meters,
+                        fetchedAt: Date()
+                    )
+                    self.gsiCache.remember(entry)
+                    self.gsiShown = entry
+                    self.gsiElevationMeters = meters
+                } else {
+                    self.gsiShown = nil
+                    self.gsiElevationMeters = nil
+                }
+            }
+        }
+    }
+
+    /// ジオイド2024。10 m か 30 秒ごと。失敗しても、直前の値は 500 m まで使う。
+    func refreshGeoid2024(now: Date = Date()) {
+        guard let position = reading.position ?? navigationReading.position, position.isPlottable else { return }
+        let latitude = position.latitudeDegrees
+        let longitude = position.longitudeDegrees
+        guard geoidCache.shouldRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, now: now) else { return }
+        geoidCache.noteRequest(latitudeDegrees: latitude, longitudeDegrees: longitude, at: now)
+        geoidGeneration += 1
+        let generation = geoidGeneration
+        geoidTask?.cancel()
+        geoidTask = Task { [weak self] in
+            let sample = await GSIGeoid2024API.fetch(latitudeDegrees: latitude, longitudeDegrees: longitude)
+            guard !Task.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, generation == self.geoidGeneration, let sample else { return }
+                self.geoidAnchorLat = latitude
+                self.geoidAnchorLon = longitude
+                self.geoid2024Meters = sample.separationMeters
+            }
+        }
+    }
+
+    private func geoidSeparation(near position: GeodeticPosition) -> Double? {
+        guard let meters = geoid2024Meters, meters.isFinite,
+              let latitude = geoidAnchorLat, let longitude = geoidAnchorLon else { return nil }
+        let moved = GeoDistance.meters(
+            latitude1: latitude,
+            longitude1: longitude,
+            latitude2: position.latitudeDegrees,
+            longitude2: position.longitudeDegrees
+        )
+        guard moved <= GSIGeoid2024Policy.reuseMeters else { return nil }
+        return meters
+    }
+
+    /// アンテナ補正のあとの楕円体高を、標高へ直す。持ち高さの引き方は変えない。
+    func liveSurveyHeight(_ position: GeodeticPosition) -> SurveyHeight {
+        let record = StatureMath.record(
+            profile: stature,
+            deviceHeight: position.ellipsoidalHeightMeters,
+            sight: liveSight
+        ).flatMap { StatureMath.applies(stage: stageTransition.stage, receiver: position.receiver) ? $0 : nil }
+        let base = record?.groundHeightMeters ?? position.ellipsoidalHeightMeters
+        return surveyHeight(ellipsoidal: base, at: position)
+    }
+
+    func surveyHeight(ellipsoidal: Double?, at position: GeodeticPosition) -> SurveyHeight {
+        let sea = position.receiver == .iphoneGPS ? position.meanSeaLevelMeters : nil
+        return SurveyHeight.resolve(
+            ellipsoidalMeters: ellipsoidal,
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            meanSeaLevelMeters: sea,
+            deviceEllipsoidalMeters: position.ellipsoidalHeightMeters,
+            gsi2024SeparationMeters: geoidSeparation(near: position)
+        )
+    }
+
+    private func stamped(
+        position: GeodeticPosition,
+        stage: PositionStage,
+        durationSeconds: TimeInterval?,
+        epochCount: Int?,
+        stature profile: StatureProfile? = nil,
+        sight: SightSample? = nil
+    ) -> ObservationCondition {
+        ObservationCondition.snapshot(
+            position: position,
+            stage: stage,
+            durationSeconds: durationSeconds,
+            epochCount: epochCount,
+            stature: profile,
+            sight: sight,
+            gsi2024SeparationMeters: geoidSeparation(near: position)
+        )
+    }
+
+    /// 今の端末高から持ち高さを引いた標高。持ち高さの引き方は変えない。
     func crosshairGroundHeight() -> Double? {
-        guard let device = reading.position?.ellipsoidalHeightMeters else { return nil }
+        guard let position = reading.position, let device = position.ellipsoidalHeightMeters else { return nil }
         let sight = liveSight ?? crosshairTilt.flatMap { tilt in
             SightSample.resolved(
                 tiltRadians: tilt,
@@ -1337,7 +1562,8 @@ final class FieldModel: ObservableObject {
             )
         }
         guard let hold = StatureMath.holdMeters(profile: stature, sight: sight) else { return nil }
-        return device - hold
+        let ellipsoidalGround = device - hold
+        return surveyHeight(ellipsoidal: ellipsoidalGround, at: position).orthometricMeters ?? ellipsoidalGround
     }
 
     @discardableResult
@@ -1365,7 +1591,7 @@ final class FieldModel: ObservableObject {
             verticalAccuracy: accuracy.vertical,
             at: Date()
         )
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: position,
             stage: .iphone,
             durationSeconds: nil,
@@ -1375,7 +1601,9 @@ final class FieldModel: ObservableObject {
             name: name,
             workID: workCatalog.selected.id,
             captured: position,
-            condition: condition
+            condition: condition,
+            projectID: drawing.project?.id,
+            origin: SurveyList.levelOrigin
         )
         store(observation)
         remember(CoordinateBookIndex.entry(from: observation, kind: CrosshairMath.kind))
@@ -1498,7 +1726,7 @@ final class FieldModel: ObservableObject {
             timestamp: Date(),
             headingDegrees: headingNow
         )
-        let condition = ObservationCondition.snapshot(
+        let condition = stamped(
             position: position,
             stage: .iphone,
             durationSeconds: nil,
@@ -1594,7 +1822,7 @@ final class FieldModel: ObservableObject {
             tab = .map
         case .openExport:
             operation.commit(effect)
-            tab = .export
+            openModeExport()
         default:
             operation.commit(effect)
         }
@@ -1630,6 +1858,7 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
+        reloadRecordPins()
         if stature.statureMeters == nil {
             asksStature = true
         }
@@ -1676,15 +1905,19 @@ final class FieldModel: ObservableObject {
         incidentTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.crew.ageFall(now: Date())
             self?.closeIncidents(now: Date())
+            self?.publishExternalChoice()
         }
         source.start()
         resumeGNSS()
+        if NTRIPSettings.load().enabled {
+            external.start()
+        }
         if readTask == nil {
             let readings = source.readings
             readTask = Task { [weak self] in
                 for await reading in readings {
                     await MainActor.run {
-                        self?.apply(reading)
+                        self?.notePhone(reading)
                     }
                 }
             }
@@ -1708,6 +1941,8 @@ final class FieldModel: ObservableObject {
         setSightForeground(false)
         pauseGNSS()
         source.stop()
+        phoneAccuracyTimer?.invalidate()
+        phoneAccuracyTimer = nil
     }
 
     private func syncSightSensors() {
@@ -1744,6 +1979,412 @@ final class FieldModel: ObservableObject {
         camera = MapCameraFollow()
         if let position = navigationReading.position, position.isPlottable {
             viewport = camera.update(for: position)
+        }
+    }
+
+    func toggleMapHeading() {
+        mapHeadingUp.toggle()
+        UserDefaults.standard.set(mapHeadingUp, forKey: "survey.mapHeadingUp")
+        mapHeadingToken += 1
+    }
+
+    func toggleMapCad() {
+        mapCadOn.toggle()
+        UserDefaults.standard.set(mapCadOn, forKey: "survey.mapCadOn")
+    }
+
+    func ensureMapCad() {
+        guard !mapCadOn else { return }
+        mapCadOn = true
+        UserDefaults.standard.set(true, forKey: "survey.mapCadOn")
+    }
+
+    func setMapCadOpacity(_ value: Double) {
+        let clamped = min(1, max(0.15, value))
+        mapCadOpacity = clamped
+        UserDefaults.standard.set(clamped, forKey: "survey.mapCadOpacity")
+    }
+
+    private func adoptProjectPlace() {
+        guard let place = drawing.project?.place?.trimmingCharacters(in: .whitespacesAndNewlines), !place.isEmpty else { return }
+        setRecordPlace(place)
+    }
+
+    func setRecordPlace(_ raw: String) {
+        recordPlace = raw
+        recordPlaceEdited = true
+        UserDefaults.standard.set(raw, forKey: "survey.recordPlace")
+        UserDefaults.standard.set(true, forKey: "survey.recordPlaceEdited")
+    }
+
+    func useNearbyPlaceName() {
+        recordPlaceEdited = false
+        recordPlace = ""
+        lastGeocodedLatitude = nil
+        lastGeocodedLongitude = nil
+        UserDefaults.standard.set("", forKey: "survey.recordPlace")
+        UserDefaults.standard.set(false, forKey: "survey.recordPlaceEdited")
+        considerPlaceName(force: true)
+    }
+
+    /// 今の位置を1点残す。座標簿と、開いているプロジェクトの 記録/<場所>/<日付>/ へ書く。
+    @discardableResult
+    func recordHere() -> Bool {
+        guard let position = reading.position, position.isPlottable else {
+            showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
+            return false
+        }
+        return writeRecord(position, average: nil)
+    }
+
+    /// 記録の本体。平均もここを通す。既知点合わせは iPhone の点だけに引く。
+    @discardableResult
+    func writeRecord(_ position: GeodeticPosition, average: PhoneAverageStamp?) -> Bool {
+        let name = retakeName ?? nextPointName ?? "P\(observationCount + 1)"
+        let work = workCatalog.selected
+        let correction = correctionStore.active
+        let control = correction?.applies(to: position, now: Date()) == true ? correction?.subtracting(from: position) : nil
+        let prepared = preparedPhonePoint(position)
+        let stored = prepared.position
+        let condition = stamped(
+            position: stored,
+            stage: average == nil ? stageTransition.stage : .iphone,
+            durationSeconds: average?.durationSeconds ?? epochWatch.duration(at: stored.timestamp),
+            epochCount: average?.sampleCount ?? epochWatch.count,
+            stature: stature,
+            sight: liveSight
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: work.id,
+            captured: stored,
+            corrected: control,
+            appliedCorrectionID: control == nil ? nil : correction?.id,
+            condition: condition,
+            projectID: drawing.project?.id,
+            phoneAverage: average,
+            knownShift: prepared.stamp
+        )
+        store(observation)
+        noteRetakeSaved(name)
+        var entry = CoordinateBookIndex.entry(from: observation, kind: bookKind(for: work))
+        entry.phoneAverage = average
+        entry.knownShift = prepared.stamp
+        remember(entry)
+        let point = FieldPointFile(
+            name: name,
+            latitude: stored.latitudeDegrees,
+            longitude: stored.longitudeDegrees,
+            ellipsoidalHeightMeters: stored.ellipsoidalHeightMeters,
+            orthometricHeightMeters: condition.orthometricHeightMeters,
+            geoidModel: condition.geoidModel,
+            horizontalAccuracyMeters: stored.hasValidHorizontalAccuracy ? stored.horizontalAccuracyMeters : nil,
+            verticalAccuracyMeters: stored.verticalAccuracyMeters,
+            timestamp: stored.timestamp,
+            phoneAverage: average,
+            knownShift: prepared.stamp
+        )
+        let saved = try? FieldRecordStore.write(point, root: recordsRoot, place: recordPlace)
+        reloadRecordPins(on: stored.timestamp)
+        if let saved, let pin = recordPins.first(where: { $0.fileURL.path == saved.path }) {
+            showRecordBanner(RecordBanner(text: pin.caption, folderURL: pin.folderURL), success: true)
+        } else {
+            let place = FieldRecordStore.placeFolder(recordPlace, latitude: stored.latitudeDegrees, longitude: stored.longitudeDegrees)
+            let day = FieldRecordStore.dayFolder(stored.timestamp)
+            let number = recordPins.count + 1
+            showRecordBanner(RecordBanner(text: "記録 #\(number) ・\(place)/\(day)", folderURL: nil), success: true)
+        }
+        return true
+    }
+
+    func beginManualPoint(name: String = "", coordinate: String = "") {
+        guard drawing.project != nil else {
+            drawing.report("先にプロジェクトを作ってください。")
+            showsProjects = true
+            return
+        }
+        manualPointName = name
+        manualPointCoordinate = coordinate
+        manualPointToken = UUID()
+        showsManualPoint = true
+    }
+
+    func beginPaperCapture() {
+        guard drawing.project != nil else {
+            drawing.report("先にプロジェクトを作ってください。")
+            showsProjects = true
+            return
+        }
+        showsPaperCapture = true
+    }
+
+    func showRecordList() {
+        modeMenu = nil
+        purgeExpiredTrash()
+        showsTrash = false
+        showsPointList = true
+    }
+
+    func nameForCapture() -> String? {
+        if let retakeName, !retakeName.isEmpty { return retakeName }
+        return nextPointName
+    }
+
+    func noteRetakeSaved(_ name: String) {
+        guard retakeName == name else { return }
+        try? journal.archiveBook(named: name)
+        retakeName = nil
+    }
+
+    func beginRetake() {
+        guard let row = selectedPointRow() else { return }
+        retakeName = row.name
+        showsPointList = false
+        captureMessage = "\(row.name)を取り直します。"
+    }
+
+    func pointListSections() -> [(title: String, rows: [PointListRow])] {
+        switch tab {
+        case .map:
+            return [("記録", recordRows())]
+        case .drawing:
+            return [("図面", drawingRows())]
+        case .survey:
+            return observationSections(SurveyList.surveyGroups)
+        case .build:
+            return observationSections(SurveyList.buildGroups)
+        }
+    }
+
+    func trashRows() -> [TrashedPoint] {
+        journal.trashedPoints()
+    }
+
+    func bookHistory(for name: String) -> [ArchivedBookEntry] {
+        journal.bookHistory(named: name)
+    }
+
+    func selectedPointRow() -> PointListRow? {
+        guard let selectedPointListID else { return nil }
+        return pointListSections().flatMap(\.rows).first { $0.id == selectedPointListID }
+    }
+
+    func trashSelectedPoint() {
+        guard let row = selectedPointRow() else { return }
+        let id = UUID()
+        var observations: [FieldObservation] = []
+        var records: [String] = []
+        var book: CoordinateBookEntry?
+        var drawingPoint: FieldPoint?
+        switch row.kind {
+        case .record(let name), .observation(let name, _):
+            let workIDs: Set<String>
+            if case .observation = row.kind {
+                workIDs = Set((tab == .build ? SurveyList.buildGroups : SurveyList.surveyGroups).map(\.id))
+            } else {
+                workIDs = Set(SurveyList.surveyGroups.map(\.id) + SurveyList.buildGroups.map(\.id))
+            }
+            observations = journal.observations(named: name).filter { item in
+                guard SurveyList.matchesProject(item, projectID: drawing.project?.id) else { return false }
+                if case .record = row.kind { return true }
+                return workIDs.contains(item.workID)
+            }
+            let files = FieldRecordStore.files(named: name, in: recordsRoot, place: listPlace, day: listDay)
+            for (index, file) in files.enumerated() {
+                records.append(FieldRecordStore.relativePath(of: file, root: recordsRoot))
+                try? FieldRecordStore.moveToTrash(file, id: id, index: index, root: recordsRoot)
+            }
+            try? journal.removeObservations(ids: observations.map(\.id))
+            if journal.observations(named: name).isEmpty {
+                book = journal.removeBook(named: name)
+            }
+        case .drawing(let pointID):
+            drawingPoint = drawing.removeFieldPoint(id: pointID)
+        }
+        let payload = PointTrashPayload(
+            observations: observations,
+            book: book,
+            records: records,
+            drawingProject: drawing.project?.name,
+            drawingPoint: drawingPoint
+        )
+        try? journal.trash(TrashedPoint(id: id, name: row.name, deletedAt: Date(), payload: payload))
+        refreshListedPoints()
+        selectedPointListID = nil
+        captureMessage = "\(row.name)をゴミ箱に移しました。"
+    }
+
+    func restoreTrash(_ id: UUID) {
+        guard let item = journal.takeTrash(id: id) else { return }
+        for observation in item.payload.observations {
+            try? journal.commit(observation)
+        }
+        if let book = item.payload.book {
+            try? journal.upsertBook(book)
+        }
+        for (index, path) in item.payload.records.enumerated() {
+            try? FieldRecordStore.restoreTrashFile(id: item.id, index: index, root: recordsRoot, relativePath: path)
+        }
+        if let point = item.payload.drawingPoint {
+            drawing.restoreFieldPoint(point)
+        }
+        FieldRecordStore.removeTrashFolder(id: item.id, root: recordsRoot)
+        refreshListedPoints()
+        captureMessage = "\(item.name)を戻しました。"
+    }
+
+    func purgeExpiredTrash() {
+        for item in journal.purgeTrash(at: Date()) {
+            FieldRecordStore.removeTrashFolder(id: item.id, root: recordsRoot)
+        }
+    }
+
+    private var listPlace: String? {
+        let place = drawing.project?.place?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let place, !place.isEmpty { return place }
+        let edited = recordPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+        return edited.isEmpty ? nil : edited
+    }
+
+    private var listDay: String? { nil }
+
+    private func recordRows() -> [PointListRow] {
+        FieldRecordStore.points(in: recordsRoot, place: listPlace, day: listDay).map { pin in
+            PointListRow(
+                id: pin.fileURL.path,
+                name: pin.name,
+                group: "記録",
+                detail: "\(pin.place)/\(pin.day)",
+                kind: .record(pin.name)
+            )
+        }
+    }
+
+    private func drawingRows() -> [PointListRow] {
+        drawing.fieldPoints.map { point in
+            PointListRow(
+                id: point.id,
+                name: point.name,
+                group: "図面",
+                detail: point.mapLabel,
+                kind: .drawing(point.id)
+            )
+        }
+    }
+
+    private func observationSections(_ groups: [(id: String, title: String)]) -> [(title: String, rows: [PointListRow])] {
+        let observations = journal.allObservations()
+        let kinds = journal.bookKinds(for: observations.map(\.name))
+        return SurveyList.grouped(
+            observations,
+            groups: groups,
+            bookKinds: kinds,
+            projectID: drawing.project?.id
+        ).map { group in
+            (group.title, group.rows.map { item in
+                PointListRow(
+                    id: item.id.uuidString,
+                    name: item.name,
+                    group: group.title,
+                    detail: listDetail(item),
+                    kind: .observation(item.name, item.workID)
+                )
+            })
+        }
+    }
+
+    private func listDetail(_ observation: FieldObservation) -> String {
+        if let meters = observation.condition?.orthometricHeightMeters {
+            return "標高 \(SurveyHeight.meters(meters))m"
+        }
+        return "\(CoordinateText.latitude(observation.captured.latitudeDegrees)) \(CoordinateText.longitude(observation.captured.longitudeDegrees))"
+    }
+
+    private func refreshListedPoints() {
+        observations = FieldObservationLog(observations: journal.recent())
+        observationCount = journal.count()
+        reloadRecordPins()
+    }
+
+    /// 今のモードの出す。地図からは測量の書き出しを開く。
+    func openModeExport() {
+        switch tab {
+        case .drawing:
+            modeMenu = .drawing
+        case .build:
+            modeMenu = .build
+        case .map, .survey:
+            tab = .survey
+            modeMenu = .survey
+        }
+    }
+
+    /// バナーを閉じ、開くフォルダがあれば返す。
+    func takeRecordFolder() -> URL? {
+        let folder = recordBanner?.folderURL
+        recordBanner = nil
+        return folder
+    }
+
+    /// プロジェクトがあるときはそのフォルダの記録。無いときは Documents/records。
+    private var recordsRoot: URL {
+        if let name = drawing.project?.name,
+           let directory = try? ProjectStore.projectDirectory(name, at: drawing.projectsRoot) {
+            let folder = directory.appendingPathComponent("記録", isDirectory: true)
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            return folder
+        }
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("records", isDirectory: true)
+    }
+
+    func recordDays(for place: String) -> [String] {
+        FieldRecordStore.dayFolders(in: recordsRoot, place: place)
+    }
+
+    private func reloadRecordPins(on day: Date = Date()) {
+        recordPins = FieldRecordStore.pins(in: recordsRoot, on: day)
+    }
+
+    private func showRecordBanner(_ banner: RecordBanner, success: Bool) {
+        let token = UUID()
+        recordBannerToken = token
+        recordBanner = banner
+        if success {
+            recordSuccessTick += 1
+        } else {
+            recordWarningTick += 1
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.recordBannerToken == token else { return }
+            self.recordBanner = nil
+        }
+    }
+
+    private func considerPlaceName(force: Bool = false) {
+        guard !recordPlaceEdited else { return }
+        guard let position = navigationReading.position ?? reading.position, position.isPlottable else { return }
+        if !force,
+           let lastLatitude = lastGeocodedLatitude,
+           let lastLongitude = lastGeocodedLongitude,
+           abs(lastLatitude - position.latitudeDegrees) < 0.01,
+           abs(lastLongitude - position.longitudeDegrees) < 0.01 {
+            return
+        }
+        lastGeocodedLatitude = position.latitudeDegrees
+        lastGeocodedLongitude = position.longitudeDegrees
+        let latitude = position.latitudeDegrees
+        let longitude = position.longitudeDegrees
+        geocodeTask?.cancel()
+        geocodeTask = Task { [weak self] in
+            let name = await PlaceGeocoder.locality(latitude: latitude, longitude: longitude)
+            guard !Task.isCancelled else { return }
+            DispatchQueue.main.async {
+                guard let self, !self.recordPlaceEdited else { return }
+                guard let name, !name.isEmpty else { return }
+                self.recordPlace = name
+                UserDefaults.standard.set(name, forKey: "survey.recordPlace")
+            }
         }
     }
 
@@ -2082,13 +2723,15 @@ final class FieldModel: ObservableObject {
 
     func cancelBookEnclosure() {
         enclosingBook = false
-        tab = .export
+        tab = .survey
+        modeMenu = .survey
     }
 
     func confirmBookEnclosure() {
         bookQuery.bounds = viewport.bounds
         enclosingBook = false
-        tab = .export
+        tab = .survey
+        modeMenu = .survey
     }
 
     func clearBookFilters() {
@@ -2144,11 +2787,11 @@ final class FieldModel: ObservableObject {
         let zone = drawing.zone
         let projectName = drawing.project?.name
         let root = drawing.projectsRoot
-        let site = siteDirectory
         let known = controlPoints
         let journal = journal
         exportMessage = "書き出しています。"
         exportURL = nil
+        exportNotice = nil
         DispatchQueue.global(qos: .userInitiated).async {
             let observations = journal.allObservations()
             let siteBook = journal.bookEntries()
@@ -2170,34 +2813,173 @@ final class FieldModel: ObservableObject {
             }
             guard !entries.isEmpty else {
                 DispatchQueue.main.async {
-                    self.exportMessage = "絞り込みに合う点がありません。"
-                    self.exportURL = nil
+                    self.showExportNotice("絞り込みに合う点がありません。", fileURL: nil)
                 }
                 return
             }
             let bytes = CoordinateDelivery.data(entries, format: format, zone: zone)
             do {
-                let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
+                let folder = try Self.deliveryFolder(projectName: projectName, root: root)
                 let url = folder.appendingPathComponent(format.filename)
                 try bytes.write(to: url, options: .atomic)
                 DispatchQueue.main.async {
-                    self.exportURL = url
-                    self.exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
+                    self.showExportNotice("\(format.label)を \(entries.count) 点、\(format.filename) に書きました。", fileURL: url)
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.exportURL = nil
-                    self.exportMessage = "書き出せませんでした。"
+                    self.showExportNotice("書き出せませんでした。", fileURL: nil)
                 }
             }
         }
     }
 
-    private static func deliveryFolder(projectName: String?, root: URL, site: URL) throws -> URL {
+    func writeExport(name: String, body: String) {
+        let projectName = drawing.project?.name
+        let root = drawing.projectsRoot
+        do {
+            let folder = try Self.deliveryFolder(projectName: projectName, root: root)
+            let url = folder.appendingPathComponent(name)
+            try Data(body.utf8).write(to: url, options: .atomic)
+            showExportNotice(name, fileURL: url)
+        } catch {
+            showExportNotice("書き出せませんでした。", fileURL: nil)
+        }
+    }
+
+    func showExportNotice(_ text: String, fileURL: URL?) {
+        exportMessage = text
+        exportURL = fileURL
+        let token = UUID()
+        exportNoticeToken = token
+        exportNotice = ExportNotice(text: text, fileURL: fileURL)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.exportNoticeToken == token else { return }
+            self.exportNotice = nil
+        }
+    }
+
+    func dismissExportNotice() {
+        exportNotice = nil
+    }
+
+    func exportDrawingTransform() {
+        writeTransform(name: "変換.txt")
+    }
+
+    func exportAlignedDrawing() {
+        writeTransform(name: "合わせた図面.txt")
+    }
+
+    func exportArbitraryPoints() {
+        let points = drawing.fieldPoints.filter { $0.origin == .arbitrary }
+        guard !points.isEmpty else {
+            showExportNotice("任意点がありません。", fileURL: nil)
+            return
+        }
+        var lines = ["name,X,Y,h"]
+        for point in points {
+            let height = point.designHeightMeters.map(FieldPoint.meters) ?? ""
+            lines.append("\(Self.csv(point.name)),\(FieldPoint.meters(point.northingMeters)),\(FieldPoint.meters(point.eastingMeters)),\(height)")
+        }
+        writeExport(name: "任意点.csv", body: lines.joined(separator: "\n"))
+    }
+
+    func exportRecordedPoints() {
+        guard !recordPins.isEmpty else {
+            exportDelivery(.csv)
+            return
+        }
+        var lines = ["name,lat,lon"]
+        for pin in recordPins {
+            lines.append("\(Self.csv(pin.name)),\(pin.latitude),\(pin.longitude)")
+        }
+        writeExport(name: "記録点.csv", body: lines.joined(separator: "\n"))
+    }
+
+    func exportObservationLog() {
+        writeObservations(journal.allObservations(), name: "観測記録.csv", empty: "観測がありません。")
+    }
+
+    func exportStakeoutResults() {
+        writeObservations(
+            journal.allObservations().filter { $0.workID == "stakeout" },
+            name: "丁張.csv",
+            empty: "丁張の記録がありません。"
+        )
+    }
+
+    func exportCutFill() {
+        var lines = ["name,FH,標高,diff,word"]
+        var count = 0
+        for point in drawing.fieldPoints {
+            let fill = CutFill.make(formation: point.formationHeightMeters, ground: point.groundLevelMeters)
+            guard fill.formationMeters != nil || fill.groundMeters != nil else { continue }
+            count += 1
+            let formation = fill.formationMeters.map(FieldPoint.meters) ?? ""
+            let ground = fill.groundMeters.map(FieldPoint.meters) ?? ""
+            lines.append("\(Self.csv(point.name)),\(formation),\(ground),\(fill.differenceText ?? ""),\(fill.word ?? "")")
+        }
+        guard count > 0 else {
+            showExportNotice("切盛がありません。", fileURL: nil)
+            return
+        }
+        writeExport(name: "切盛.csv", body: lines.joined(separator: "\n"))
+    }
+
+    private func writeTransform(name: String) {
+        guard let transform = drawing.activeTransform else {
+            showExportNotice("合わせがありません。", fileURL: nil)
+            return
+        }
+        let saved = drawing.alignments
+            .filter { $0.drawingFileName == drawing.fileName }
+            .max { $0.createdAt < $1.createdAt }
+        let rms = drawing.fit?.rmsMeters ?? saved?.rmsMeters
+        var lines = [
+            "系 \(drawing.zone)",
+            "縮尺 \(Self.plain(transform.scale))",
+            "回転 \(Self.plain(transform.rotationDegrees))",
+            "東 \(Self.plain(transform.translationEasting))",
+            "北 \(Self.plain(transform.translationNorthing))"
+        ]
+        if let rms {
+            lines.append("残差 \(Self.plain(rms))")
+        }
+        if let file = drawing.fileName {
+            lines.append(file)
+        }
+        writeExport(name: name, body: lines.joined(separator: "\n"))
+    }
+
+    private func writeObservations(_ rows: [FieldObservation], name: String, empty: String) {
+        guard !rows.isEmpty else {
+            showExportNotice(empty, fileURL: nil)
+            return
+        }
+        var lines = ["name,work,lat,lon,標高,楕円体高,ジオイド"]
+        for item in rows {
+            let entry = CoordinateBookIndex.entry(from: item)
+            let orthometric = entry.orthometricHeightMeters.map(Self.plain) ?? ""
+            let ellipsoidal = entry.ellipsoidalHeightMeters.map(Self.plain) ?? ""
+            lines.append("\(Self.csv(item.name)),\(item.workID),\(item.captured.latitudeDegrees),\(item.captured.longitudeDegrees),\(orthometric),\(ellipsoidal),\(entry.geoidModel ?? "")")
+        }
+        writeExport(name: name, body: lines.joined(separator: "\n"))
+    }
+
+    private static func csv(_ value: String) -> String {
+        value.replacingOccurrences(of: ",", with: " ").replacingOccurrences(of: "\n", with: " ")
+    }
+
+    private static func plain(_ value: Double) -> String {
+        String(format: "%.4f", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
+    private static func deliveryFolder(projectName: String?, root: URL) throws -> URL {
         if let projectName {
             return try ProjectStore.exportDirectory(projectName: projectName, at: root)
         }
-        let folder = site.appendingPathComponent("出す", isDirectory: true)
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(ProjectStore.exportFolderName, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
     }
@@ -2259,6 +3041,119 @@ final class FieldModel: ObservableObject {
         gnss.choose(id)
     }
 
+    func applyExternalReceiver() {
+        if NTRIPSettings.load().enabled {
+            external.start()
+            external.applySettings()
+        } else {
+            external.stop()
+            receiverStatus = "未接続"
+        }
+    }
+
+    func scanReceivers() {
+        external.scan()
+    }
+
+    func connectReceiver(_ id: String) {
+        external.connect(id)
+    }
+
+    func noteReceiverChoice(_ choice: GNSSChoice) {
+        if !receiverChoices.contains(where: { $0.id == choice.id }) {
+            receiverChoices.append(choice)
+        }
+    }
+
+    func noteReceiverLink(_ text: String) {
+        receiverStatus = text
+    }
+
+    func noteReceiverFirmware(_ text: String) {
+        receiverFirmware = text
+    }
+
+    func noteRTCM(_ line: String) {
+        rtcmLine = line
+    }
+
+    func noteReceiver(_ position: GeodeticPosition) {
+        radioReading = PositionReading(position: position, availability: .available)
+        radioAt = Date()
+        let age = position.correctionAgeSeconds.map { "補正\(Int($0.rounded()))秒" } ?? "補正 —"
+        let sats = position.satelliteCount.map { "衛星\($0)" } ?? "衛星 —"
+        receiverStatus = "\(position.solutionLabel) \(age) \(sats)"
+        publishExternalChoice()
+    }
+
+    func noteCorrectionData() {
+        correctionAt = Date()
+        publishExternalChoice()
+    }
+
+    func receiverLost() {
+        radioReading = nil
+        radioAt = nil
+        receiverStatus = "受信機が切れました"
+        publishExternalChoice()
+    }
+
+    func correctionsLost() {
+        correctionAt = nil
+        publishExternalChoice()
+    }
+
+    func upstreamGGA(at date: Date = Date()) -> String? {
+        let position = radioReading?.position ?? phoneReading.position ?? reading.position
+        guard let position, position.isPlottable else { return nil }
+        return NMEA.gga(
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            quality: 1,
+            satellites: position.satelliteCount ?? 8,
+            hdop: position.pdop ?? 1,
+            orthometricMeters: position.meanSeaLevelMeters,
+            geoidSeparationMeters: nil,
+            ageSeconds: nil,
+            station: "",
+            at: date
+        )
+    }
+
+    private func notePhone(_ reading: PositionReading) {
+        phoneReading = reading
+        capturePhoneAverage()
+        publishExternalChoice()
+    }
+
+    private func publishExternalChoice(now: Date = Date()) {
+        let choice = ExternalPosition.choose(
+            iphone: phoneReading,
+            receiver: radioReading,
+            receiverAt: radioAt,
+            correctionAt: correctionAt,
+            now: now,
+            previous: positionTier
+        )
+        if let notice = choice.notice {
+            showGNSSNotice(notice)
+        }
+        let changed = choice.reading != reading || positionTier != choice.tier
+        positionTier = choice.tier
+        guard changed else { return }
+        apply(choice.reading)
+    }
+
+    private func showGNSSNotice(_ text: String) {
+        let token = UUID()
+        gnssNoticeToken = token
+        gnssNotice = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+            guard let self, self.gnssNoticeToken == token else { return }
+            self.gnssNotice = nil
+        }
+    }
+
     private func apply(_ reading: PositionReading) {
         self.reading = reading
         if let position = reading.position {
@@ -2297,6 +3192,11 @@ final class FieldModel: ObservableObject {
         }
         trackIncidents()
         refreshVisibleControlPoints()
+        considerPlaceName()
+        refreshGeoid2024()
+        if tab == .map {
+            refreshTerrainElevation()
+        }
         guard followUser, let position = navigationReading.position, position.isPlottable else { return }
         viewport = camera.update(for: position)
     }
@@ -2726,6 +3626,161 @@ final class FieldModel: ObservableObject {
                 deadReckon = track
                 refreshBridge()
             }
+        }
+    }
+
+    func setAverageSpan(_ span: PhoneAverageSpan) {
+        averageSpan = span
+        UserDefaults.standard.set(span.rawValue, forKey: "survey.averageSpan")
+    }
+
+    func beginPhoneAverage(_ purpose: PhoneAveragePurpose) {
+        if case .knownPoint = purpose, drawing.project == nil {
+            showRecordBanner(RecordBanner(text: "現場を選んでください", folderURL: nil), success: false)
+            return
+        }
+        phoneRun = PhoneAverageRun(startedAt: Date(), limit: averageSpan.seconds, purpose: purpose)
+        phoneClock = Date()
+        showsPhoneAverage = false
+        showsKnownShift = false
+        modeMenu = nil
+        trackPhoneClock(true)
+    }
+
+    func stopPhoneAverage() {
+        finishPhoneAverage()
+    }
+
+    func setKnownShiftEnabled(_ enabled: Bool) {
+        guard var shift = knownShift, let project = drawing.project else { return }
+        shift.enabled = enabled
+        shift.projectID = project.id
+        knownShift = shift
+        try? KnownShiftFile.save(shift, projectName: project.name, root: drawing.projectsRoot)
+        trackPhoneClock(enabled || phoneRun != nil)
+    }
+
+    func loadKnownShift() {
+        guard let project = drawing.project else {
+            knownShift = nil
+            trackPhoneClock(phoneRun != nil)
+            return
+        }
+        var loaded = KnownShiftFile.load(projectName: project.name, root: drawing.projectsRoot)
+        loaded?.projectID = project.id
+        knownShift = loaded
+        trackPhoneClock(loaded?.enabled == true || phoneRun != nil)
+    }
+
+    private func preparedPhonePoint(_ position: GeodeticPosition, at now: Date = Date()) -> (position: GeodeticPosition, stamp: KnownShiftStamp?) {
+        guard let knownShift, knownShift.projectID == drawing.project?.id,
+              let applied = knownShift.applied(to: position, at: now) else {
+            return (position, nil)
+        }
+        return (applied.position, applied.stamp)
+    }
+
+    private func capturePhoneAverage() {
+        guard var run = phoneRun, let position = phoneReading.position, position.isPlottable else { return }
+        let condition = stamped(
+            position: position,
+            stage: .iphone,
+            durationSeconds: nil,
+            epochCount: nil,
+            stature: stature,
+            sight: liveSight
+        )
+        let sample = PhoneFixSample(
+            latitudeDegrees: position.latitudeDegrees,
+            longitudeDegrees: position.longitudeDegrees,
+            ellipsoidalHeightMeters: position.ellipsoidalHeightMeters,
+            orthometricHeightMeters: condition.orthometricHeightMeters,
+            horizontalAccuracyMeters: position.horizontalAccuracyMeters,
+            verticalAccuracyMeters: position.verticalAccuracyMeters,
+            timestamp: position.timestamp
+        )
+        run = run.adding(sample)
+        phoneRun = run
+        if run.isFinished(at: Date()) {
+            finishPhoneAverage()
+        }
+    }
+
+    private func tickPhoneAccuracy() {
+        let now = Date()
+        phoneClock = now
+        guard let run = phoneRun else {
+            if knownShift?.enabled != true { trackPhoneClock(false) }
+            return
+        }
+        if run.isFinished(at: now) {
+            finishPhoneAverage()
+        }
+    }
+
+    private func finishPhoneAverage() {
+        guard let run = phoneRun else { return }
+        phoneRun = nil
+        trackPhoneClock(knownShift?.enabled == true)
+        let ended = Date()
+        guard let result = PhoneAverage.summarize(run.samples, startedAt: run.startedAt, endedAt: ended) else {
+            showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
+            return
+        }
+        switch run.purpose {
+        case .record:
+            commitAverage(result)
+        case .knownPoint(let anchor):
+            installKnownShift(anchor, mean: result, at: ended)
+        }
+    }
+
+    private func commitAverage(_ result: PhoneAverageResult) {
+        writeRecord(averagedPosition(result), average: result.stamp)
+    }
+
+    private func averagedPosition(_ result: PhoneAverageResult) -> GeodeticPosition {
+        let template = phoneReading.position
+        return GeodeticPosition(
+            latitudeDegrees: result.latitudeDegrees,
+            longitudeDegrees: result.longitudeDegrees,
+            ellipsoidalHeightMeters: result.ellipsoidalHeightMeters,
+            horizontalAccuracyMeters: result.meanHorizontalAccuracyMeters,
+            verticalAccuracyMeters: template?.verticalAccuracyMeters,
+            timestamp: Date(),
+            stage: .iphone,
+            fixQuality: .standalone,
+            receiver: .iphoneGPS,
+            satelliteCount: template?.satelliteCount,
+            pdop: template?.pdop
+        )
+    }
+
+    private func installKnownShift(_ anchor: KnownAnchor, mean: PhoneAverageResult, at date: Date) {
+        guard let project = drawing.project else {
+            showRecordBanner(RecordBanner(text: "現場を選んでください", folderURL: nil), success: false)
+            return
+        }
+        guard var shift = KnownPointShift.calibrate(projectID: project.id, anchor: anchor, mean: mean, at: date) else {
+            showRecordBanner(RecordBanner(text: "位置なし", folderURL: nil), success: false)
+            return
+        }
+        shift.projectID = project.id
+        knownShift = shift
+        try? KnownShiftFile.save(shift, projectName: project.name, root: drawing.projectsRoot)
+        trackPhoneClock(true)
+        showRecordBanner(RecordBanner(text: "\(shift.sourceName)に合わせました \(shift.deltaText)", folderURL: nil), success: true)
+    }
+
+    private func trackPhoneClock(_ needed: Bool) {
+        if !needed {
+            phoneAccuracyTimer?.invalidate()
+            phoneAccuracyTimer = nil
+            return
+        }
+        guard phoneAccuracyTimer == nil else { return }
+        phoneAccuracyTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.tickPhoneAccuracy()
         }
     }
 

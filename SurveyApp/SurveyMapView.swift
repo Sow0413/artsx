@@ -10,7 +10,7 @@ struct SurveyMapView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> MKMapView {
-        let map = MKMapView(frame: .zero)
+        let map = SurveyMapCanvas(frame: .zero)
         map.delegate = context.coordinator
         map.showsUserLocation = false
         map.pointOfInterestFilter = .excludingAll
@@ -19,9 +19,19 @@ struct SurveyMapView: UIViewRepresentable {
         map.isScrollEnabled = true
         map.isRotateEnabled = true
         map.showsTraffic = false
+        let configuration = MKStandardMapConfiguration(elevationStyle: .flat, emphasisStyle: .muted)
+        configuration.pointOfInterestFilter = .excludingAll
+        map.preferredConfiguration = configuration
         map.backgroundColor = SurveyUIColor.mapBackdrop
+        map.onBounds = { [weak coordinator = context.coordinator] map in
+            coordinator?.noteBounds(of: map)
+        }
         context.coordinator.attach(field: field, map: map)
         return map
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: MKMapView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions()
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
@@ -36,23 +46,45 @@ struct SurveyMapView: UIViewRepresentable {
             viewport: field.viewport,
             followUser: field.followUser,
             tone: field.badge.tone,
-            offlineRevision: field.offlineRevision
+            offlineRevision: field.offlineRevision,
+            headingUp: field.mapHeadingUp,
+            headingToken: field.mapHeadingToken
         )
         context.coordinator.syncControls(
             on: map,
             points: field.visibleControlPoints,
             selectedID: field.selectedControlPointID
         )
+        let showLines = field.mapCadOn && field.drawing.isGeoreferenced
         context.coordinator.syncDrawing(
             on: map,
-            paths: field.drawing.mapPaths,
-            revision: field.drawing.mapRevision
+            paths: showLines ? field.drawing.mapPaths : [],
+            revision: field.drawing.mapRevision,
+            visible: showLines,
+            opacity: field.mapCadOpacity
         )
+        context.coordinator.syncFieldPoints(
+            on: map,
+            points: field.mapCadOn ? field.drawing.fieldPoints : []
+        )
+        context.coordinator.setFieldPointSelect { id in
+            if field.drawing.chooseFieldPoint(id) {
+                field.tab = .drawing
+            }
+        }
+        context.coordinator.setArbitrary(field.drawing.placingArbitrary) { latitude, longitude in
+            field.drawing.placeOnMap(latitude: latitude, longitude: longitude)
+            field.tab = .drawing
+        }
+        context.coordinator.setHere { latitude, longitude in
+            field.beginManualPoint(name: "ここ", coordinate: ManualPoint.decimalPair(latitude: latitude, longitude: longitude))
+        }
         context.coordinator.syncReach(on: map, field: field)
         context.coordinator.syncCrew(on: map, field: field)
         context.coordinator.syncAid(on: map, field: field)
         context.coordinator.syncDisaster(on: map, field: field)
         context.coordinator.syncHeat(on: map, field: field)
+        context.coordinator.syncRecords(on: map, pins: field.recordPins)
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
         }
@@ -77,6 +109,8 @@ struct SurveyMapView: UIViewRepresentable {
         private var wasFollowing = true
         private var drawingLines: [MKPolyline] = []
         private var drawingRevision = -1
+        private var drawingShown = false
+        private var drawingOpacity: CGFloat = 0.85
         private var reachOverlays: [MKOverlay] = []
         private var reachKey = ""
         private var crewOverlays: [MKOverlay] = []
@@ -91,6 +125,21 @@ struct SurveyMapView: UIViewRepresentable {
         private var heatKey = ""
         private var mapPick = false
         private var onMapTap: (Double, Double) -> Void = { _, _ in }
+        private var recordAnnotations: [RecordPinAnnotation] = []
+        private var recordKey = ""
+        private var fieldAnnotations: [FieldPointAnnotation] = []
+        private var fieldKey = ""
+        private var onSelectFieldPoint: (String) -> Void = { _ in }
+        private var arbitraryPick = false
+        private var onArbitrary: (Double, Double) -> Void = { _, _ in }
+        private var onHere: (Double, Double) -> Void = { _, _ in }
+        private var pendingViewport: MapViewport?
+        private var pendingFollow = true
+        private var pendingReading: PositionReading?
+        private var pendingHeadingUp = false
+        private var pendingHeadingToken = 0
+        private var appliedHeadingToken = -1
+        private var headingLockUntil = Date.distantPast
 
         func attach(field: FieldModel, map: MKMapView) {
             store = field.tiles
@@ -108,7 +157,23 @@ struct SurveyMapView: UIViewRepresentable {
                 let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
                 tap.cancelsTouchesInView = false
                 map.addGestureRecognizer(tap)
+                let press = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+                press.minimumPressDuration = 0.45
+                map.addGestureRecognizer(press)
             }
+        }
+
+        func setFieldPointSelect(_ handler: @escaping (String) -> Void) {
+            onSelectFieldPoint = handler
+        }
+
+        func setArbitrary(_ enabled: Bool, handler: @escaping (Double, Double) -> Void) {
+            arbitraryPick = enabled
+            onArbitrary = handler
+        }
+
+        func setHere(_ handler: @escaping (Double, Double) -> Void) {
+            onHere = handler
         }
 
         func setMapPick(_ enabled: Bool, handler: @escaping (Double, Double) -> Void) {
@@ -342,21 +407,30 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }
 
-        func syncDrawing(on map: MKMapView, paths: [GeographicPath], revision: Int) {
-            guard revision != drawingRevision else { return }
-            drawingRevision = revision
-            if !drawingLines.isEmpty {
-                map.removeOverlays(drawingLines)
-            }
-            drawingLines = paths.compactMap { path in
-                var coordinates = path.coordinates.map {
-                    CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
+        func syncDrawing(on map: MKMapView, paths: [GeographicPath], revision: Int, visible: Bool, opacity: Double) {
+            drawingOpacity = CGFloat(min(1, max(0.15, opacity)))
+            if revision != drawingRevision || visible != drawingShown {
+                drawingRevision = revision
+                drawingShown = visible
+                if !drawingLines.isEmpty {
+                    map.removeOverlays(drawingLines)
                 }
-                guard coordinates.count >= 2 else { return nil }
-                return MKPolyline(coordinates: &coordinates, count: coordinates.count)
+                drawingLines = []
+                if visible {
+                    drawingLines = paths.compactMap { path in
+                        var coordinates = path.coordinates.map {
+                            CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
+                        }
+                        guard coordinates.count >= 2 else { return nil }
+                        return MKPolyline(coordinates: &coordinates, count: coordinates.count)
+                    }
+                    if !drawingLines.isEmpty {
+                        map.addOverlays(drawingLines, level: .aboveLabels)
+                    }
+                }
             }
-            if !drawingLines.isEmpty {
-                map.addOverlays(drawingLines, level: .aboveLabels)
+            for line in drawingLines {
+                (map.renderer(for: line) as? MKPolylineRenderer)?.alpha = drawingOpacity
             }
         }
 
@@ -366,13 +440,45 @@ struct SurveyMapView: UIViewRepresentable {
             onMapTap(coordinate.latitude, coordinate.longitude)
         }
 
+        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began, let map = gesture.view as? MKMapView else { return }
+            let coordinate = map.convert(gesture.location(in: map), toCoordinateFrom: map)
+            if arbitraryPick {
+                onArbitrary(coordinate.latitude, coordinate.longitude)
+            } else {
+                onHere(coordinate.latitude, coordinate.longitude)
+            }
+        }
+
+        func syncFieldPoints(on map: MKMapView, points: [FieldPoint]) {
+            let key = points.map { "\($0.id):\($0.latitudeDegrees):\($0.longitudeDegrees):\($0.mapLabel)" }.joined(separator: "|")
+            if key == fieldKey { return }
+            if !fieldAnnotations.isEmpty {
+                map.removeAnnotations(fieldAnnotations)
+            }
+            fieldAnnotations = points.map { point in
+                FieldPointAnnotation(
+                    pointID: point.id,
+                    coordinate: CLLocationCoordinate2D(latitude: point.latitudeDegrees, longitude: point.longitudeDegrees),
+                    title: point.mapLabel,
+                    subtitle: "X \(FieldPoint.meters(point.northingMeters)) Y \(FieldPoint.meters(point.eastingMeters))"
+                )
+            }
+            fieldKey = key
+            if !fieldAnnotations.isEmpty {
+                map.addAnnotations(fieldAnnotations)
+            }
+        }
+
         func update(
             map: MKMapView,
             reading: PositionReading,
             viewport: MapViewport,
             followUser: Bool,
             tone: AccuracyTone,
-            offlineRevision: Int
+            offlineRevision: Int,
+            headingUp: Bool,
+            headingToken: Int
         ) {
             self.tone = tone
             if offlineRevision != self.offlineRevision {
@@ -381,11 +487,27 @@ struct SurveyMapView: UIViewRepresentable {
             }
             syncAnnotation(on: map, reading: reading)
             syncCircle(on: map, reading: reading, tone: tone)
+            pendingViewport = viewport
+            pendingFollow = followUser
+            pendingReading = reading
+            pendingHeadingUp = headingUp
+            pendingHeadingToken = headingToken
             if followUser, !wasFollowing {
                 appliedViewport = nil
             }
             wasFollowing = followUser
-            guard followUser, appliedViewport != viewport else { return }
+            let moved = applyRegionIfNeeded(on: map)
+            applyHeading(on: map, regionJustSet: moved)
+        }
+
+        func noteBounds(of map: MKMapView) {
+            let moved = applyRegionIfNeeded(on: map)
+            applyHeading(on: map, regionJustSet: moved)
+        }
+
+        private func applyRegionIfNeeded(on map: MKMapView) -> Bool {
+            guard map.bounds.width > 1, map.bounds.height > 1 else { return false }
+            guard pendingFollow, let viewport = pendingViewport, appliedViewport != viewport else { return false }
             appliedViewport = viewport
             let region = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: viewport.centerLatitude, longitude: viewport.centerLongitude),
@@ -395,7 +517,59 @@ struct SurveyMapView: UIViewRepresentable {
             map.setRegion(region, animated: didSetInitialRegion)
             applyingProgrammaticRegion = false
             didSetInitialRegion = true
+            headingLockUntil = Date().addingTimeInterval(0.7)
             reportVisible(map)
+            if let tileOverlay, let renderer = map.renderer(for: tileOverlay) as? MKTileOverlayRenderer {
+                renderer.reloadData()
+            }
+            return true
+        }
+
+        /// setRegion は方位を北に戻す。追随中の進行方向は、その直後にもう一度載せる。
+        private func applyHeading(on map: MKMapView, regionJustSet: Bool) {
+            guard map.bounds.width > 1, map.camera.centerCoordinateDistance > 1 else { return }
+            let tokenChanged = appliedHeadingToken != pendingHeadingToken
+            guard let target = desiredHeading() else { return }
+            if !pendingHeadingUp, !tokenChanged, !pendingFollow {
+                return
+            }
+            if pendingHeadingUp, !tokenChanged, !pendingFollow, !regionJustSet {
+                return
+            }
+            let delta = Self.headingDelta(map.camera.heading, target)
+            if delta <= 1 {
+                appliedHeadingToken = pendingHeadingToken
+                return
+            }
+            if !tokenChanged, !regionJustSet, delta <= 4 {
+                return
+            }
+            let camera = MKMapCamera()
+            camera.centerCoordinate = map.camera.centerCoordinate
+            camera.centerCoordinateDistance = map.camera.centerCoordinateDistance
+            camera.heading = target
+            camera.pitch = 0
+            let animate = !regionJustSet && !tokenChanged && didSetInitialRegion
+            applyingProgrammaticRegion = true
+            map.setCamera(camera, animated: animate)
+            applyingProgrammaticRegion = false
+            appliedHeadingToken = pendingHeadingToken
+        }
+
+        private func desiredHeading() -> CLLocationDirection? {
+            guard pendingHeadingUp else { return 0 }
+            guard let position = pendingReading?.position else { return nil }
+            for candidate in [position.headingDegrees, position.courseDegrees] {
+                if let candidate, candidate.isFinite, (0...360).contains(candidate) {
+                    return candidate
+                }
+            }
+            return nil
+        }
+
+        private static func headingDelta(_ current: CLLocationDirection, _ target: CLLocationDirection) -> CLLocationDirection {
+            let raw = abs(current - target).truncatingRemainder(dividingBy: 360)
+            return min(raw, 360 - raw)
         }
 
         func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
@@ -406,6 +580,8 @@ struct SurveyMapView: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
             reportVisible(mapView)
+            guard Date() < headingLockUntil else { return }
+            applyHeading(on: mapView, regionJustSet: true)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -439,10 +615,11 @@ struct SurveyMapView: UIViewRepresentable {
                 renderer.lineWidth = 3
                 return renderer
             }
-            if let line = overlay as? MKPolyline {
+            if let line = overlay as? MKPolyline, drawingLines.contains(where: { $0 === line }) {
                 let renderer = MKPolylineRenderer(polyline: line)
                 renderer.strokeColor = SurveyUIColor.ink
-                renderer.lineWidth = SurveyColor.stroke
+                renderer.lineWidth = 2
+                renderer.alpha = drawingOpacity
                 return renderer
             }
             if let circle = overlay as? MKCircle {
@@ -463,9 +640,15 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
-            guard let point = view.annotation as? ControlPointAnnotation else { return }
-            onSelectControlPoint(point.pointID)
-            mapView.deselectAnnotation(point, animated: false)
+            if let point = view.annotation as? ControlPointAnnotation {
+                onSelectControlPoint(point.pointID)
+                mapView.deselectAnnotation(point, animated: false)
+                return
+            }
+            if let point = view.annotation as? FieldPointAnnotation {
+                onSelectFieldPoint(point.pointID)
+                mapView.deselectAnnotation(point, animated: false)
+            }
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -529,6 +712,24 @@ struct SurveyMapView: UIViewRepresentable {
                 view.canShowCallout = true
                 return view
             }
+            if let point = annotation as? FieldPointAnnotation {
+                let marker = mapView.dequeueReusableAnnotationView(withIdentifier: "field-point") as? MKMarkerAnnotationView
+                    ?? MKMarkerAnnotationView(annotation: point, reuseIdentifier: "field-point")
+                marker.annotation = point
+                marker.markerTintColor = SurveyUIColor.blue
+                marker.glyphText = nil
+                marker.titleVisibility = .visible
+                marker.canShowCallout = true
+                return marker
+            }
+            if let pin = annotation as? RecordPinAnnotation {
+                let marker = mapView.dequeueReusableAnnotationView(withIdentifier: RecordPinView.reuseID) as? RecordPinView
+                    ?? RecordPinView(annotation: pin, reuseIdentifier: RecordPinView.reuseID)
+                marker.annotation = pin
+                marker.setNumber(pin.number)
+                marker.canShowCallout = true
+                return marker
+            }
             guard annotation is UserDotAnnotation else { return nil }
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: "user-dot")
                 ?? MKAnnotationView(annotation: annotation, reuseIdentifier: "user-dot")
@@ -546,7 +747,8 @@ struct SurveyMapView: UIViewRepresentable {
             }
             let overlay = GSITileOverlay(store: store)
             tileOverlay = overlay
-            map.addOverlay(overlay, level: .aboveLabels)
+            // ラベルより上に置くと、地物を消したあとにタイルが合成されず画面が黒のままになる。
+            map.addOverlay(overlay, level: .aboveRoads)
             if let circle {
                 map.removeOverlay(circle)
                 map.addOverlay(circle, level: .aboveLabels)
@@ -595,6 +797,25 @@ struct SurveyMapView: UIViewRepresentable {
             }
             heatKey = key
             map.addOverlays(heatOverlays, level: .aboveLabels)
+        }
+
+        func syncRecords(on map: MKMapView, pins: [FieldRecordPin]) {
+            let key = pins.map { "\($0.number):\($0.latitude):\($0.longitude)" }.joined(separator: "|")
+            if key == recordKey { return }
+            if !recordAnnotations.isEmpty {
+                map.removeAnnotations(recordAnnotations)
+            }
+            recordAnnotations = pins.map { pin in
+                RecordPinAnnotation(
+                    number: pin.number,
+                    coordinate: CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude),
+                    title: pin.caption
+                )
+            }
+            recordKey = key
+            if !recordAnnotations.isEmpty {
+                map.addAnnotations(recordAnnotations)
+            }
         }
 
         private func syncAnnotation(on map: MKMapView, reading: PositionReading) {
@@ -850,11 +1071,88 @@ final class CrewAnnotation: NSObject, MKAnnotation {
     }
 }
 
+final class FieldPointAnnotation: NSObject, MKAnnotation {
+    let pointID: String
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    let title: String?
+    let subtitle: String?
+
+    init(pointID: String, coordinate: CLLocationCoordinate2D, title: String, subtitle: String) {
+        self.pointID = pointID
+        self.coordinate = coordinate
+        self.title = title
+        self.subtitle = subtitle
+        super.init()
+    }
+}
+
+final class RecordPinAnnotation: NSObject, MKAnnotation {
+    let number: Int
+    dynamic var coordinate: CLLocationCoordinate2D
+    var title: String?
+
+    init(number: Int, coordinate: CLLocationCoordinate2D, title: String) {
+        self.number = number
+        self.coordinate = coordinate
+        self.title = title
+        super.init()
+    }
+}
+
+final class RecordPinView: MKAnnotationView {
+    static let reuseID = "record-pin"
+
+    func setNumber(_ number: Int) {
+        let side: CGFloat = 36
+        image = Self.badge("\(number)", side: side)
+        bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        centerOffset = .zero
+    }
+
+    private static func badge(_ text: String, side: CGFloat) -> UIImage {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
+        return renderer.image { _ in
+            let rect = CGRect(x: 1, y: 1, width: side - 2, height: side - 2)
+            UIColor.white.setFill()
+            UIColor.black.setStroke()
+            let path = UIBezierPath(ovalIn: rect)
+            path.lineWidth = 2
+            path.fill()
+            path.stroke()
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            let font = UIFont.systemFont(ofSize: text.count > 2 ? 11 : 15, weight: .heavy)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: UIColor.black,
+                .paragraphStyle: paragraph
+            ]
+            let size = (text as NSString).size(withAttributes: attributes)
+            let origin = CGPoint(x: (side - size.width) / 2, y: (side - size.height) / 2)
+            (text as NSString).draw(at: origin, withAttributes: attributes)
+        }
+    }
+}
+
 final class UserDotAnnotation: NSObject, MKAnnotation {
     @objc dynamic var coordinate: CLLocationCoordinate2D
 
     init(coordinate: CLLocationCoordinate2D) {
         self.coordinate = coordinate
         super.init()
+    }
+}
+
+/// 最初の update は bounds が 0 のことがある。サイズが付いてから領域を置く。
+final class SurveyMapCanvas: MKMapView {
+    var onBounds: ((MKMapView) -> Void)?
+    private var lastSize: CGSize = .zero
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let size = bounds.size
+        guard size.width > 1, size.height > 1, size != lastSize else { return }
+        lastSize = size
+        onBounds?(self)
     }
 }

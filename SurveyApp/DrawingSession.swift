@@ -8,6 +8,15 @@ enum DrawingPick: Equatable {
     case mapPoint
 }
 
+struct PendingIntake: Identifiable, Equatable {
+    var fileName: String
+    var kind: IntakeKind
+    var text: String
+    var columnCount: Int
+    var original: Data
+    var id: String { fileName }
+}
+
 struct DrawingCamera: Equatable {
     var centerX = 0.0
     var centerY = 0.0
@@ -16,9 +25,10 @@ struct DrawingCamera: Equatable {
     var fittedID: String?
 }
 
-/// 図面タブの状態。DXF の原本は設計フォルダに置き、合わせは別の版として足す。
+/// 図面タブの状態。原本は図面フォルダに置き、合わせは別の版として足す。
 final class DrawingSession: ObservableObject {
     @Published private(set) var projects: [SurveyProject] = []
+    @Published private(set) var trashed: [ProjectTrashItem] = []
     @Published private(set) var project: SurveyProject?
     @Published private(set) var document: DrawingDocument?
     @Published private(set) var fileName: String?
@@ -26,6 +36,7 @@ final class DrawingSession: ObservableObject {
     @Published var axis: DrawingAxis = .cadEastNorth
     @Published private(set) var zoneChoices: [Int] = Array(1...19)
     @Published private(set) var placementNote: String?
+    @Published private(set) var placementLooksLocal = false
     @Published private(set) var warning: ZoneWarning?
     @Published private(set) var suggestion: ZoneSuggestion?
     @Published private(set) var pairs: [AlignmentPair] = []
@@ -71,6 +82,17 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var weatherLabel = ""
     /// 図面の読込。解析が終わる前から、プロジェクト自体は使える。
     @Published private(set) var importProgress: WorkProgress?
+    @Published private(set) var fieldPoints: [FieldPoint] = []
+    @Published var pendingIntake: PendingIntake?
+    /// 座標の CSV か用紙。確認するまで点にはしない。
+    @Published var pointTable: PointTable?
+    @Published var twoPointMode = false
+    @Published var placingArbitrary = false
+    @Published var draftPoint: FieldPoint?
+    @Published var selectedPointID: String?
+    @Published private(set) var pdfData: Data?
+    @Published private(set) var stakeoutPointID: String?
+    private var twoPointDidSave = false
 
     var onProjectCommitted: (() -> Void)?
 
@@ -87,7 +109,16 @@ final class DrawingSession: ObservableObject {
 
     var activeTransform: Similarity2D? {
         if pairs.count >= 2 { return fit?.transform }
-        return alignments.first { $0.id == activeAlignmentID }?.transform
+        return appliedAlignment?.transform
+    }
+
+    private var appliedAlignment: AlignmentRecord? {
+        guard let fileName else { return nil }
+        let pool = alignments.filter { $0.drawingFileName == fileName }
+        if let activeAlignmentID, let match = pool.first(where: { $0.id == activeAlignmentID }) {
+            return match
+        }
+        return pool.max { $0.createdAt < $1.createdAt }
     }
 
     var accuracy: AlignmentAccuracy {
@@ -97,24 +128,92 @@ final class DrawingSession: ObservableObject {
     /// 2組以上の手合わせが優先。なければ、使っている合わせの札。cm は座標簿の札だけ。
     var stakeoutAccuracy: AlignmentAccuracy? {
         if pairs.count >= 2 { return AlignmentAccuracy.decide(pairs.map(\.kind)) }
-        if pairs.isEmpty {
-            return alignments.first { $0.id == activeAlignmentID }?.accuracyTag
-        }
+        if pairs.isEmpty { return appliedAlignment?.accuracyTag }
         return nil
     }
 
     var activeComposesAxis: Bool {
         if pairs.count >= 2 { return false }
-        return alignments.first { $0.id == activeAlignmentID }?.composesAxis ?? false
+        return appliedAlignment?.composesAxis ?? false
+    }
+
+    var hasMapOverlay: Bool { isGeoreferenced || !fieldPoints.isEmpty }
+
+    var canPlaceArbitrary: Bool { activeTransform != nil && document != nil }
+
+    var tolerance: AlignmentTolerance {
+        AlignmentTolerance.resolved(
+            millimeters: project?.alignToleranceMillimeters,
+            denominator: project?.alignToleranceDenominator
+        )
+    }
+
+    var spanCheck: AlignmentSpanCheck? {
+        AlignmentSpan.check(pairs: pairs, zone: zone, tolerance: tolerance)
+    }
+
+    var stakeoutPoint: FieldPoint? {
+        guard let stakeoutPointID else { return nil }
+        return fieldPoints.first { $0.id == stakeoutPointID }
+    }
+
+    var isGeoreferenced: Bool {
+        guard let document, !document.bounds.isEmpty else { return false }
+        let record = project?.drawings.first { $0.fileName == fileName }
+        let prefecture = record?.prefecture ?? project?.prefecture
+        return PlanePlacementChooser.isGeoreferenced(
+            midX: document.bounds.midX,
+            midY: document.bounds.midY,
+            zone: zone,
+            hasTransform: activeTransform != nil,
+            prefecture: prefecture
+        )
+    }
+
+    /// 公共座標は現場の系があるとき。手元の図面は 2点合わせが付いてから。
+    var showsDrawingMap: Bool {
+        guard let document, !document.bounds.isEmpty, isGeoreferenced else { return false }
+        if activeTransform != nil { return true }
+        return project?.zone != nil
     }
 
     func reload() {
+        ProjectStore.purgeTrash(at: projectsRoot)
         projects = (try? ProjectStore.list(at: projectsRoot)) ?? []
+        trashed = (try? ProjectStore.listTrash(at: projectsRoot)) ?? []
+        if let id = project?.id, let fresh = projects.first(where: { $0.id == id }) {
+            project = fresh
+        }
     }
 
-    func createProject(named rawName: String) {
+    func createProject(
+        named rawName: String,
+        place: String = "",
+        workDate: String = "",
+        prefecture: String? = nil,
+        area: String? = nil,
+        zone: Int? = nil,
+        manualZone: Bool = false
+    ) {
         do {
-            let created = try ProjectStore.create(name: rawName, at: projectsRoot)
+            var created = try ProjectStore.create(name: rawName, at: projectsRoot)
+            let trimmedPlace = place.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedDate = workDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedPlace.isEmpty { created.place = trimmedPlace }
+            if !trimmedDate.isEmpty { created.workDate = trimmedDate }
+            let prefectureName = prefecture.flatMap { PlaneZoneCatalog.named($0)?.name }
+            created.prefecture = prefectureName
+            created.area = prefectureName.flatMap { PlaneZoneCatalog.canonicalArea(prefecture: $0, area: area) }
+            if let zone, PlaneRectangular.zone(zone) != nil {
+                created.zone = zone
+                created.manualZone = manualZone
+            } else if let prefectureName, let decided = PlaneZoneCatalog.zone(prefecture: prefectureName, area: created.area) {
+                created.zone = decided
+                created.manualZone = false
+            }
+            if created.place != nil || created.workDate != nil || created.prefecture != nil || created.zone != nil {
+                try ProjectStore.save(created, at: projectsRoot)
+            }
             reload()
             select(created)
             message = "\(created.name) を作りました。"
@@ -125,9 +224,51 @@ final class DrawingSession: ObservableObject {
         }
     }
 
+    func renameProject(to rawName: String) {
+        guard let id = project?.id else { return }
+        renameProject(id: id, to: rawName)
+    }
+
+    func renameProject(id: String, to rawName: String) {
+        guard var current = storedProject(id) else { return }
+        let active = project?.id == id
+        do {
+            try ProjectStore.rename(&current, to: rawName, at: projectsRoot)
+            reload()
+            if active, let fresh = projects.first(where: { $0.id == id }) {
+                select(fresh)
+            }
+            message = nil
+        } catch let error as ProjectStoreError {
+            message = error.description
+        } catch {
+            message = "名前を変えられませんでした。"
+        }
+    }
+
+    func setProjectPlace(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        project?.place = trimmed.isEmpty ? nil : trimmed
+        persistProject()
+        onProjectCommitted?()
+    }
+
+    func setProjectDate(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        project?.workDate = trimmed.isEmpty ? nil : trimmed
+        persistProject()
+        onProjectCommitted?()
+        reload()
+    }
+
+    func openDrawing(named fileName: String) {
+        guard project?.drawings.contains(where: { $0.fileName == fileName }) == true else { return }
+        guard self.fileName != fileName else { return }
+        loadDrawing(named: fileName)
+    }
+
     func select(_ selected: SurveyProject) {
         loadGeneration += 1
-        let generation = loadGeneration
         project = selected
         zone = selected.zone ?? zone
         axis = selected.axis
@@ -136,15 +277,17 @@ final class DrawingSession: ObservableObject {
         fit = nil
         pending = nil
         inspection = nil
-        activeAlignmentID = alignments.last?.id
-        if let active = alignments.last {
-            pairs = active.pairs
-            lockScale = active.lockScale
-            zone = active.zone
-            axis = active.axis
-        }
+        activeAlignmentID = nil
         document = nil
         fileName = nil
+        pdfData = nil
+        draftPoint = nil
+        placingArbitrary = false
+        twoPointMode = false
+        selectedPointID = nil
+        stakeoutPointID = nil
+        pendingIntake = nil
+        fieldPoints = FieldPointStore.load(projectName: selected.name, at: projectsRoot)
         camera.fittedID = nil
         importProgress = nil
         applyCab(from: selected)
@@ -152,9 +295,28 @@ final class DrawingSession: ObservableObject {
         refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
         onProjectCommitted?()
         guard let drawing = selected.drawings.last else { return }
-        let drawingName = drawing.fileName
-        let projectName = selected.name
+        loadDrawing(named: drawing.fileName)
+    }
+
+    private func loadDrawing(named drawingName: String) {
+        guard let project else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
+        let projectName = project.name
         let root = projectsRoot
+        let ext = (drawingName as NSString).pathExtension.lowercased()
+        if ext == "pdf" {
+            document = nil
+            fileName = drawingName
+            pdfData = try? ProjectStore.originalDXF(fileName: drawingName, projectName: projectName, at: root)
+            importProgress = nil
+            camera.fittedID = nil
+            return
+        }
+        pdfData = nil
+        document = nil
+        fileName = nil
+        camera.fittedID = nil
         importProgress = WorkProgress(label: "図面を読んでいます", fraction: 0.05)
         DispatchQueue.global(qos: .userInitiated).async {
             let data: Data
@@ -169,7 +331,7 @@ final class DrawingSession: ObservableObject {
                 return
             }
             do {
-                let parsed = try DrawingImport.load(data: data, fileName: drawingName) { progress in
+                let parsed = try DrawingImport.load(data, fileName: drawingName) { progress in
                     DispatchQueue.main.async {
                         guard generation == self.loadGeneration else { return }
                         self.importProgress = progress
@@ -196,6 +358,26 @@ final class DrawingSession: ObservableObject {
         latitude: Double? = nil,
         longitude: Double? = nil
     ) {
+        guard project != nil else {
+            message = "先にプロジェクトを作ってください。"
+            return
+        }
+        switch FieldIntake.detect(data: data, fileName: rawName) {
+        case .drawing:
+            importDrawing(data: data, fileName: rawName)
+        case .pdf:
+            importPDF(data: data, fileName: rawName)
+        case .sima, .list:
+            importCoordinates(data: data, fileName: rawName, heightMap: nil)
+        case .unknown:
+            message = "図面、SIMA、座標のどれかにしてください。"
+        }
+    }
+
+    private func importDrawing(
+        data: Data,
+        fileName rawName: String
+    ) {
         guard let snapshot = project else {
             message = "先にプロジェクトを作ってください。"
             return
@@ -209,7 +391,7 @@ final class DrawingSession: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             var current = snapshot
             do {
-                let parsed = try DrawingImport.load(data: data, fileName: rawName) { progress in
+                let parsed = try DrawingImport.load(data, fileName: rawName) { progress in
                     DispatchQueue.main.async {
                         guard generation == self.loadGeneration else { return }
                         self.importProgress = progress
@@ -226,13 +408,13 @@ final class DrawingSession: ObservableObject {
                     codePage: parsed.codePage,
                     unsupported: parsed.unsupportedCounts
                 )
-                var note = ext == "sfc"
-                    ? "設計に \(stored) を置きました。公共座標として読みました。系を選ぶと地図に載ります。元の SFC は変えていません。"
-                    : "設計に \(stored) を置きました。元の DXF は変えていません。"
-                if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
-                if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
+                if let index = current.drawings.lastIndex(where: { $0.fileName == stored }) {
+                    current.drawings[index].prefecture = current.prefecture
+                    current.drawings[index].area = current.area
+                    current.drawings[index].zone = current.zone
+                    try ProjectStore.save(current, at: root)
+                }
                 let draft = current
-                let base = note
                 DispatchQueue.main.async {
                     guard generation == self.loadGeneration else { return }
                     self.project = draft
@@ -240,12 +422,10 @@ final class DrawingSession: ObservableObject {
                     if ext == "sfc" { self.axis = .cadEastNorth }
                     self.reload()
                     self.adopt(parsed, fileName: stored)
-                    self.refreshPlacement(latitude: latitude, longitude: longitude, overrideZone: ext == "sfc")
-                    if let placementNote = self.placementNote {
-                        self.message = [base, placementNote].joined(separator: " ")
-                    } else {
-                        self.message = base
-                    }
+                    self.refreshPlacement(latitude: nil, longitude: nil, overrideZone: ext == "sfc")
+                    let notice = self.importNotice()
+                    self.message = notice
+                    self.dismissMessage(notice, after: 4)
                 }
             } catch let error as DXFError {
                 self.failImport(generation, error.description)
@@ -259,47 +439,216 @@ final class DrawingSession: ObservableObject {
 
     func setPrefecture(_ raw: String?, latitude: Double?, longitude: Double?) {
         let name = raw.flatMap { PlaneZoneCatalog.named($0)?.name }
-        project?.prefecture = name
-        persistProject()
-        refreshPlacement(latitude: latitude, longitude: longitude, overrideZone: true)
+        let decided = name.flatMap { PlaneZoneCatalog.zone(prefecture: $0, area: nil) }
+        setProjectLocation(prefecture: name, area: nil, zone: decided, manual: false, latitude: latitude, longitude: longitude)
+    }
+
+    func setProjectLocation(
+        prefecture raw: String?,
+        area rawArea: String?,
+        zone number: Int?,
+        manual: Bool,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) {
+        guard let id = project?.id else { return }
+        setProjectLocation(id: id, prefecture: raw, area: rawArea, zone: number, manual: manual, latitude: latitude, longitude: longitude)
+    }
+
+    func setProjectLocation(
+        id: String,
+        prefecture raw: String?,
+        area rawArea: String?,
+        zone number: Int?,
+        manual: Bool,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) {
+        let name = raw.flatMap { PlaneZoneCatalog.named($0)?.name }
+        let canonical = name.flatMap { PlaneZoneCatalog.canonicalArea(prefecture: $0, area: rawArea) }
+        let active = project?.id == id
+        guard var current = storedProject(id) else { return }
+        current.prefecture = name
+        current.area = canonical
+        current.manualZone = manual
+        if let number, PlaneRectangular.zone(number) != nil {
+            current.zone = number
+        }
+        if active {
+            let openZone = fileName.flatMap { name in current.drawings.first { $0.fileName == name }?.zone }
+            project = current
+            if let number, PlaneRectangular.zone(number) != nil, openZone == nil {
+                setZone(number, manual: manual, touchDrawing: false)
+            } else {
+                persistProject()
+                reload()
+                refreshPlacement(latitude: latitude, longitude: longitude, overrideZone: false)
+            }
+            onProjectCommitted?()
+        } else {
+            try? ProjectStore.save(current, at: projectsRoot)
+            reload()
+        }
+    }
+
+    func setProjectDate(id: String, to raw: String) {
+        if project?.id == id {
+            setProjectDate(raw)
+            return
+        }
+        guard var current = storedProject(id) else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        current.workDate = trimmed.isEmpty ? nil : trimmed
+        try? ProjectStore.save(current, at: projectsRoot)
+        reload()
+    }
+
+    func renameDrawing(projectID: String, fileName: String, to raw: String) {
+        updateDrawing(projectID: projectID, fileName: fileName) { drawing in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            drawing.displayName = trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
+    func setDrawingLocation(
+        projectID: String,
+        fileName: String,
+        prefecture raw: String?,
+        area rawArea: String?,
+        zone number: Int?,
+        manual: Bool
+    ) {
+        let name = raw.flatMap { PlaneZoneCatalog.named($0)?.name }
+        let canonical = name.flatMap { PlaneZoneCatalog.canonicalArea(prefecture: $0, area: rawArea) }
+        updateDrawing(projectID: projectID, fileName: fileName) { drawing in
+            drawing.prefecture = name
+            drawing.area = canonical
+            drawing.zone = number
+            _ = manual
+        }
+        guard project?.id == projectID, self.fileName == fileName, let number, PlaneRectangular.zone(number) != nil else { return }
+        zone = number
+        refresh()
+        refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
+    }
+
+    func trashProject(id: String) {
+        guard let current = storedProject(id) else { return }
+        do {
+            _ = try ProjectStore.trashProject(current, at: projectsRoot)
+            if project?.id == id {
+                clearOpenDrawing()
+                project = nil
+            }
+            reload()
+            message = "\(current.name)をゴミ箱に入れました。"
+        } catch let error as ProjectStoreError {
+            message = error.description
+        } catch {
+            message = "現場をゴミ箱に入れられませんでした。"
+        }
+    }
+
+    func trashDrawing(fileName: String, projectID: String) {
+        guard var current = storedProject(projectID) else { return }
+        do {
+            _ = try ProjectStore.trashDrawing(fileName: fileName, in: &current, at: projectsRoot)
+            if project?.id == projectID {
+                project = current
+                if self.fileName == fileName { clearOpenDrawing() }
+            }
+            reload()
+            message = "図面をゴミ箱に入れました。"
+        } catch let error as ProjectStoreError {
+            message = error.description
+        } catch {
+            message = "図面をゴミ箱に入れられませんでした。"
+        }
+    }
+
+    func restoreTrash(id: String) {
+        do {
+            let item = try ProjectStore.restoreTrash(id: id, at: projectsRoot)
+            reload()
+            message = "\(item.name)を戻しました。"
+        } catch let error as ProjectStoreError {
+            message = error.description
+        } catch {
+            message = "ゴミ箱から戻せませんでした。"
+        }
     }
 
     func setZone(_ number: Int) {
+        setZone(number, manual: true, touchDrawing: true)
+    }
+
+    func setZone(_ number: Int, manual: Bool, touchDrawing: Bool = true) {
         guard PlaneRectangular.zone(number) != nil else { return }
         zone = number
         project?.zone = number
+        project?.manualZone = manual
+        if touchDrawing, let fileName, var drawings = project?.drawings, let index = drawings.firstIndex(where: { $0.fileName == fileName }) {
+            drawings[index].zone = number
+            if drawings[index].prefecture == nil {
+                drawings[index].prefecture = project?.prefecture
+                drawings[index].area = project?.area
+            }
+            project?.drawings = drawings
+        }
+        fieldPoints = fieldPoints.map { $0.relocated(to: number) }
+        if let project {
+            try? FieldPointStore.save(fieldPoints, projectName: project.name, at: projectsRoot)
+            publishBook(fieldPoints)
+        }
         persistProject()
+        reload()
         refresh()
         rebuildStationLine()
+        mapRevision += 1
+        refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
     }
 
     func refreshPlacement(latitude: Double?, longitude: Double?, overrideZone: Bool) {
+        let record = project?.drawings.first { $0.fileName == fileName }
+        let prefecture = record?.prefecture ?? project?.prefecture
+        let area = record?.prefecture != nil ? record?.area : project?.area
+        let storedZone = record?.zone ?? project?.zone
+        let chosen = (storedZone != nil && (project?.manualZone == true || prefecture != nil || record?.zone != nil)) ? storedZone : nil
         guard let document, !document.bounds.isEmpty else {
-            if let name = project?.prefecture, let record = PlaneZoneCatalog.named(name) {
+            if let name = prefecture, let record = PlaneZoneCatalog.named(name) {
                 zoneChoices = record.zones
-                placementNote = record.decidesZone
-                    ? "\(record.name)は\(record.zones[0])系です。"
-                    : "\(record.name)は\(record.zones.map { "\($0)系" }.joined(separator: "・"))です。"
+                if let zone = storedZone ?? PlaneZoneCatalog.zone(prefecture: name, area: area) {
+                    placementNote = PlaneZoneCatalog.summary(prefecture: name, area: area, zone: zone)
+                    placementLooksLocal = false
+                } else {
+                    let text = record.zones.map { PlaneRectangular.zone($0)?.romanLabel ?? "\($0)系" }.joined(separator: "・")
+                    placementNote = "\(record.name)は\(text)です。"
+                    placementLooksLocal = false
+                }
             }
             return
         }
         let placement = PlanePlacementChooser.choose(
             x: document.bounds.midX,
             y: document.bounds.midY,
-            prefecture: project?.prefecture,
+            prefecture: prefecture,
             latitude: latitude,
-            longitude: longitude
+            longitude: longitude,
+            zone: chosen,
+            area: area
         )
         var choices = placement.zones
         if !choices.contains(zone) { choices.append(zone) }
         zoneChoices = choices.sorted()
         placementNote = placement.note
+        placementLooksLocal = placement.looksLocal
         guard overrideZone else { return }
-        if let decided = placement.decidedZone, PlaneRectangular.zone(decided) != nil {
+        if chosen == nil, let decided = placement.decidedZone, PlaneRectangular.zone(decided) != nil {
             zone = decided
             project?.zone = decided
+            stampOpenDrawing(zone: decided, prefecture: prefecture, area: area)
         }
-        if let decided = placement.decidedAxis {
+        if chosen == nil, let decided = placement.decidedAxis {
             axis = decided
             project?.axis = decided
         }
@@ -732,6 +1081,31 @@ final class DrawingSession: ObservableObject {
         message = text
     }
 
+    /// 「取り込みました（三重 VI系）」。ローカル座標のときは 2点合わせへ一行で案内する。
+    private func importNotice() -> String {
+        if placementLooksLocal {
+            return "取り込みました。2点合わせで載せてください。"
+        }
+        let record = project?.drawings.first { $0.fileName == fileName }
+        let prefecture = record?.prefecture ?? project?.prefecture
+        let area = record?.prefecture != nil ? record?.area : project?.area
+        let number = record?.zone ?? project?.zone
+        if let prefecture, let number {
+            return "取り込みました（\(PlaneZoneCatalog.toastPlace(prefecture: prefecture, area: area, zone: number))）"
+        }
+        if let number, let roman = PlaneRectangular.zone(number)?.romanLabel {
+            return "取り込みました（\(roman)）"
+        }
+        return "取り込みました"
+    }
+
+    private func dismissMessage(_ expected: String, after seconds: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.message == expected else { return }
+            self.message = nil
+        }
+    }
+
     func beginMapPick() -> Bool {
         guard pending != nil else {
             message = "先に図面の点をタップしてください。"
@@ -753,6 +1127,10 @@ final class DrawingSession: ObservableObject {
     }
 
     func takeDrawingTap(_ point: PlanarPoint, tolerance: Double) {
+        if placingArbitrary {
+            placeOnDrawing(point, tolerance: tolerance, free: false)
+            return
+        }
         guard let document else { return }
         guard let hit = DrawingSnap.nearest(in: document, to: point, tolerance: tolerance) else {
             message = "交点・端点・点の近くをタップしてください。"
@@ -881,7 +1259,12 @@ final class DrawingSession: ObservableObject {
         self.pending = nil
         pick = .idle
         refresh()
-        message = pairs.count < 2 ? "もう1組、図面の点を選んでください。" : "対応は \(pairs.count) 組です。"
+        if twoPointMode, pairs.count < 2 {
+            pick = .drawingVertex
+            message = "もう1組、図面の点をタップしてください。"
+        } else {
+            message = pairs.count < 2 ? "もう1組、図面の点を選んでください。" : "対応は \(pairs.count) 組です。"
+        }
     }
 
     func removePair(_ id: String) {
@@ -923,6 +1306,7 @@ final class DrawingSession: ObservableObject {
             let stored = try ProjectStore.saveAlignment(record, projectName: project.name, at: projectsRoot)
             alignments = (try? ProjectStore.alignments(projectName: project.name, at: projectsRoot)) ?? alignments
             activeAlignmentID = stored.id
+            twoPointDidSave = true
             message = "合わせ「\(stored.name)」の版 \(stored.version) を設計に置きました。元の図面は変えていません。"
         } catch let error as ProjectStoreError {
             message = error.description
@@ -1080,8 +1464,9 @@ final class DrawingSession: ObservableObject {
         guard camera.fittedID != token else { return }
         camera.centerX = document.bounds.isEmpty ? 0 : document.bounds.midX
         camera.centerY = document.bounds.isEmpty ? 0 : document.bounds.midY
-        let span = max(document.bounds.width, document.bounds.height, 1)
-        camera.pointsPerUnit = Double(min(size.width, size.height)) * 0.82 / span
+        let width = max(document.bounds.width, 1)
+        let height = max(document.bounds.height, 1)
+        camera.pointsPerUnit = min(Double(size.width) * 0.96 / width, Double(size.height) * 0.96 / height)
         camera.rotationDegrees = 0
         camera.fittedID = token
     }
@@ -1097,11 +1482,65 @@ final class DrawingSession: ObservableObject {
 
     private func adopt(_ parsed: DrawingDocument, fileName: String) {
         importProgress = nil
+        pdfData = nil
         document = parsed
         self.fileName = fileName
         camera.fittedID = nil
         backgroundVerdict = nil
+        if let number = project?.drawings.first(where: { $0.fileName == fileName })?.zone ?? project?.zone {
+            zone = number
+        }
+        restoreAlignment(named: fileName)
+        readPublicSFCOnTheSelectedZone()
         refresh()
+        refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
+    }
+
+    /// ミリの公共座標 SFC は、選んだ系で X を東、Y を北として地図に載せる。
+    /// sfig_locate の紙面上の配置は図形に掛けない。原点付近の紙の座標だけ 2点合わせにする。
+    private func readPublicSFCOnTheSelectedZone() {
+        guard (fileName as NSString?)?.pathExtension.lowercased() == "sfc" else { return }
+        guard activeTransform == nil, isGeoreferenced else { return }
+        guard axis != .cadEastNorth else { return }
+        axis = .cadEastNorth
+        if project?.axis != .cadEastNorth {
+            project?.axis = .cadEastNorth
+            persistProject()
+        }
+    }
+
+    private func storedProject(_ id: String) -> SurveyProject? {
+        if project?.id == id { return project }
+        return projects.first { $0.id == id }
+    }
+
+    private func updateDrawing(projectID: String, fileName: String, _ change: (inout ProjectDrawing) -> Void) {
+        guard var current = storedProject(projectID),
+              let index = current.drawings.firstIndex(where: { $0.fileName == fileName }) else { return }
+        change(&current.drawings[index])
+        if project?.id == projectID { project = current }
+        try? ProjectStore.save(current, at: projectsRoot)
+        reload()
+    }
+
+    private func stampOpenDrawing(zone: Int, prefecture: String?, area: String?) {
+        guard let fileName, var drawings = project?.drawings,
+              let index = drawings.firstIndex(where: { $0.fileName == fileName }) else { return }
+        if drawings[index].zone == nil { drawings[index].zone = zone }
+        if drawings[index].prefecture == nil { drawings[index].prefecture = prefecture }
+        if drawings[index].area == nil { drawings[index].area = area }
+        project?.drawings = drawings
+    }
+
+    private func clearOpenDrawing() {
+        document = nil
+        fileName = nil
+        pdfData = nil
+        mapPaths = []
+        overlayCapped = false
+        placementNote = nil
+        placementLooksLocal = false
+        mapRevision += 1
     }
 
     private func failImport(_ generation: Int, _ text: String) {
@@ -1154,7 +1593,7 @@ final class DrawingSession: ObservableObject {
     private func refreshMap() {
         mapGeneration += 1
         let generation = mapGeneration
-        guard let document else {
+        guard let document, isGeoreferenced else {
             mapPaths = []
             overlayCapped = false
             mapRevision += 1
@@ -1179,5 +1618,450 @@ final class DrawingSession: ObservableObject {
                 self.mapRevision += 1
             }
         }
+    }
+
+    func beginTwoPoint() -> Bool {
+        guard document != nil else {
+            message = "先に図面を開いてください。"
+            return false
+        }
+        guard fieldPoints.count >= 2 else {
+            message = "SIMA が2点以上要ります。"
+            return false
+        }
+        _ = ensureZone()
+        twoPointDidSave = false
+        twoPointMode = true
+        pairs = []
+        fit = nil
+        pending = nil
+        activeAlignmentID = nil
+        alignmentName = "2点合わせ"
+        beginVertexPick()
+        return true
+    }
+
+    func finishTwoPoint() {
+        twoPointMode = false
+        if !twoPointDidSave, let fileName {
+            restoreAlignment(named: fileName)
+            refresh()
+        }
+        twoPointDidSave = false
+        if pick == .drawingVertex || pick == .mapPoint { pick = .idle }
+        pending = nil
+    }
+
+    func setTolerance(millimeters: Double, denominator: Double) {
+        guard millimeters >= 0, millimeters <= 10_000, denominator >= 1, denominator <= 1_000_000 else { return }
+        project?.alignToleranceMillimeters = millimeters
+        project?.alignToleranceDenominator = denominator
+        persistProject()
+    }
+
+    @discardableResult
+    func chooseFieldPoint(_ id: String) -> Bool {
+        guard let point = fieldPoints.first(where: { $0.id == id }) else { return false }
+        if pending != nil {
+            addTarget(kind: .coordinateBook, latitude: point.latitudeDegrees, longitude: point.longitudeDegrees, label: point.name)
+            return true
+        }
+        selectedPointID = id
+        return false
+    }
+
+    func placeOnDrawing(_ point: PlanarPoint, tolerance: Double, free: Bool) {
+        guard canPlaceArbitrary, let document else {
+            message = "先に2点合わせを保存してください。"
+            return
+        }
+        let placed = DrawingSnap.place(in: document, to: point, tolerance: tolerance, free: free)
+        let inspected = DrawingPlacement.inspect(
+            point: placed.point,
+            zone: zone,
+            axis: axis,
+            transform: activeTransform,
+            fromLatitude: nil,
+            fromLongitude: nil,
+            composesAxis: activeComposesAxis,
+            snapLabel: placed.label
+        )
+        guard let east = inspected.eastingMeters, let north = inspected.northingMeters,
+              let latitude = inspected.latitudeDegrees, let longitude = inspected.longitudeDegrees else {
+            message = "平面の位置にできません。"
+            return
+        }
+        draftPoint = makeArbitrary(
+            name: nextArbitraryName(),
+            northing: north,
+            easting: east,
+            latitude: latitude,
+            longitude: longitude,
+            snap: placed.label,
+            drawingX: placed.point.x,
+            drawingY: placed.point.y
+        )
+    }
+
+    func takeDrawingLongPress(_ point: PlanarPoint, tolerance: Double) {
+        guard placingArbitrary else { return }
+        placeOnDrawing(point, tolerance: tolerance, free: true)
+    }
+
+    func placeOnMap(latitude: Double, longitude: Double) {
+        guard placingArbitrary, let plane = PlaneRectangular.forward(
+            latitudeDegrees: latitude,
+            longitudeDegrees: longitude,
+            zone: zone
+        ) else { return }
+        var drawingX: Double?
+        var drawingY: Double?
+        if let transform = activeTransform, !activeComposesAxis,
+           let back = transform.inverse(PlanarPoint(x: plane.eastingMeters, y: plane.northingMeters)) {
+            drawingX = back.x
+            drawingY = back.y
+        }
+        draftPoint = makeArbitrary(
+            name: nextArbitraryName(),
+            northing: plane.northingMeters,
+            easting: plane.eastingMeters,
+            latitude: latitude,
+            longitude: longitude,
+            snap: "任意",
+            drawingX: drawingX,
+            drawingY: drawingY
+        )
+    }
+
+    func setDraftHeight(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            draftPoint?.designHeightMeters = nil
+            return
+        }
+        guard let value = Double(trimmed), value.isFinite, abs(value) < 10_000 else { return }
+        draftPoint?.designHeightMeters = value
+    }
+
+    func saveDraftPoint() {
+        guard let draft = draftPoint, project != nil else { return }
+        if let index = fieldPoints.firstIndex(where: { $0.id == draft.id }) {
+            fieldPoints[index] = draft
+        } else {
+            fieldPoints.append(draft)
+        }
+        if let project {
+            try? FieldPointStore.save(fieldPoints, projectName: project.name, at: projectsRoot)
+        }
+        publishBook(fieldPoints)
+        mapRevision += 1
+        message = "\(draft.name) を保存しました。"
+    }
+
+    @discardableResult
+    func sendDraftToStakeout() -> Bool {
+        saveDraftPoint()
+        guard let id = draftPoint?.id else { return false }
+        return sendToStakeout(id)
+    }
+
+    @discardableResult
+    func removeFieldPoint(id: String) -> FieldPoint? {
+        guard let index = fieldPoints.firstIndex(where: { $0.id == id }) else { return nil }
+        let point = fieldPoints.remove(at: index)
+        if let project {
+            try? FieldPointStore.save(fieldPoints, projectName: project.name, at: projectsRoot)
+        }
+        publishBook(fieldPoints)
+        mapRevision += 1
+        return point
+    }
+
+    func restoreFieldPoint(_ point: FieldPoint) {
+        guard !fieldPoints.contains(where: { $0.id == point.id }) else { return }
+        fieldPoints.append(point)
+        if let project {
+            try? FieldPointStore.save(fieldPoints, projectName: project.name, at: projectsRoot)
+        }
+        publishBook(fieldPoints)
+        mapRevision += 1
+    }
+
+    @discardableResult
+    func sendToStakeout(_ id: String) -> Bool {
+        guard let point = fieldPoints.first(where: { $0.id == id }) else { return false }
+        stakeoutPointID = id
+        selectedPointID = id
+        inspection = DrawingInspect(
+            drawingX: point.drawingX ?? 0,
+            drawingY: point.drawingY ?? 0,
+            eastingMeters: point.eastingMeters,
+            northingMeters: point.northingMeters,
+            latitudeDegrees: point.latitudeDegrees,
+            longitudeDegrees: point.longitudeDegrees,
+            distanceMeters: nil,
+            azimuthDegrees: nil,
+            snapLabel: point.snapLabel
+        )
+        return true
+    }
+
+    func applyHeightMap(groundColumn: Int?, formationColumn: Int?) {
+        guard let pending = pendingIntake else { return }
+        importCoordinates(
+            data: pending.original,
+            fileName: pending.fileName,
+            heightMap: HeightColumnMap(groundColumn: groundColumn, formationColumn: formationColumn)
+        )
+    }
+
+    func presentPointTable(_ table: PointTable) {
+        let number = ensureZone()
+        var next = table
+        if let saved = project?.pointColumnMap, saved.roles.count == next.columnCount {
+            next.roles = saved.roles
+            next.hasHeader = saved.hasHeader
+        }
+        pointTable = PointTableReader.evaluate(next, zone: number)
+        message = nil
+    }
+
+    func confirmPointTable(_ table: PointTable) -> String? {
+        guard project != nil else { return "先にプロジェクトを作ってください。" }
+        let outcome = PointTableReader.assess(table, zone: zone)
+        guard !outcome.points.isEmpty else {
+            pointTable = PointTableReader.evaluate(table, zone: zone)
+            if let issue = outcome.issues.first {
+                return "\(issue.row + 1)行目: \(issue.message)"
+            }
+            return "点を読めませんでした。"
+        }
+        storePoints(outcome.points)
+        if var current = project {
+            current.pointColumnMap = PointColumnMap(roles: table.roles, hasHeader: table.hasHeader)
+            project = current
+            persistProject()
+        }
+        let bad = outcome.issues.count
+        if bad == 0, let warning = outcome.axisWarning {
+            message = "\(outcome.points.count)点。\(warning)"
+        } else if bad == 0 {
+            message = "\(outcome.points.count)点"
+        } else {
+            message = "\(outcome.points.count)点。読めない行 \(bad)"
+        }
+        if let name = outcome.points.first?.name,
+           let saved = fieldPoints.first(where: { $0.name == name && $0.origin == .list }) {
+            selectedPointID = saved.id
+        }
+        pointTable = nil
+        return nil
+    }
+
+    private func importCoordinates(data: Data, fileName: String, heightMap: HeightColumnMap?) {
+        let number = ensureZone()
+        if FieldIntake.detect(data: data, fileName: fileName) == .list {
+            if let table = PointTableReader.read(data: data, fileName: fileName) {
+                presentPointTable(table)
+                return
+            }
+            message = "点を読めませんでした。"
+            return
+        }
+        let result = FieldIntake.read(data: data, fileName: fileName, zone: number, heightMap: heightMap)
+        if result.needsHeightMap {
+            pendingIntake = PendingIntake(
+                fileName: fileName,
+                kind: result.kind,
+                text: result.text,
+                columnCount: result.columnCount,
+                original: data
+            )
+            message = result.note
+            return
+        }
+        pendingIntake = nil
+        if result.kind == .sima, let name = project?.name {
+            try? ProjectStore.importSIMA(data: data, fileName: fileName, projectName: name, at: projectsRoot)
+        }
+        storePoints(result.points)
+        message = result.note
+    }
+
+    private func importPDF(data: Data, fileName: String) {
+        guard var current = project else { return }
+        do {
+            let stored = try ProjectStore.importDXF(
+                data: data,
+                fileName: fileName,
+                into: &current,
+                at: projectsRoot,
+                codePage: "pdf",
+                unsupported: [:]
+            )
+            project = current
+            onProjectCommitted?()
+            reload()
+            document = nil
+            pdfData = data
+            self.fileName = stored
+            importProgress = nil
+            message = "PDFを図面に置きました。"
+        } catch {
+            message = "PDFを置けませんでした。"
+        }
+    }
+
+    private func ensureZone() -> Int {
+        if let current = project?.zone, PlaneRectangular.zone(current) != nil {
+            zone = current
+            return current
+        }
+        let number = FieldIntake.defaultZone
+        zone = number
+        project?.zone = number
+        persistProject()
+        return number
+    }
+
+    private func restoreAlignment(named drawingName: String) {
+        let matches = alignments.filter { $0.drawingFileName == drawingName }
+        guard let record = matches.max(by: { $0.createdAt < $1.createdAt }) else {
+            pairs = []
+            fit = nil
+            activeAlignmentID = nil
+            return
+        }
+        activeAlignmentID = record.id
+        if zone != record.zone {
+            zone = record.zone
+            project?.zone = record.zone
+            fieldPoints = fieldPoints.map { $0.relocated(to: record.zone) }
+            if let name = project?.name {
+                try? FieldPointStore.save(fieldPoints, projectName: name, at: projectsRoot)
+            }
+        }
+        axis = record.axis
+        lockScale = record.lockScale
+        pairs = record.pairs
+        alignmentName = record.name
+    }
+
+    private func storePoints(_ incoming: [FieldPoint]) {
+        guard let project else { return }
+        for point in incoming {
+            if let index = fieldPoints.firstIndex(where: { $0.name == point.name && $0.origin != .arbitrary }) {
+                var kept = point
+                kept.id = fieldPoints[index].id
+                fieldPoints[index] = kept
+            } else if !fieldPoints.contains(where: { $0.id == point.id }) {
+                fieldPoints.append(point)
+            }
+        }
+        try? FieldPointStore.save(fieldPoints, projectName: project.name, at: projectsRoot)
+        publishBook(fieldPoints)
+        mapRevision += 1
+    }
+
+    /// 緯度経度、度分秒、または現場の系の X Y。保存した点は取り込みと同じく地図と丁張に出る。
+    @discardableResult
+    func saveEnteredPoint(name rawName: String, coordinate: String, heightText: String) -> String? {
+        guard project != nil else { return "先にプロジェクトを作ってください。" }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return "点名を入れてください。" }
+        guard let fix = ManualPoint.parse(coordinate, zone: zone) else {
+            return "緯度経度か、平面直角の X Y にしてください。"
+        }
+        let heightTrimmed = heightText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let height: Double?
+        if heightTrimmed.isEmpty {
+            height = nil
+        } else if let parsed = ManualPoint.height(heightTrimmed) {
+            height = parsed
+        } else {
+            return "標高の数値が読めません。"
+        }
+        let point = FieldPoint(
+            id: UUID().uuidString,
+            name: name,
+            northingMeters: fix.northingMeters,
+            eastingMeters: fix.eastingMeters,
+            zone: zone,
+            latitudeDegrees: fix.latitudeDegrees,
+            longitudeDegrees: fix.longitudeDegrees,
+            groundLevelMeters: height,
+            heightMeters: height,
+            origin: .manual,
+            anchor: fix.kind == .plane ? .grid : .geographic,
+            snapLabel: "手入力"
+        )
+        storePoints([point])
+        if let saved = fieldPoints.first(where: { $0.name == name && $0.origin == .manual }) {
+            selectedPointID = saved.id
+        }
+        message = "\(name) を保存しました。"
+        return nil
+    }
+
+    private func bookSource(_ origin: FieldPointOrigin) -> String {
+        switch origin {
+        case .sima: return "SIMA"
+        case .list: return "一覧"
+        case .manual: return "手入力"
+        case .arbitrary: return "任意点"
+        }
+    }
+
+    private func publishBook(_ points: [FieldPoint]) {
+        guard let project, let directory = try? ProjectStore.projectDirectory(project.name, at: projectsRoot) else { return }
+        let now = Date()
+        let entries = points.map { point in
+            CoordinateBookEntry(
+                name: point.name,
+                latitudeDegrees: point.latitudeDegrees,
+                longitudeDegrees: point.longitudeDegrees,
+                ellipsoidalHeightMeters: point.bookHeightMeters,
+                horizontalAccuracyMeters: 0,
+                verticalAccuracyMeters: nil,
+                satelliteCount: nil,
+                fixDurationSeconds: 0,
+                recordedAt: now,
+                kind: point.origin == .arbitrary ? "任意点" : "座標",
+                source: bookSource(point.origin),
+                orthometricHeightMeters: point.origin == .manual ? point.heightMeters : nil
+            )
+        }
+        try? CoordinateBookStore.upsert(entries, projectDirectory: directory)
+    }
+
+    private func nextArbitraryName() -> String {
+        let count = fieldPoints.filter { $0.origin == .arbitrary }.count + 1
+        return "任意\(count)"
+    }
+
+    private func makeArbitrary(
+        name: String,
+        northing: Double,
+        easting: Double,
+        latitude: Double,
+        longitude: Double,
+        snap: String,
+        drawingX: Double?,
+        drawingY: Double?
+    ) -> FieldPoint {
+        FieldPoint(
+            id: UUID().uuidString,
+            name: name,
+            northingMeters: northing,
+            eastingMeters: easting,
+            zone: zone,
+            latitudeDegrees: latitude,
+            longitudeDegrees: longitude,
+            origin: .arbitrary,
+            anchor: .geographic,
+            snapLabel: snap,
+            drawingX: drawingX,
+            drawingY: drawingY
+        )
     }
 }

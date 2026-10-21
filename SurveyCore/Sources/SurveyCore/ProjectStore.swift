@@ -5,12 +5,35 @@ public struct ProjectDrawing: Codable, Equatable, Sendable {
     public var importedAt: Date
     public var codePage: String
     public var unsupported: [String: Int]
+    /// 一覧に出す名前。空ならファイル名。
+    public var displayName: String? = nil
+    public var prefecture: String? = nil
+    public var area: String? = nil
+    public var zone: Int? = nil
 
-    public init(fileName: String, importedAt: Date, codePage: String, unsupported: [String: Int]) {
+    public init(
+        fileName: String,
+        importedAt: Date,
+        codePage: String,
+        unsupported: [String: Int],
+        displayName: String? = nil,
+        prefecture: String? = nil,
+        area: String? = nil,
+        zone: Int? = nil
+    ) {
         self.fileName = fileName
         self.importedAt = importedAt
         self.codePage = codePage
         self.unsupported = unsupported
+        self.displayName = displayName
+        self.prefecture = prefecture
+        self.area = area
+        self.zone = zone
+    }
+
+    public var title: String {
+        let trimmed = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? fileName : trimmed
     }
 }
 
@@ -23,6 +46,10 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var drawings: [ProjectDrawing]
     /// 先に選んだ都道府県。無い古いプロジェクトは nil。
     public var prefecture: String?
+    /// 系が分かれる県の区域。一つの系の県は nil。
+    public var area: String?
+    /// 系を手で指定した。県から決めたときは false。
+    public var manualZone: Bool?
     /// 作業半径の機種。手入力のときは nil。
     public var machinePreset: String?
     /// 作業半径。メートル。無い古いプロジェクトは nil。
@@ -54,6 +81,16 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var siteFence: SiteFence?
     /// 位置を共有してよい時間。無いプロジェクトは共有しない。
     public var workHours: WorkHours?
+    /// 記録の場所名。プロジェクトがあるときは projects/<名前>/記録/ の下に置く。
+    public var place: String?
+    /// 現場の日付。YYYY-MM-DD。無いときは作成日。
+    public var workDate: String?
+    /// 2点合わせの距離差の許容。ミリ。無いときは 20。
+    public var alignToleranceMillimeters: Double?
+    /// 距離差の比の分母。1/N の N。無いときは 5000。
+    public var alignToleranceDenominator: Double?
+    /// 座標 CSV の列の役割。同じ列数の次のファイルに使う。
+    public var pointColumnMap: PointColumnMap?
 
     public init(
         id: String = UUID().uuidString,
@@ -63,6 +100,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         axis: DrawingAxis = .cadEastNorth,
         drawings: [ProjectDrawing] = [],
         prefecture: String? = nil,
+        area: String? = nil,
+        manualZone: Bool? = nil,
         machinePreset: String? = nil,
         machineRadiusMeters: Double? = nil,
         eyeHeightMeters: Double? = nil,
@@ -78,7 +117,12 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         weather: String? = nil,
         siteAid: SiteAid? = nil,
         siteFence: SiteFence? = nil,
-        workHours: WorkHours? = nil
+        workHours: WorkHours? = nil,
+        place: String? = nil,
+        workDate: String? = nil,
+        alignToleranceMillimeters: Double? = nil,
+        alignToleranceDenominator: Double? = nil,
+        pointColumnMap: PointColumnMap? = nil
     ) {
         self.id = id
         self.name = name
@@ -87,6 +131,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.axis = axis
         self.drawings = drawings
         self.prefecture = prefecture
+        self.area = area
+        self.manualZone = manualZone
         self.machinePreset = machinePreset
         self.machineRadiusMeters = machineRadiusMeters
         self.eyeHeightMeters = eyeHeightMeters
@@ -103,14 +149,28 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.siteAid = siteAid
         self.siteFence = siteFence
         self.workHours = workHours
+        self.place = place
+        self.workDate = workDate
+        self.alignToleranceMillimeters = alignToleranceMillimeters
+        self.alignToleranceDenominator = alignToleranceDenominator
+        self.pointColumnMap = pointColumnMap
+    }
+
+    public var listDate: String {
+        if let workDate {
+            let trimmed = workDate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return FieldRecordStore.dayFolder(createdAt)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, createdAt, zone, axis, drawings, prefecture
+        case id, name, createdAt, zone, axis, drawings, prefecture, area, manualZone
         case machinePreset, machineRadiusMeters, eyeHeightMeters, sightDatum, phoneAtEyes
         case stationIntervalMeters, stationOrigin, stationLine
         case cautionMeters, proximityMarginMeters, approachLeadMeters, approachRepeatSeconds, weather
-        case siteAid, siteFence, workHours
+        case siteAid, siteFence, workHours, place, workDate
+        case alignToleranceMillimeters, alignToleranceDenominator, pointColumnMap
     }
 
     public init(from decoder: Decoder) throws {
@@ -122,6 +182,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         axis = try container.decodeIfPresent(DrawingAxis.self, forKey: .axis) ?? .cadEastNorth
         drawings = try container.decodeIfPresent([ProjectDrawing].self, forKey: .drawings) ?? []
         prefecture = try container.decodeIfPresent(String.self, forKey: .prefecture)
+        area = try container.decodeIfPresent(String.self, forKey: .area)
+        manualZone = try container.decodeIfPresent(Bool.self, forKey: .manualZone)
         machinePreset = try container.decodeIfPresent(String.self, forKey: .machinePreset)
         machineRadiusMeters = try container.decodeIfPresent(Double.self, forKey: .machineRadiusMeters)
         eyeHeightMeters = try container.decodeIfPresent(Double.self, forKey: .eyeHeightMeters)
@@ -138,6 +200,11 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         siteAid = try container.decodeIfPresent(SiteAid.self, forKey: .siteAid)
         siteFence = try container.decodeIfPresent(SiteFence.self, forKey: .siteFence)
         workHours = try container.decodeIfPresent(WorkHours.self, forKey: .workHours)
+        place = try container.decodeIfPresent(String.self, forKey: .place)
+        workDate = try container.decodeIfPresent(String.self, forKey: .workDate)
+        alignToleranceMillimeters = try container.decodeIfPresent(Double.self, forKey: .alignToleranceMillimeters)
+        alignToleranceDenominator = try container.decodeIfPresent(Double.self, forKey: .alignToleranceDenominator)
+        pointColumnMap = try container.decodeIfPresent(PointColumnMap.self, forKey: .pointColumnMap)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -149,6 +216,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encode(axis, forKey: .axis)
         try container.encode(drawings, forKey: .drawings)
         try container.encodeIfPresent(prefecture, forKey: .prefecture)
+        try container.encodeIfPresent(area, forKey: .area)
+        try container.encodeIfPresent(manualZone, forKey: .manualZone)
         try container.encodeIfPresent(machinePreset, forKey: .machinePreset)
         try container.encodeIfPresent(machineRadiusMeters, forKey: .machineRadiusMeters)
         try container.encodeIfPresent(eyeHeightMeters, forKey: .eyeHeightMeters)
@@ -165,6 +234,11 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(siteAid, forKey: .siteAid)
         try container.encodeIfPresent(siteFence, forKey: .siteFence)
         try container.encodeIfPresent(workHours, forKey: .workHours)
+        try container.encodeIfPresent(place, forKey: .place)
+        try container.encodeIfPresent(workDate, forKey: .workDate)
+        try container.encodeIfPresent(alignToleranceMillimeters, forKey: .alignToleranceMillimeters)
+        try container.encodeIfPresent(alignToleranceDenominator, forKey: .alignToleranceDenominator)
+        try container.encodeIfPresent(pointColumnMap, forKey: .pointColumnMap)
     }
 }
 
@@ -234,8 +308,19 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
     public var epochCount: Int?
     public var receiverLabel: String?
     public var satelliteNote: String?
+    /// 標高。観測点はジオイドを引いた値。既知点は入れず、成果の高さを ellipsoidalHeightMeters に置く。
+    public var orthometricHeightMeters: Double?
+    public var geoidUndulationMeters: Double?
+    public var geoidModel: String?
+    public var phoneAverage: PhoneAverageStamp?
+    public var knownShift: KnownShiftStamp?
 
     public var id: String { name }
+
+    /// 出す・SIMA に書く高さ。観測は標高、既知点は入っている成果。
+    public var deliveredHeightMeters: Double? {
+        orthometricHeightMeters ?? ellipsoidalHeightMeters
+    }
 
     public init(
         name: String,
@@ -256,7 +341,12 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         correctionSource: String? = nil,
         epochCount: Int? = nil,
         receiverLabel: String? = nil,
-        satelliteNote: String? = nil
+        satelliteNote: String? = nil,
+        orthometricHeightMeters: Double? = nil,
+        geoidUndulationMeters: Double? = nil,
+        geoidModel: String? = nil,
+        phoneAverage: PhoneAverageStamp? = nil,
+        knownShift: KnownShiftStamp? = nil
     ) {
         self.name = name
         self.latitudeDegrees = latitudeDegrees
@@ -277,6 +367,11 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         self.epochCount = epochCount
         self.receiverLabel = receiverLabel
         self.satelliteNote = satelliteNote
+        self.orthometricHeightMeters = orthometricHeightMeters
+        self.geoidUndulationMeters = geoidUndulationMeters
+        self.geoidModel = geoidModel
+        self.phoneAverage = phoneAverage
+        self.knownShift = knownShift
     }
 }
 
@@ -285,6 +380,7 @@ public enum ProjectStoreError: Error, Equatable, CustomStringConvertible {
     case alreadyExists
     case missingProject
     case unreadable
+    case drawingExists
 
     public var description: String {
         switch self {
@@ -292,13 +388,68 @@ public enum ProjectStoreError: Error, Equatable, CustomStringConvertible {
         case .alreadyExists: return "同じ名前のプロジェクトがあります。"
         case .missingProject: return "プロジェクトが見つかりません。"
         case .unreadable: return "プロジェクトを読めませんでした。"
+        case .drawingExists: return "同じ名前の図面があります。"
         }
     }
 }
 
-/// `ルート/プロジェクト名/` の下に、座標簿・記録・点群・設計・下敷き・出す を作る。
+/// 現場か図面を30日残す。期限を過ぎたものは消す。
+public struct ProjectTrashItem: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, Sendable {
+        case project
+        case drawing
+    }
+
+    public static let retention: TimeInterval = 30 * 24 * 60 * 60
+
+    public var id: String
+    public var kind: Kind
+    public var name: String
+    public var deletedAt: Date
+    public var projectID: String?
+    public var projectName: String?
+    public var fileName: String?
+    public var drawing: ProjectDrawing?
+
+    public init(
+        id: String = UUID().uuidString,
+        kind: Kind,
+        name: String,
+        deletedAt: Date,
+        projectID: String? = nil,
+        projectName: String? = nil,
+        fileName: String? = nil,
+        drawing: ProjectDrawing? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.deletedAt = deletedAt
+        self.projectID = projectID
+        self.projectName = projectName
+        self.fileName = fileName
+        self.drawing = drawing
+    }
+
+    public func isExpired(at now: Date) -> Bool {
+        now.timeIntervalSince(deletedAt) >= Self.retention
+    }
+
+    public func daysLeft(at now: Date) -> Int {
+        let remaining = Self.retention - now.timeIntervalSince(deletedAt)
+        if remaining <= 0 { return 0 }
+        return Int(ceil(remaining / (24 * 60 * 60)))
+    }
+}
+
+/// `Documents/projects/プロジェクト名/` の下に、図面・SIMA・出力・記録を置く。
 public enum ProjectStore {
-    public static let childFolders = ["座標簿", "記録", "点群", "設計", "下敷き", "出す"]
+    public static let drawingFolder = "図面"
+    public static let simaFolder = "SIMA"
+    public static let exportFolderName = "出力"
+    public static let legacyDrawingFolder = "設計"
+    public static let legacyExportFolder = "出す"
+    public static let childFolders = ["座標簿", "記録", "点群", "図面", "SIMA", "下敷き", "出力"]
 
     public static func create(name: String, at root: URL, now: Date = Date()) throws -> SurveyProject {
         guard let safe = safeComponent(name) else { throw ProjectStoreError.emptyName }
@@ -317,12 +468,31 @@ public enum ProjectStore {
 
     public static func list(at root: URL) throws -> [SurveyProject] {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let urls = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])
+        let urls = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
         return try urls.compactMap { url in
+            if url.lastPathComponent == trashFolderName || url.lastPathComponent.hasPrefix(".") { return nil }
             let json = url.appendingPathComponent("project.json")
             guard FileManager.default.fileExists(atPath: json.path) else { return nil }
             return try read(SurveyProject.self, from: json)
         }.sorted { $0.name < $1.name }
+    }
+
+    public static func rename(_ project: inout SurveyProject, to rawName: String, at root: URL) throws {
+        guard let safe = safeComponent(rawName) else { throw ProjectStoreError.emptyName }
+        let from = try projectDirectory(project.name, at: root)
+        if safe != project.name {
+            let destination = root.appendingPathComponent(safe, isDirectory: true)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                throw ProjectStoreError.alreadyExists
+            }
+            try FileManager.default.moveItem(at: from, to: destination)
+            project.name = safe
+        }
+        try save(project, at: root)
     }
 
     public static func save(_ project: SurveyProject, at root: URL) throws {
@@ -330,7 +500,159 @@ public enum ProjectStore {
         try write(project, to: directory.appendingPathComponent("project.json"))
     }
 
-    /// 受け取ったバイト列を設計フォルダへそのまま置く。中身は書き換えない。
+    public static let trashFolderName = ".Trash"
+    public static let legacyTrashFolderName = ".trash"
+
+    /// 現場のフォルダごとゴミ箱へ移す。30日で消える。
+    public static func trashProject(_ project: SurveyProject, at root: URL, now: Date = Date()) throws -> ProjectTrashItem {
+        let source = try projectDirectory(project.name, at: root)
+        let item = ProjectTrashItem(
+            kind: .project,
+            name: project.name,
+            deletedAt: now,
+            projectID: project.id,
+            projectName: project.name
+        )
+        let folder = trashDirectory(item.id, at: root)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let body = folder.appendingPathComponent("body", isDirectory: true)
+        do {
+            try FileManager.default.moveItem(at: source, to: body)
+            try write(item, to: folder.appendingPathComponent("meta.json"))
+        } catch {
+            if FileManager.default.fileExists(atPath: body.path),
+               !FileManager.default.fileExists(atPath: source.path) {
+                try? FileManager.default.moveItem(at: body, to: source)
+            }
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+        return item
+    }
+
+    /// 図面ファイルと変換の札をゴミ箱へ移し、現場の一覧から外す。
+    public static func trashDrawing(
+        fileName: String,
+        in project: inout SurveyProject,
+        at root: URL,
+        now: Date = Date()
+    ) throws -> ProjectTrashItem {
+        guard let index = project.drawings.firstIndex(where: { $0.fileName == fileName }) else {
+            throw ProjectStoreError.unreadable
+        }
+        let drawing = project.drawings[index]
+        let directory = try projectDirectory(project.name, at: root)
+        let design = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
+        let source = design.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: source.path) else { throw ProjectStoreError.unreadable }
+        let item = ProjectTrashItem(
+            kind: .drawing,
+            name: drawing.title,
+            deletedAt: now,
+            projectID: project.id,
+            projectName: project.name,
+            fileName: fileName,
+            drawing: drawing
+        )
+        let folder = trashDirectory(item.id, at: root)
+        let body = folder.appendingPathComponent("body", isDirectory: true)
+        try FileManager.default.createDirectory(at: body, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.moveItem(at: source, to: body.appendingPathComponent(fileName))
+            let tagName = conversionTagName(for: fileName)
+            let tag = design.appendingPathComponent(tagName)
+            if FileManager.default.fileExists(atPath: tag.path) {
+                try FileManager.default.moveItem(at: tag, to: body.appendingPathComponent(tagName))
+            }
+            try moveAlignments(named: fileName, from: design, to: body)
+            try write(item, to: folder.appendingPathComponent("meta.json"))
+        } catch {
+            try? restoreMovedDrawing(fileName: fileName, body: body, design: design)
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+        project.drawings.remove(at: index)
+        do {
+            try save(project, at: root)
+        } catch {
+            project.drawings.insert(drawing, at: index)
+            try? restoreMovedDrawing(fileName: fileName, body: body, design: design)
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+        return item
+    }
+
+    public static func listTrash(at root: URL) throws -> [ProjectTrashItem] {
+        var items: [ProjectTrashItem] = []
+        var seen: Set<String> = []
+        for name in [trashFolderName, legacyTrashFolderName] {
+            let folder = root.appendingPathComponent(name, isDirectory: true)
+            guard FileManager.default.fileExists(atPath: folder.path) else { continue }
+            let urls = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            for url in urls {
+                guard let item = try? read(ProjectTrashItem.self, from: url.appendingPathComponent("meta.json")) else { continue }
+                if seen.insert(item.id).inserted {
+                    items.append(item)
+                }
+            }
+        }
+        return items.sorted { $0.deletedAt > $1.deletedAt }
+    }
+
+    public static func purgeTrash(at root: URL, now: Date = Date()) {
+        guard let items = try? listTrash(at: root) else { return }
+        for item in items where item.isExpired(at: now) {
+            try? FileManager.default.removeItem(at: trashDirectory(item.id, at: root))
+        }
+    }
+
+    @discardableResult
+    public static func restoreTrash(id: String, at root: URL) throws -> ProjectTrashItem {
+        let folder = trashDirectory(id, at: root)
+        let meta = folder.appendingPathComponent("meta.json")
+        guard FileManager.default.fileExists(atPath: meta.path) else { throw ProjectStoreError.missingProject }
+        let item = try read(ProjectTrashItem.self, from: meta)
+        let body = folder.appendingPathComponent("body", isDirectory: true)
+        switch item.kind {
+        case .project:
+            let dest = root.appendingPathComponent(item.name, isDirectory: true)
+            if FileManager.default.fileExists(atPath: resolved(dest)) {
+                throw ProjectStoreError.alreadyExists
+            }
+            try FileManager.default.moveItem(at: body, to: dest)
+        case .drawing:
+            guard let projectID = item.projectID, let fileName = item.fileName,
+                  var project = try list(at: root).first(where: { $0.id == projectID }) else {
+                throw ProjectStoreError.missingProject
+            }
+            let directory = try projectDirectory(project.name, at: root)
+            let design = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
+            let dest = design.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: resolved(dest)) {
+                throw ProjectStoreError.drawingExists
+            }
+            try FileManager.default.moveItem(at: body.appendingPathComponent(fileName), to: dest)
+            let tagName = conversionTagName(for: fileName)
+            let tag = body.appendingPathComponent(tagName)
+            if FileManager.default.fileExists(atPath: tag.path) {
+                let tagDest = design.appendingPathComponent(tagName)
+                if FileManager.default.fileExists(atPath: tagDest.path) {
+                    try? FileManager.default.removeItem(at: tagDest)
+                }
+                try FileManager.default.moveItem(at: tag, to: tagDest)
+            }
+            try moveAlignmentsBack(from: body, to: design)
+            if let drawing = item.drawing, !project.drawings.contains(where: { $0.fileName == fileName }) {
+                project.drawings.append(drawing)
+            }
+            try save(project, at: root)
+        }
+        try? FileManager.default.removeItem(at: folder)
+        return item
+    }
+
+    /// 受け取ったバイト列を図面フォルダへそのまま置く。中身は書き換えない。
     public static func importDXF(
         data: Data,
         fileName: String,
@@ -341,7 +663,7 @@ public enum ProjectStore {
         now: Date = Date()
     ) throws -> String {
         let directory = try projectDirectory(project.name, at: root)
-        let design = directory.appendingPathComponent("設計", isDirectory: true)
+        let design = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
         let stored = uniqueFileName(preferred: fileName, in: design)
         try data.write(to: design.appendingPathComponent(stored))
         project.drawings.append(ProjectDrawing(
@@ -355,9 +677,21 @@ public enum ProjectStore {
         return stored
     }
 
+    /// SIMA の原本を SIMA フォルダへそのまま置く。中身は書き換えない。
+    @discardableResult
+    public static func importSIMA(
+        data: Data,
+        fileName: String,
+        projectName: String,
+        at root: URL
+    ) throws -> String {
+        try importOriginal(data: data, fileName: fileName, folder: simaFolder, projectName: projectName, at: root)
+    }
+
     public static func originalDXF(fileName: String, projectName: String, at root: URL) throws -> Data {
         let directory = try projectDirectory(projectName, at: root)
-        let url = directory.appendingPathComponent("設計", isDirectory: true).appendingPathComponent(fileName)
+        let folder = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
+        let url = folder.appendingPathComponent(fileName)
         guard let data = try? Data(contentsOf: url) else { throw ProjectStoreError.unreadable }
         return data
     }
@@ -366,8 +700,7 @@ public enum ProjectStore {
         let directory = try projectDirectory(projectName, at: root)
         let tag = ConversionTag(fileName: fileName, zone: zone, axis: axis, note: ConversionTag.keptOriginal)
         let base = (fileName as NSString).deletingPathExtension
-        let url = directory
-            .appendingPathComponent("設計", isDirectory: true)
+        let url = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
             .appendingPathComponent("\(safeComponent(base) ?? "図面").変換.json")
         try write(tag, to: url)
     }
@@ -375,8 +708,7 @@ public enum ProjectStore {
     public static func saveAlignment(_ record: AlignmentRecord, projectName: String, at root: URL) throws -> AlignmentRecord {
         guard let safe = safeComponent(record.name) else { throw ProjectStoreError.emptyName }
         let directory = try projectDirectory(projectName, at: root)
-        let folder = directory
-            .appendingPathComponent("設計", isDirectory: true)
+        let folder = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
             .appendingPathComponent("合わせ", isDirectory: true)
             .appendingPathComponent(safe, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -390,8 +722,7 @@ public enum ProjectStore {
 
     public static func alignments(projectName: String, at root: URL) throws -> [AlignmentRecord] {
         let directory = try projectDirectory(projectName, at: root)
-        let folder = directory
-            .appendingPathComponent("設計", isDirectory: true)
+        let folder = preparedFolder(drawingFolder, legacy: legacyDrawingFolder, in: directory)
             .appendingPathComponent("合わせ", isDirectory: true)
         guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
         let names = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
@@ -571,16 +902,172 @@ public enum ProjectStore {
 
     public static func exportDirectory(projectName: String, at root: URL) throws -> URL {
         let directory = try projectDirectory(projectName, at: root)
-        let folder = directory.appendingPathComponent("出す", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
+        return preparedFolder(exportFolderName, legacy: legacyExportFolder, in: directory)
+    }
+
+    /// Application Support の旧 `プロジェクト` を Documents/projects へ移す。図面と出力のフォルダ名も揃える。
+    public static func migrateProjects(from legacyRoot: URL, to root: URL) {
+        let manager = FileManager.default
+        try? manager.createDirectory(at: root, withIntermediateDirectories: true)
+        if manager.fileExists(atPath: legacyRoot.path),
+           let children = try? manager.contentsOfDirectory(at: legacyRoot, includingPropertiesForKeys: nil) {
+            for child in children {
+                let name = child.lastPathComponent
+                if name == trashFolderName || name == legacyTrashFolderName || name.hasPrefix(".") { continue }
+                guard manager.fileExists(atPath: child.appendingPathComponent("project.json").path) else { continue }
+                let dest = root.appendingPathComponent(name, isDirectory: true)
+                if manager.fileExists(atPath: dest.path) { continue }
+                try? manager.moveItem(at: child, to: dest)
+            }
+            moveTrashContents(from: legacyRoot, to: root)
+        }
+        if let children = try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
+            for child in children where !child.lastPathComponent.hasPrefix(".") {
+                adoptLegacyFolders(in: child)
+            }
+        }
+    }
+
+    private static func trashDirectory(_ id: String, at root: URL) -> URL {
+        for name in [trashFolderName, legacyTrashFolderName] {
+            let existing = root.appendingPathComponent(name, isDirectory: true).appendingPathComponent(id, isDirectory: true)
+            if FileManager.default.fileExists(atPath: existing.path) { return existing }
+        }
+        return root.appendingPathComponent(trashFolderName, isDirectory: true).appendingPathComponent(id, isDirectory: true)
+    }
+
+    private static func conversionTagName(for fileName: String) -> String {
+        let base = (fileName as NSString).deletingPathExtension
+        return "\(safeComponent(base) ?? "図面").変換.json"
+    }
+
+    /// macOS の一時ディレクトリは `/var` から `/private/var` へのリンクになる。存在確認の前に解く。
+    private static func resolved(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().path
+    }
+
+    private static func moveAlignments(named fileName: String, from design: URL, to body: URL) throws {
+        let source = design.appendingPathComponent("合わせ", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
+        let folders = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+        for folder in folders {
+            guard alignmentMatches(fileName, in: folder) else { continue }
+            let destRoot = body.appendingPathComponent("合わせ", isDirectory: true)
+            try FileManager.default.createDirectory(at: destRoot, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: folder, to: destRoot.appendingPathComponent(folder.lastPathComponent, isDirectory: true))
+        }
+    }
+
+    private static func moveAlignmentsBack(from body: URL, to design: URL) throws {
+        let source = body.appendingPathComponent("合わせ", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: source.path) else { return }
+        let destRoot = design.appendingPathComponent("合わせ", isDirectory: true)
+        try FileManager.default.createDirectory(at: destRoot, withIntermediateDirectories: true)
+        let folders = try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
+        for folder in folders {
+            let dest = destRoot.appendingPathComponent(folder.lastPathComponent, isDirectory: true)
+            if FileManager.default.fileExists(atPath: dest.path) { continue }
+            try FileManager.default.moveItem(at: folder, to: dest)
+        }
+    }
+
+    private static func alignmentMatches(_ fileName: String, in folder: URL) -> Bool {
+        guard let versions = try? alignmentVersions(in: folder), let latest = versions.max() else { return false }
+        let url = folder.appendingPathComponent("v\(latest).json")
+        guard let record = try? read(AlignmentRecord.self, from: url) else { return false }
+        return record.drawingFileName == fileName
+    }
+
+    private static func restoreMovedDrawing(fileName: String, body: URL, design: URL) throws {
+        let moved = body.appendingPathComponent(fileName)
+        let dest = design.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: moved.path), !FileManager.default.fileExists(atPath: dest.path) {
+            try FileManager.default.moveItem(at: moved, to: dest)
+        }
+        let tagName = conversionTagName(for: fileName)
+        let tag = body.appendingPathComponent(tagName)
+        let tagDest = design.appendingPathComponent(tagName)
+        if FileManager.default.fileExists(atPath: tag.path), !FileManager.default.fileExists(atPath: tagDest.path) {
+            try FileManager.default.moveItem(at: tag, to: tagDest)
+        }
+        try moveAlignmentsBack(from: body, to: design)
     }
 
     public static func projectDirectory(_ name: String, at root: URL) throws -> URL {
         guard let safe = safeComponent(name) else { throw ProjectStoreError.emptyName }
         let directory = root.appendingPathComponent(safe, isDirectory: true)
         guard FileManager.default.fileExists(atPath: directory.path) else { throw ProjectStoreError.missingProject }
+        adoptLegacyFolders(in: directory)
         return directory
+    }
+
+    @discardableResult
+    private static func importOriginal(
+        data: Data,
+        fileName: String,
+        folder folderName: String,
+        projectName: String,
+        at root: URL
+    ) throws -> String {
+        let directory = try projectDirectory(projectName, at: root)
+        let folder = preparedFolder(folderName, legacy: nil, in: directory)
+        let stored = uniqueFileName(preferred: fileName, in: folder)
+        try data.write(to: folder.appendingPathComponent(stored))
+        return stored
+    }
+
+    private static func preparedFolder(_ name: String, legacy: String?, in directory: URL) -> URL {
+        if let legacy {
+            let old = directory.appendingPathComponent(legacy, isDirectory: true)
+            let current = directory.appendingPathComponent(name, isDirectory: true)
+            moveContents(from: old, to: current)
+        }
+        let folder = directory.appendingPathComponent(name, isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    private static func adoptLegacyFolders(in directory: URL) {
+        moveContents(
+            from: directory.appendingPathComponent(legacyDrawingFolder, isDirectory: true),
+            to: directory.appendingPathComponent(drawingFolder, isDirectory: true)
+        )
+        moveContents(
+            from: directory.appendingPathComponent(legacyExportFolder, isDirectory: true),
+            to: directory.appendingPathComponent(exportFolderName, isDirectory: true)
+        )
+        try? FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(simaFolder, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try? FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(exportFolderName, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+    }
+
+    private static func moveContents(from source: URL, to destination: URL) {
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: source.path) else { return }
+        try? manager.createDirectory(at: destination, withIntermediateDirectories: true)
+        guard let items = try? manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil) else { return }
+        for item in items {
+            let dest = destination.appendingPathComponent(item.lastPathComponent)
+            if manager.fileExists(atPath: dest.path) { continue }
+            try? manager.moveItem(at: item, to: dest)
+        }
+        if let left = try? manager.contentsOfDirectory(at: source, includingPropertiesForKeys: nil), left.isEmpty {
+            try? manager.removeItem(at: source)
+        }
+    }
+
+    private static func moveTrashContents(from legacyRoot: URL, to root: URL) {
+        for name in [trashFolderName, legacyTrashFolderName] {
+            let source = legacyRoot.appendingPathComponent(name, isDirectory: true)
+            guard FileManager.default.fileExists(atPath: source.path) else { continue }
+            let destination = root.appendingPathComponent(trashFolderName, isDirectory: true)
+            moveContents(from: source, to: destination)
+        }
     }
 
     private static func alignmentVersions(in folder: URL) throws -> [Int] {

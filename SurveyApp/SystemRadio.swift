@@ -1,9 +1,9 @@
 import Foundation
 import SurveyCore
 
-#if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+#if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
 import AVFoundation
-import PushToTalk
+@_weakLinked import PushToTalk
 
 /// システムの PushToTalk。ロック中の受信とシステムのボタンは、このクラスが枠だけ持つ。
 /// 実機の参加、トークン、音声セッションは未確認。
@@ -15,6 +15,7 @@ final class SystemPushToTalk: NSObject, PTChannelManagerDelegate, PTChannelResto
     var onToken: ((Data) -> Void)?
 
     func start() {
+        guard RadioHardware.pushToTalk else { return }
         Task { @MainActor in
             do {
                 manager = try await PTChannelManager.channelManager(delegate: self, restorationDelegate: self)
@@ -25,6 +26,7 @@ final class SystemPushToTalk: NSObject, PTChannelManagerDelegate, PTChannelResto
     }
 
     func join(_ channel: RadioChannel) {
+        guard RadioHardware.pushToTalk else { return }
         self.channel = channel
         manager?.requestJoinChannel(
             channelUUID: channel.uuid,
@@ -33,12 +35,12 @@ final class SystemPushToTalk: NSObject, PTChannelManagerDelegate, PTChannelResto
     }
 
     func begin() {
-        guard let channel else { return }
+        guard RadioHardware.pushToTalk, let channel else { return }
         manager?.requestBeginTransmitting(channelUUID: channel.uuid)
     }
 
     func end() {
-        guard let channel else { return }
+        guard RadioHardware.pushToTalk, let channel else { return }
         manager?.stopTransmitting(channelUUID: channel.uuid)
     }
 

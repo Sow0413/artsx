@@ -5,13 +5,46 @@ public struct DrawingBatchStroke: Sendable, Equatable {
     public var red: Double
     public var green: Double
     public var blue: Double
+    /// 画面上の pt。拡大しても変えない。
+    public var width: Double
     public var points: [PlanarPoint]
 
-    public init(color: DrawingColor, points: [PlanarPoint]) {
+    public init(color: DrawingColor, points: [PlanarPoint], width: Double = DrawingStroke.screenPoints(weight: 1)) {
         red = color.red
         green = color.green
         blue = color.blue
+        self.width = width
         self.points = points
+    }
+}
+
+/// 図面の線は画面の pt で描く。SXF の線幅は相対のヒントで、0.5〜1 pt を超えない。
+public enum DrawingStroke {
+    public static let minimumPoints = 0.5
+    public static let maximumPoints = 1.0
+    public static let contour = DrawingColor(red: 0.55, green: 0.57, blue: 0.60)
+
+    /// 1〜8 は SXF の線幅番号。それより大きい値は 0.01 mm とみて、どちらも 0.5〜1 pt に収める。
+    public static func screenPoints(weight: Double) -> Double {
+        let hint = weight.isFinite && weight > 0 ? weight : 1
+        let t: Double
+        if hint <= 8 {
+            t = (min(8, hint) - 1) / 7
+        } else {
+            let millimetres = hint / 100
+            t = min(1, max(0, (millimetres - 0.13) / (1.0 - 0.13)))
+        }
+        return minimumPoints + (maximumPoints - minimumPoints) * t
+    }
+
+    public static func isContour(_ layer: String) -> Bool {
+        let folded = layer.uppercased()
+        let markers = ["等高", "計曲線", "主曲線", "補助曲線", "CONTOUR", "CNTR"]
+        return markers.contains { folded.contains($0) }
+    }
+
+    public static func displayColor(_ color: DrawingColor, layer: String) -> DrawingColor {
+        isContour(layer) ? contour : color
     }
 }
 
@@ -79,25 +112,36 @@ public enum DrawingLOD {
         var points: [DrawingBatchPoint] = []
         var labels: [DrawingBatchLabel] = []
         strokes.reserveCapacity(min(ids.count, maxStrokes))
+        var contourSeen = 0
         for id in ids {
             if strokes.count >= maxStrokes { break }
             guard document.entities.indices.contains(id) else { continue }
             let entity = document.entities[id]
             guard visible.contains(entity.layer) else { continue }
             if !overview, !entity.bounds.intersects(view) { continue }
-            if entity.bounds.width < pixel, entity.bounds.height < pixel, entity.stroke.count > 1 {
+            let contour = DrawingStroke.isContour(entity.layer)
+            if overview && contour {
+                contourSeen += 1
+                if contourSeen % 3 != 1 { continue }
+            }
+            let cull = contour ? pixel * 1.8 : pixel
+            if entity.bounds.width < cull, entity.bounds.height < cull, entity.stroke.count > 1 {
                 continue
             }
-            let limit = overview ? 4 : 48
-            let simplified = decimate(entity.stroke, step: pixel * 1.5, limit: limit)
+            let limit = overview ? (contour ? 3 : 4) : 48
+            let gap = pixel * (overview && contour ? 4 : 1.5)
+            let simplified = decimate(entity.stroke, step: gap, limit: limit)
             if simplified.count >= 2 {
-                strokes.append(DrawingBatchStroke(color: entity.color, points: simplified))
+                let color = DrawingStroke.displayColor(entity.color, layer: entity.layer)
+                let width = DrawingStroke.screenPoints(weight: entity.lineWeight)
+                strokes.append(DrawingBatchStroke(color: color, points: simplified, width: width))
             }
+            let shown = DrawingStroke.displayColor(entity.color, layer: entity.layer)
             if case let .point(point) = entity.primitive, view.contains(point) || overview {
-                points.append(DrawingBatchPoint(color: entity.color, point: point))
+                points.append(DrawingBatchPoint(color: shown, point: point))
             }
             if labels.count < maxLabels, case let .text(origin, string, height, _) = entity.primitive, height >= pixel * 8 {
-                labels.append(DrawingBatchLabel(color: entity.color, origin: origin, text: string, height: height))
+                labels.append(DrawingBatchLabel(color: shown, origin: origin, text: string, height: height))
             }
         }
         return DrawingBatch(strokes: strokes, points: points, labels: labels)

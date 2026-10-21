@@ -88,17 +88,12 @@ private final class ARSessionBox: NSObject, ARSessionDelegate {
     }
 
     func attach(_ view: ARSCNView) {
-        preview = view
         view.session = session
         session.delegate = self
         enableGround()
     }
 
-    func detach() {
-        preview = nil
-    }
-
-    private weak var preview: ARSCNView?
+    func detach() {}
 
     private func configuration(ground: Bool) -> ARWorldTrackingConfiguration {
         let configuration = ARWorldTrackingConfiguration()
@@ -120,7 +115,6 @@ private final class ARSessionBox: NSObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        preview?.session(session, didUpdate: frame)
         let now = Date()
         guard now.timeIntervalSince(last) >= 0.1 else { return }
         last = now
@@ -156,18 +150,6 @@ private final class ARSessionBox: NSObject, ARSessionDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.onFrame?(sample)
         }
-    }
-
-    func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        preview?.session(session, didAdd: anchors)
-    }
-
-    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        preview?.session(session, didUpdate: anchors)
-    }
-
-    func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-        preview?.session(session, didRemove: anchors)
     }
 
     private static func ground(in frame: ARFrame, cameraX: Float, cameraZ: Float) -> (y: Double?, source: String) {

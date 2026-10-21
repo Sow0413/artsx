@@ -72,7 +72,10 @@ struct BatterSheet: View {
             if showsRelativeBadge {
                 RelativeStageBadge(badge: relativeBadge)
             } else {
-                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                AccuracyBadgeView(
+                    badge: field.badge,
+                    knownOffsetMeters: field.knownShift?.horizontalOffsetMeters
+                )
                 if guide {
                     Text(BatterMath.guideWord)
                         .font(SurveyType(22, .heavy))
@@ -140,7 +143,7 @@ struct BatterSheet: View {
                 .font(SurveyType(20, .heavy))
                 .fixedSize(horizontal: false, vertical: true)
             if field.batter.slope != 0, field.batter.slopeAzimuthDegrees == nil {
-                Text("勾配の向きが無いので、勾配は足しません。")
+                Text("勾配の向きなし")
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -164,22 +167,25 @@ struct BatterSheet: View {
                 case .poleTip:
                     fieldRow("ポール高 m", text: $poleText, commit: commitPole)
                 case .crosshair:
-                    Text(crosshairLevel == true ? "十字線は水平です。器械高は地盤高に目の高さを足した値です。" : "十字線は、水平（±0.1°）のときだけ高さに使います。")
-                        .font(SurveyType(14, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 0) {
+                        Text(crosshairLevel == true ? "水平" : "水平待ち")
+                            .font(SurveyType(16, .heavy))
+                            .foregroundStyle(crosshairLevel == true ? SurveyColor.muted : SurveyColor.amber)
+                        InfoButton(help: .batter)
+                        Spacer(minLength: 0)
+                    }
                 case .relative:
                     relativeSettings
                 }
                 fieldRow("計画高 m", text: $designText, commit: commitDesign)
-                fieldRow("オフセット m（+0.50 で貫は 50cm 上）", text: $offsetText, commit: commitOffset)
-                fieldRow("勾配（1m あたり。+0.02 は 2%）", text: $slopeText, commit: commitSlope)
-                fieldRow("勾配の向き °（空なら足さない）", text: $azimuthText, commit: commitAzimuth)
+                fieldRow("オフセット m", text: $offsetText, commit: commitOffset)
+                fieldRow("勾配 /m", text: $slopeText, commit: commitSlope)
+                fieldRow("勾配の向き °", text: $azimuthText, commit: commitAzimuth)
                 if planAzimuth != nil {
                     Button("目標の方向を使う") { usePlanAzimuth() }
                         .buttonStyle(SurveyPlainButton())
                 }
-                fieldRow("許容 ±mm（既定 5）", text: $toleranceText, commit: commitTolerance)
+                fieldRow("許容 ±mm", text: $toleranceText, commit: commitTolerance)
             }
         }
         .frame(maxHeight: field.batter.source == .relative ? 300 : 220)
@@ -187,15 +193,12 @@ struct BatterSheet: View {
 
     private var relativeSettings: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("楕円体高のある基準点か、座標簿の点でゼロを合わせます。標高だけしか無い点は使いません。")
-                .font(SurveyType(14, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
+            HelpLabel(title: "ゼロ", help: .batter)
             ForEach(controlHeights.prefix(8)) { item in
                 knownButton(item)
             }
             if controlHeights.isEmpty {
-                Text("楕円体高のある基準点は、まだありません。")
+                Text("基準点なし")
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
@@ -317,8 +320,9 @@ struct BatterSheet: View {
     private var measured: Double? {
         switch field.batter.source {
         case .poleTip:
-            guard let device = position?.ellipsoidalHeightMeters else { return nil }
-            return BatterMath.poleTip(deviceEllipsoidal: device, poleMeters: field.poleHeight.meters)
+            guard let position, let device = position.ellipsoidalHeightMeters else { return nil }
+            guard let tip = BatterMath.poleTip(deviceEllipsoidal: device, poleMeters: field.poleHeight.meters) else { return nil }
+            return field.surveyHeight(ellipsoidal: tip, at: position).orthometricMeters ?? tip
         case .crosshair:
             guard BatterMath.acceptsCrosshair(isLevel: crosshairLevel),
                   let ground = field.crosshairGroundHeight(),
@@ -434,9 +438,9 @@ struct BatterSheet: View {
             if field.poleHeight.meters == nil { return "ポール高が無いので、先端の高さは出せません。" }
             if measured == nil { return "ポール高が範囲外です。" }
         case .crosshair:
-            if crosshairLevel == nil { return "傾きが無いので、十字線の水平は未確認です。" }
+            if crosshairLevel == nil { return "傾きが無いので、十字線が水平かは出せません。" }
             if crosshairLevel == false { return "水平ではないので、十字線は高さになりません。" }
-            if field.crosshairGroundHeight() == nil { return "地盤高が無いので、十字線の高さは出せません。" }
+            if field.crosshairGroundHeight() == nil { return "標高が無いので、十字線の高さは出せません。" }
             if StatureMath.eyeHeight(field.stature) == nil { return "目の高さが無いので、十字線の高さは出せません。" }
         case .relative:
             if relative.fix == nil { return "既知の高さでゼロを合わせてください。" }

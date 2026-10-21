@@ -3,18 +3,24 @@ import SurveyCore
 
 struct WorkBar: View {
     @ObservedObject var field: FieldModel
+    var ids: [String]? = nil
+
+    private var works: [WorkRequirement] {
+        guard let ids else { return field.workCatalog.works }
+        return ids.compactMap { id in field.workCatalog.works.first { $0.id == id } }
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(field.workCatalog.works) { work in
+                ForEach(works) { work in
                     Button {
                         field.selectWork(work.id)
                     } label: {
                         Text(work.shortTitle)
                             .font(SurveyType(16, .heavy))
                             .padding(.horizontal, 14)
-                            .frame(minHeight: OutdoorContrast.primaryPoints)
+                            .frame(minHeight: 44)
                             .foregroundStyle(field.workCatalog.selectedID == work.id ? SurveyColor.onAccent : SurveyColor.muted)
                             .background(
                                 field.workCatalog.selectedID == work.id ? SurveyColor.blue : SurveyColor.card,
@@ -31,7 +37,7 @@ struct WorkBar: View {
                     Text("数値")
                         .font(SurveyType(16, .heavy))
                         .padding(.horizontal, 14)
-                        .frame(minHeight: OutdoorContrast.primaryPoints)
+                        .frame(minHeight: 44)
                         .foregroundStyle(SurveyColor.text)
                         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
@@ -39,7 +45,7 @@ struct WorkBar: View {
                 .accessibilityLabel("要求精度を編集")
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
         }
         .background(SurveyColor.background)
             .overlay(alignment: .top) {
@@ -62,10 +68,7 @@ struct WorkSettingsSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("仮の既定値です。現場に合わせて直すと、SitePack の work-requirements.json に残ります。")
-                        .font(SurveyType(15, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HelpLabel(title: "要求精度", help: .accuracy)
                     ForEach($rows) { $row in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(row.title)
@@ -79,12 +82,8 @@ struct WorkSettingsSheet: View {
                         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("楽観的なときの係数")
+                        Text("係数")
                             .font(SurveyType(18, .heavy))
-                        Text("三角点で報告が楽観的だった機器は、この倍率をかけてから要求と比べます。")
-                            .font(SurveyType(14, .semibold))
-                            .foregroundStyle(SurveyColor.muted)
-                            .fixedSize(horizontal: false, vertical: true)
                         labeledField("倍", text: $factor)
                     }
                     .padding(12)

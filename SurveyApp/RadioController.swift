@@ -21,7 +21,7 @@ final class RadioController: ObservableObject {
     var onRelay: ((RadioPacket) -> Void)?
     private var heardRadio: [String] = []
 
-    #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+    #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
     private let system = SystemPushToTalk()
     #endif
 
@@ -29,13 +29,14 @@ final class RadioController: ObservableObject {
         self.nearby = nearby
         self.defaults = defaults
         desk = RadioDesk(speaker: "この端末", relay: relay, nearby: mesh)
-        spaceAudio = defaults.object(forKey: "radio.spaceAudio") as? Bool ?? false
-        space.enabled = spaceAudio
+        let spaceOn = defaults.object(forKey: "radio.spaceAudio") as? Bool ?? false
+        spaceAudio = spaceOn
         if RadioHardware.pushToTalk || RadioHardware.nearbyPeers {
             status = "中継はまだありません。近くに同じ現場がいれば、そちらへ出します。"
         } else {
             status = "無線の権限は切ってあります。発話は端末に残します。"
         }
+        space.enabled = spaceOn
         desk.onAudio = { [weak self] data in
             self?.playIncoming(data)
         }
@@ -69,7 +70,7 @@ final class RadioController: ObservableObject {
     func audioData() -> [UUID: Data] { desk.audio }
 
     func arm() {
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if RadioHardware.pushToTalk {
             system.onBegan = { [weak self] in self?.systemTalkBegan() }
             system.onEnded = { [weak self] in self?.systemTalkEnded() }
@@ -100,7 +101,7 @@ final class RadioController: ObservableObject {
     func begin(channel: RadioChannel, station: RadioStationStamp?) {
         desk.attachStation = attachStation
         desk.join(channel)
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if RadioHardware.pushToTalk {
             system.join(channel)
         }
@@ -108,7 +109,7 @@ final class RadioController: ObservableObject {
         nearby.start(channel: channel, name: desk.speaker)
         let started = desk.beginTalking(at: Date(), station: station) != nil
         systemBegan = started
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if started, RadioHardware.pushToTalk {
             system.begin()
         }
@@ -117,7 +118,7 @@ final class RadioController: ObservableObject {
     }
 
     func end(projectName: String?, root: URL?) {
-        #if !SURVEY_PLAYGROUND && canImport(PushToTalk)
+        #if !SURVEY_PLAYGROUND && canImport(PushToTalk) && !targetEnvironment(macCatalyst)
         if RadioHardware.pushToTalk {
             system.end()
         }

@@ -10,14 +10,7 @@ struct ExtraSettingsSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("測量の画面が先です。座標簿、図面、測設、基準点、出力、オペ画面は、ここのスイッチに関係なく動きます。")
-                        .font(SurveyType(16, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("下はおまけです。既定ではオフで、測量の画面には出ません。オンにした機能だけが、その画面に足されます。")
-                        .font(SurveyType(16, .heavy))
-                        .foregroundStyle(SurveyColor.text)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HelpLabel(title: "追加機能", help: .extras)
                     row("押して話す", "オペ画面の無線ボタンと、話しているあいだの矢印。", \.pushToTalk)
                     row("接近警報", "相手の位置、ヒヤリ、音と画面の色。", \.proximity)
                     row("転倒", "加速度での転倒と衝撃。", \.fall)
@@ -31,7 +24,7 @@ struct ExtraSettingsSheet: View {
                 .padding(16)
             }
             .background(SurveyColor.background)
-            .navigationTitle("おまけ")
+            .navigationTitle("追加機能")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -63,21 +56,3 @@ struct ExtraSettingsSheet: View {
     }
 }
 
-struct ExtraEntryButton: View {
-    var action: () -> Void
-
-    var body: some View {
-        Button("おまけ", action: action)
-            .font(SurveyType(14, .heavy))
-            .foregroundStyle(SurveyColor.muted)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(SurveyColor.card)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .accessibilityLabel("おまけの設定")
-    }
-}

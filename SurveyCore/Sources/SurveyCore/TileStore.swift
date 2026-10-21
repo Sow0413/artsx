@@ -54,12 +54,17 @@ public actor DiskTileCache: TileFetching {
         try loadIfNeeded()
         if let data = read(tile) {
             touch(tile, bytes: data.count)
-            try persist()
+            try? persist()
             return data
         }
         let data = try await upstream.fetch(tile)
         guard !data.isEmpty else { throw TileError.empty(tile) }
-        try write(data, for: tile)
+        // ディスクに書けなくても、取れた画像は地図に出す。書けないと result が失敗し、全面が黒になる。
+        do {
+            try write(data, for: tile)
+        } catch {
+            return data
+        }
         return data
     }
 

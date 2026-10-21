@@ -9,23 +9,12 @@ struct ExportTabView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("出す")
-                    .font(SurveyType(28, .heavy))
-                ExtraEntryButton {
-                    field.showsExtras = true
+                HStack(spacing: 0) {
+                    Text("出す")
+                        .font(SurveyType(28, .heavy))
+                    InfoButton(help: .delivery)
+                    Spacer(minLength: 0)
                 }
-                Text("無線、接近、転倒、SOS、災害、中継、統計はおまけです。既定ではオフで、測量の画面には出ません。")
-                    .font(SurveyType(14, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("受取手が今受け取れる形だけ出します。点群と3Dは点群フォルダに保存するだけで、ここには出しません。")
-                    .font(SurveyType(16, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(CoordinateDelivery.pointCloudNote)
-                    .font(SurveyType(14, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
                 filters
                 let preview = field.bookPreview()
                 Text("\(preview.count) 点")
@@ -61,10 +50,6 @@ struct ExportTabView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text("系\(field.drawing.zone)の平面直角座標で書きます。JGD2024 の元期補正は、まだ掛けていません。")
-                    .font(SurveyType(13, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(20)
         }
@@ -75,11 +60,8 @@ struct ExportTabView: View {
 
     private var filters: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("座標簿の絞り込み")
+            Text("絞り込み")
                 .font(SurveyType(18, .heavy))
-            Text("条件はすべて同時に効きます。空欄は無視します。")
-                .font(SurveyType(13, .semibold))
-                .foregroundStyle(SurveyColor.muted)
             fieldRow("点名の頭") {
                 TextField("T", text: prefixBinding)
                     .textInputAutocapitalization(.characters)
@@ -217,7 +199,8 @@ struct ExportTabView: View {
         case .rtkFix: return entry.receiverLabel == "CLAS" ? "CLAS" : "FIX"
         case .float: return "FLOAT"
         case .clas: return "CLAS"
-        case .standalone, .dgps, .none: return "単独"
+        case .dgps: return "DGPS"
+        case .standalone, .none: return "単独"
         }
     }
 }
