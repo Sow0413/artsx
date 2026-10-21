@@ -69,10 +69,7 @@ struct MeasureLogView: View {
                 }
                 OperationBar(field: field, showsSkill: true)
                 if field.operation.showsAdvanced {
-                    Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
-                        .font(SurveyType(16, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HelpLabel(title: field.workCatalog.selected.shortTitle, help: .points)
                     TextField("点名の頭（T）", text: prefixBinding)
                         .textFieldStyle(.roundedBorder)
                         .textInputAutocapitalization(.characters)
@@ -209,8 +206,7 @@ struct MeasureLogView: View {
 
     private var controlSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("基準点")
-                .font(SurveyType(18, .heavy))
+            HelpLabel(title: "基準点", help: .points)
             Text(controlStatus)
                 .font(SurveyType(15, .semibold))
                 .foregroundStyle(field.controlFix.restarted ? SurveyColor.amber : SurveyColor.muted)
@@ -233,10 +229,6 @@ struct MeasureLogView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
-            Text("段階2の RTK FIX のあいだだけ残せます。解が落ちて段階が下がると記録は止まり、測位は続きます。iPhone の GPS では衛星数・PDOP・補正の遅れは出ません。")
-                .font(SurveyType(13, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)

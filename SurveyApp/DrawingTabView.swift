@@ -672,21 +672,10 @@ struct DrawingTabView: View {
                     Text("\(CoordinateText.latitude(latitude)), \(CoordinateText.longitude(longitude))")
                         .font(SurveyType(14, .semibold))
                 }
-                if stakeoutPrecision == .centimeters {
-                    Text("座標簿で合わせてあるので、cm で出します。")
-                        .font(SurveyType(13, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                }
                 Button("この線を中心線にする") {
                     drawing.adoptOperatorLine()
                 }
                 .buttonStyle(SurveyPlainButton())
-                Text("追加距離を張り、現在地を No.23+5.0m 左 3.2m のように出します。iPhone の精度で足ります。")
-                    .font(SurveyType(13, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                Text("この点がオペの目標です。作業半径の内と外を色で出します。")
-                    .font(SurveyType(13, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
                 if let guide = field.stakeoutGuide {
                     Text(guide.speech)
                         .font(SurveyType(34, .heavy))
@@ -698,6 +687,12 @@ struct DrawingTabView: View {
                     }
                     Button("AR位置出し") { field.showsARStakeout = true }
                         .buttonStyle(SurveyPlainButton())
+                    HStack(spacing: 0) {
+                        Text("声")
+                            .font(SurveyType(16, .heavy))
+                        InfoButton(help: .stakeout)
+                        Spacer(minLength: 0)
+                    }
                     HStack(spacing: 8) {
                         ForEach(StakeoutSpeechStyle.allCases, id: \.self) { style in
                             Button(style.label) { field.setStakeoutSpeech(style) }
@@ -721,7 +716,7 @@ struct DrawingTabView: View {
                         }
                     }
                 } else if inspection.distanceMeters == nil {
-                    Text("現在地が無いので、距離と方向は出せません。")
+                    Text("現在地なし")
                         .font(SurveyType(14, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }

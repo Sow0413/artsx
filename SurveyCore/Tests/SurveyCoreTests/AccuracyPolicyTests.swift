@@ -15,6 +15,7 @@ final class AccuracyPolicyTests: XCTestCase {
         XCTAssertEqual(badge.tone, .yellow)
         XCTAssertEqual(badge.solutionLabel, "単独")
         XCTAssertEqual(badge.text, "単独　iPhone GPS 約3m")
+        XCTAssertEqual(badge.compactText, "単独 ±3m")
         XCTAssertTrue(badge.accessibilityText.hasPrefix("下見。段階0。単独　iPhone GPS 約3m"))
         XCTAssertTrue(badge.guidance.contains("高さがあと300cm"))
         XCTAssertFalse(badge.isStakeoutGrade)
@@ -152,6 +153,9 @@ final class AccuracyPolicyTests: XCTestCase {
         XCTAssertEqual(AccuracyFormat.label(meters: 0.8, approximate: true), "約80cm")
         XCTAssertEqual(AccuracyFormat.label(meters: 0.05, approximate: true), "約5cm")
         XCTAssertEqual(AccuracyFormat.label(meters: 0.02, approximate: false), "2cm")
+        XCTAssertEqual(AccuracyFormat.plusMinus(meters: 20), "±20m")
+        XCTAssertEqual(AccuracyFormat.plusMinus(meters: 0.2), "±20cm")
+        XCTAssertEqual(AccuracyFormat.plusMinus(meters: 0.02), "±2cm")
     }
 
     func testPositionRoundTripsAndKeepsFrame() throws {

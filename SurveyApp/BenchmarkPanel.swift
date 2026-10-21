@@ -7,20 +7,23 @@ struct BenchmarkHint: View {
     let visibleCount: Int
 
     var body: some View {
-        Text(message)
-            .font(SurveyType(14, .semibold))
-            .foregroundStyle(notice == nil ? SurveyColor.muted : SurveyColor.amber)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        HStack(spacing: 0) {
+            Text(message)
+                .font(SurveyType(14, .semibold))
+                .foregroundStyle(notice == nil ? SurveyColor.muted : SurveyColor.amber)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            InfoButton(help: .benchmark)
+        }
+        .padding(.leading, 10)
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var message: String {
         if let notice { return notice }
-        if visibleCount > 0 { return "三角点をタップすると、検証の記録を始めます。" }
-        if loadedCount > 0 { return "近くに見本の点が無いときは、地図を引いて探します。" }
-        return "基準点がありません。"
+        if visibleCount > 0 { return "三角点 \(visibleCount)" }
+        if loadedCount > 0 { return "この範囲に三角点なし" }
+        return "基準点なし"
     }
 }
 
@@ -71,9 +74,6 @@ struct BenchmarkCard: View {
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("毎回、置き直して向きを変えます。")
-                .font(SurveyType(14, .semibold))
-                .foregroundStyle(SurveyColor.muted)
             HStack(spacing: 8) {
                 ForEach([1, 3, 5], id: \.self) { count in
                     Button {
@@ -136,7 +136,7 @@ struct BenchmarkCard: View {
                 .foregroundStyle(SurveyColor.muted)
             Text("\(recorder.samples.count) / \(recorder.plan.expectedCount) 点")
                 .font(SurveyType(28, .heavy, mono: true))
-            Text("1秒に1点。\(BenchmarkPlan.durationTitle(recorder.plan.durationSeconds))で止まります。")
+            Text("1秒に1点")
                 .font(SurveyType(15, .semibold))
                 .foregroundStyle(SurveyColor.muted)
             Button(action: field.cancelBenchmark) {

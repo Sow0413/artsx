@@ -21,6 +21,8 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
     public var caution: String
     /// FIX / FLOAT / 単独 / CLAS。位置が無いときは「—」。
     public var solutionLabel: String
+    /// 常時出す1行。例: 単独 ±20m。足りない長さは guidance に残し、画面ではタップで出す。
+    public var compactText: String
 
     public init(
         tone: AccuracyTone,
@@ -29,7 +31,8 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
         isStakeoutGrade: Bool,
         guidance: String = "",
         caution: String = "",
-        solutionLabel: String = "—"
+        solutionLabel: String = "—",
+        compactText: String = ""
     ) {
         self.tone = tone
         self.text = text
@@ -38,6 +41,7 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
         self.guidance = guidance
         self.caution = caution
         self.solutionLabel = solutionLabel
+        self.compactText = compactText.isEmpty ? text : compactText
     }
 }
 
@@ -56,6 +60,20 @@ public enum AccuracyFormat {
             centimeters = 1
         }
         return "\(prefix)\(centimeters)cm"
+    }
+
+    /// 常時バナー用。約は付けず、±で幅だけ出す。
+    public static func plusMinus(meters: Double) -> String {
+        guard meters.isFinite, meters >= 0 else { return "±—m" }
+        if meters >= 1 {
+            let rounded = Int(meters.rounded(.toNearestOrAwayFromZero))
+            return "±\(rounded)m"
+        }
+        var centimeters = Int((meters * 100).rounded(.toNearestOrAwayFromZero))
+        if centimeters == 0, meters > 0 {
+            centimeters = 1
+        }
+        return "±\(centimeters)cm"
     }
 }
 
@@ -97,7 +115,8 @@ public enum AccuracyPolicy {
                     text: "精度不明",
                     accessibilityText: "\(work.shortTitle)。段階\(position.stage.rawValue)。精度不明",
                     isStakeoutGrade: false,
-                    solutionLabel: position.solutionLabel
+                    solutionLabel: position.solutionLabel,
+                    compactText: "\(position.solutionLabel) 精度不明"
                 )
             }
             let judged = judgment(
@@ -117,6 +136,7 @@ public enum AccuracyPolicy {
                 guidance = [stageNotice, guidance].filter { !$0.isEmpty }.joined(separator: " ")
             }
             let text = "\(position.solutionLabel)　\(detail(for: position))"
+            let compactText = "\(position.solutionLabel) \(AccuracyFormat.plusMinus(meters: position.horizontalAccuracyMeters))"
             let stage = operatingStage ?? position.stage
             let accessibility = [
                 work.shortTitle,
@@ -131,7 +151,8 @@ public enum AccuracyPolicy {
                 isStakeoutGrade: position.isTrustedRTKFix && tone == .green,
                 guidance: guidance,
                 caution: judged.caution,
-                solutionLabel: position.solutionLabel
+                solutionLabel: position.solutionLabel,
+                compactText: compactText
             )
         }
     }

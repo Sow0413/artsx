@@ -11,6 +11,8 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var field: FieldModel
     @StateObject private var appearance = SurveyAppearance()
+    @State private var showsMenu = false
+    @State private var menuNext: FieldMenuNext?
 
     init(
         source: any PositionSource,
@@ -47,12 +49,18 @@ struct RootView: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
             }
-            if field.tab != .seat {
-                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: field.tab == .map)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 4)
-                    .padding(.bottom, 4)
+            HStack(spacing: 8) {
+                if field.tab != .seat {
+                    AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: true)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Spacer(minLength: 0)
+                }
+                settingsButton
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 4)
             if field.tab != .seat, let correction = field.correctionStore.active {
                 CorrectionStatusBar(correction: correction)
             }
@@ -80,7 +88,6 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            themeButton
             if field.tab != .seat {
                 SurveyTabBar(selection: $field.tab)
             }
@@ -124,6 +131,9 @@ struct RootView: View {
             field.consumePendingConfirm()
         }
         .modifier(MeshPresenceWatcher(field: field))
+        .sheet(isPresented: $showsMenu, onDismiss: openMenuNext) {
+            FieldMenuSheet(field: field, appearance: appearance, next: $menuNext)
+        }
         .sheet(isPresented: $field.showsPrivacy) {
             LocationPrivacySheet(field: field)
         }
@@ -153,6 +163,23 @@ struct RootView: View {
         }
     }
 
+    private func openMenuNext() {
+        let next = menuNext
+        menuNext = nil
+        switch next {
+        case .stature:
+            field.showsStature = true
+        case .extras:
+            field.showsExtras = true
+        case .tools:
+            field.showsToolOrder = true
+        case .privacy:
+            field.showsPrivacy = true
+        case nil:
+            break
+        }
+    }
+
     private func syncVolume() {
         if field.operation.level == .skilled, field.operation.eyesFree, scenePhase == .active {
             VolumeConfirmWatcher.start {
@@ -163,22 +190,22 @@ struct RootView: View {
         }
     }
 
-    private var themeButton: some View {
-        Button(action: appearance.cycle) {
-            Text(appearance.label)
-                .font(SurveyType(15, .heavy))
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(appearance.outdoor ? SurveyColor.color(OutdoorContrast.yellow) : SurveyColor.card)
-                .foregroundStyle(appearance.outdoor ? SurveyColor.color(OutdoorContrast.black) : SurveyColor.text)
+    private var settingsButton: some View {
+        Button {
+            showsMenu = true
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(SurveyType(18, .bold))
+                .frame(width: 44, height: 44)
+                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .foregroundStyle(SurveyColor.text)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
                 )
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        .accessibilityLabel(appearance.label)
+        .accessibilityLabel("設定")
     }
 }
 

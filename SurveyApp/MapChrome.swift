@@ -5,62 +5,96 @@ struct AccuracyBadgeView: View {
     let badge: AccuracyBadgeModel
     var stage: PositionStage?
     var compact = false
+    @State private var showsDetail = false
 
     var body: some View {
-        HStack(spacing: compact ? 8 : 10) {
-            Circle()
-                .fill(badge.tone.mark)
-                .frame(width: compact ? 12 : 16, height: compact ? 12 : 16)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(badge.solutionLabel)
-                        .font(SurveyType(compact ? 13 : 15, .heavy))
-                        .foregroundStyle(chipInk)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, compact ? 2 : 3)
-                        .background(badge.tone.mark, in: Capsule())
-                    if let stage {
-                        Text("段階\(stage.rawValue)")
-                            .font(SurveyType(compact ? 12 : 13, .heavy))
-                            .foregroundStyle(SurveyColor.muted)
-                    }
-                }
-                Text(badge.text)
-                    .font(SurveyType(compact ? 16 : 20, .heavy))
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                if !badge.caution.isEmpty {
-                    Text(badge.caution)
-                        .font(SurveyType(compact ? 12 : 13, .semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if !badge.guidance.isEmpty {
-                    Text(badge.guidance)
-                        .font(SurveyType(compact ? 13 : 14, .heavy))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 0)
+        Button {
+            showsDetail = true
+        } label: {
+            compactLine
         }
-        .padding(.horizontal, compact ? 10 : 14)
-        .padding(.vertical, compact ? 6 : 12)
-        .frame(maxWidth: .infinity, minHeight: compact ? 44 : OutdoorContrast.primaryPoints, alignment: .leading)
-        .foregroundStyle(badge.tone.tint)
-        .background(badge.tone.badgeBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
-        )
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showsDetail) {
+            AccuracyDetailSheet(badge: badge, stage: stage)
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(badge.accessibilityText)
+        .accessibilityHint("詳しく見る")
     }
 
-    /// 黄地は黒文字。赤と緑の原色地は白文字。
-    private var chipInk: Color {
-        switch badge.tone {
-        case .amber, .yellow: return SurveyColor.color(OutdoorContrast.black)
-        case .red, .green, .grey: return SurveyColor.onAccent
+    private var compactLine: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(badge.tone.mark)
+                .frame(width: 12, height: 12)
+            Text(badge.compactText.isEmpty ? badge.text : badge.compactText)
+                .font(SurveyType(16, .heavy))
+                .foregroundStyle(badge.tone.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(badge.tone.badgeBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+        )
+    }
+
+}
+
+/// 足りない長さと届く手段。常時バナーには出さない。
+struct AccuracyDetailSheet: View {
+    let badge: AccuracyBadgeModel
+    var stage: PositionStage?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(badge.compactText.isEmpty ? badge.text : badge.compactText)
+                        .font(SurveyType(34, .heavy))
+                        .foregroundStyle(badge.tone.tint)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    if let stage {
+                        Text("段階\(stage.rawValue)")
+                            .font(SurveyType(16, .heavy))
+                            .foregroundStyle(SurveyColor.muted)
+                    }
+                    if badge.text != badge.compactText {
+                        Text(badge.text)
+                            .font(SurveyType(18, .heavy))
+                    }
+                    if !badge.caution.isEmpty {
+                        Text(badge.caution)
+                            .font(SurveyType(16, .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !badge.guidance.isEmpty {
+                        Text(badge.guidance)
+                            .font(SurveyType(16, .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .foregroundStyle(SurveyColor.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+            }
+            .background(SurveyColor.background)
+            .navigationTitle("測位")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") { dismiss() }
+                        .font(SurveyType(17, .heavy))
+                }
+            }
+        }
+        .modifier(SurveyScheme())
     }
 }
 
@@ -135,11 +169,8 @@ struct LocationPanel: View {
                     .font(SurveyType(20, .heavy, mono: true))
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
-                    Text(accuracyText(position))
-                }
-                .font(SurveyType(15, .bold))
+                Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
+                    .font(SurveyType(15, .bold))
                 if let statureNotice {
                     Button(action: { onStature?() }) {
                         Text(statureNotice)
@@ -156,13 +187,8 @@ struct LocationPanel: View {
                     Text(note)
                         .font(SurveyType(14, .heavy))
                         .foregroundStyle(SurveyColor.blue)
+                        .lineLimit(2)
                 }
-                Text(CoordinateText.previewNote)
-                    .font(SurveyType(12, .bold))
-                    .foregroundStyle(SurveyColor.muted)
-                Text(CoordinateText.storageNote)
-                    .font(SurveyType(12, .medium))
-                    .foregroundStyle(SurveyColor.muted)
                 if let warning = warningText {
                     Text(warning)
                         .font(SurveyType(15, .bold))
@@ -189,11 +215,6 @@ struct LocationPanel: View {
                 .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
         .accessibilityElement(children: .combine)
-    }
-
-    private func accuracyText(_ position: GeodeticPosition) -> String {
-        guard position.hasValidHorizontalAccuracy else { return "精度不明" }
-        return CoordinateText.accuracyMeters(position.horizontalAccuracyMeters)
     }
 
     private var warningText: String? {
@@ -223,11 +244,11 @@ struct LocationPanel: View {
     private var emptyDetail: String {
         switch reading.availability {
         case .denied:
-            return "iPhone の設定で、このアプリの位置情報を許可すると現在地が出ます。"
+            return "設定で許可"
         case .unavailable:
-            return "空の見える場所でもう一度待ってください。"
+            return "空の見える場所で待つ"
         case .waiting, .available:
-            return "iPhone GPS の段階0です。数mの下見に使います。"
+            return "iPhone GPS"
         }
     }
 }

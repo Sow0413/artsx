@@ -41,12 +41,15 @@ struct CrosshairSheet: View {
                         }
                         .pickerStyle(.segmented)
                         angleBlock
-                        Text(CrosshairMath.exampleLabel(calibrated: field.tiltZero.calibrated))
-                            .font(SurveyType(16, .heavy))
-                        Text(field.tiltZero.calibrated ? "傾斜は反転法でゼロを合わせています。" : "傾斜は未校正です。20mの誤差は校正後より大きく出します。")
-                            .font(SurveyType(14, .semibold))
-                            .foregroundStyle(SurveyColor.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 0) {
+                            Text(CrosshairMath.exampleLabel(calibrated: field.tiltZero.calibrated))
+                                .font(SurveyType(16, .heavy))
+                            InfoButton(help: .level)
+                            Spacer(minLength: 0)
+                        }
+                        Text(field.tiltZero.calibrated ? "校正済み" : "未校正")
+                            .font(SurveyType(14, .heavy))
+                            .foregroundStyle(field.tiltZero.calibrated ? SurveyColor.muted : SurveyColor.amber)
                         calibrationBlock
                         if mode == .level {
                             levelBlock
@@ -59,8 +62,8 @@ struct CrosshairSheet: View {
                                 .foregroundStyle(SurveyColor.amber)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if let badge = stageBadge {
-                            AccuracyBadgeView(badge: badge, stage: .iphone)
+                        if mode == .target, let badge = stageBadge, targetResult != nil {
+                            AccuracyBadgeView(badge: badge, stage: .iphone, compact: true)
                         }
                     }
                     .padding(20)
@@ -97,10 +100,9 @@ struct CrosshairSheet: View {
             Text(elevation.map { "\(CrosshairMath.angleText($0))°" } ?? "傾きを待っています")
                 .font(SurveyType(28, .heavy, mono: true))
             if isLevel {
-                Text("±0.1°以内。十字線は目の高さの水平線です。")
-                    .font(SurveyType(14, .semibold))
+                Text("±0.1°")
+                    .font(SurveyType(16, .heavy))
                     .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -109,10 +111,6 @@ struct CrosshairSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("傾斜校正")
                 .font(SurveyType(18, .heavy))
-            Text("同じ傾きのまま端末を180°回し、二回読みます。ゼロ点はその平均です。")
-                .font(SurveyType(14, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
             if field.tiltZero.calibrated {
                 Text("ゼロ点 \(CrosshairMath.angleText(field.tiltZero.biasRadians))°")
                     .font(SurveyType(16, .heavy, mono: true))
@@ -149,10 +147,6 @@ struct CrosshairSheet: View {
                     .font(SurveyType(28, .heavy, mono: true))
                 Text("相手の地盤高 \(CrosshairMath.meterText(result.targetHeightMeters))m")
                     .font(SurveyType(16, .heavy, mono: true))
-                Text("器械高は、自分の地盤高に目の高さを足した値です。読み値が目の高さなら高低差は 0 です。")
-                    .font(SurveyType(14, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(levelHint)
                     .font(SurveyType(15, .heavy))
@@ -172,10 +166,6 @@ struct CrosshairSheet: View {
                 .font(SurveyType(20, .heavy, mono: true))
                 .padding(10)
                 .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text("空欄のときは、LiDAR か ARKit の距離を使います。")
-                .font(SurveyType(14, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
             if let shot = targetResult {
                 Text("高低差 \(CrosshairMath.meterText(shot.heightDifferenceMeters))m")
                     .font(SurveyType(28, .heavy, mono: true))
@@ -206,7 +196,7 @@ struct CrosshairSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .disabled(shot.latitudeDegrees == nil)
             } else {
-                Text("距離と仰角が揃うと、高低差を出します。")
+                Text("距離と仰角待ち")
                     .font(SurveyType(15, .heavy))
                     .foregroundStyle(SurveyColor.amber)
             }

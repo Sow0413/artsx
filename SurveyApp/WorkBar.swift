@@ -62,10 +62,7 @@ struct WorkSettingsSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("仮の既定値です。現場に合わせて直すと、SitePack の work-requirements.json に残ります。")
-                        .font(SurveyType(15, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HelpLabel(title: "要求精度", help: .accuracy)
                     ForEach($rows) { $row in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(row.title)
@@ -79,12 +76,8 @@ struct WorkSettingsSheet: View {
                         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("楽観的なときの係数")
+                        Text("係数")
                             .font(SurveyType(18, .heavy))
-                        Text("三角点で報告が楽観的だった機器は、この倍率をかけてから要求と比べます。")
-                            .font(SurveyType(14, .semibold))
-                            .foregroundStyle(SurveyColor.muted)
-                            .fixedSize(horizontal: false, vertical: true)
                         labeledField("倍", text: $factor)
                     }
                     .padding(12)

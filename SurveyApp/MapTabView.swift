@@ -133,9 +133,6 @@ struct MapTabView: View {
                 IncidentTray(field: field)
             }
             HStack {
-                ExtraEntryButton {
-                    field.showsExtras = true
-                }
                 if field.extras.pushToTalk {
                     chipButton(field.radio.spaceAudio ? "定位オン" : "定位", tint: field.radio.spaceAudio ? SurveyColor.amber : SurveyColor.text) {
                         field.radio.setSpaceAudio(!field.radio.spaceAudio)

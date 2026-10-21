@@ -20,10 +20,7 @@ struct StatureSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("段階0の iPhone だけで、端末の高さから持ち高さを引いて地盤高にします。既定は画面の角度です。鉛直で視線が水平のときは、端末の高さを目の高さにします。肘より上は代わりです。外部GNSSのポール高とは別にします。身長を一度入れると、歩幅の初期値も身長×0.45で入ります。")
-                        .font(SurveyType(16, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    HelpLabel(title: "身長", help: .stature)
                     if let label = StatureMath.correction(for: draft, stage: .iphone, receiver: .iphoneGPS, sight: field.liveSight)?.screenLabel {
                         Text(label)
                             .font(SurveyType(28, .heavy))
@@ -36,10 +33,6 @@ struct StatureSheet: View {
                             .keyboardType(.decimalPad)
                             .autocorrectionDisabled()
                     }
-                    Text("この身長で、目の高さと持ち高さを出します。歩幅の初期値は身長×0.45です。既知距離を歩くと、その歩幅に替わります。")
-                        .font(SurveyType(14, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
                     Text("持ち方")
                         .font(SurveyType(18, .heavy))
                     ForEach(HoldStyle.allCases, id: \.self) { item in
@@ -60,10 +53,8 @@ struct StatureSheet: View {
                         Text(sightLine)
                             .font(SurveyType(16, .heavy))
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("アンテナは端末中心から上へ \(StatureMath.factorText(AntennaCatalog.alongUpMeters(model: field.deviceMachine)))m（この機種の定数）です。顔までの距離が測れないときは 0.35m です。")
-                            .font(SurveyType(14, .semibold))
-                            .foregroundStyle(SurveyColor.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text("アンテナ +\(StatureMath.factorText(AntennaCatalog.alongUpMeters(model: field.deviceMachine)))m")
+                            .font(SurveyType(16, .heavy, mono: true))
                     }
                     if style == .manual {
                         fieldBlock("持ち高 m") {
@@ -74,10 +65,6 @@ struct StatureSheet: View {
                     }
                     Text("係数")
                         .font(SurveyType(18, .heavy))
-                    Text("画面の角度は、目の高さ（身長から引く長さ）を使います。肘より上と胸の前は身長×係数。運転席は、オペ画面の視線高とは別に、既定 2m です。")
-                        .font(SurveyType(14, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
                     fieldBlock("肘より上の係数") {
                         TextField("0.70", text: $elbowText)
                             .keyboardType(.decimalPad)
@@ -100,10 +87,6 @@ struct StatureSheet: View {
                     }
                     Text("校正")
                         .font(SurveyType(18, .heavy))
-                    Text("この画面の値は、この端末の中だけに残します。共有しません。")
-                        .font(SurveyType(14, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
                     ForEach(PersonalProfile.recordLines(stature: field.stature, pace: field.pace), id: \.self) { line in
                         Text(line)
                             .font(SurveyType(16, .heavy))
@@ -111,10 +94,6 @@ struct StatureSheet: View {
                     }
                     Text("持ち高さ")
                         .font(SurveyType(18, .heavy))
-                    Text("既知の楕円体高の点で、今の持ち方のまま1回観測します。端末の高さと既知高さの差を、肘より上の係数にします。")
-                        .font(SurveyType(14, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
                     fieldBlock("既知の楕円体高 m") {
                         TextField("11.20", text: $knownText)
                             .keyboardType(.decimalPad)
@@ -132,10 +111,6 @@ struct StatureSheet: View {
                         )
                     Text("歩幅")
                         .font(SurveyType(18, .heavy))
-                    Text("平らな所で、分かっている距離を歩きます。")
-                        .font(SurveyType(14, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
                     fieldBlock("距離 m") {
                         TextField("50", text: $distanceText)
                             .keyboardType(.decimalPad)
@@ -336,10 +311,7 @@ struct StatureAskSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 16) {
-                Text("身長を一度入れると、段階0の iPhone で地盤高を出せます。持ち方は画面の角度です。端末が鉛直で視線が水平のときは、端末の高さを目の高さにします。±1°以内は目線水平です。同じ身長で、歩幅の初期値も身長×0.45で入ります。この値は端末の中だけに残し、共有しません。")
-                    .font(SurveyType(16, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                HelpLabel(title: "身長", help: .stature)
                 Text("身長 m")
                     .font(SurveyType(15, .heavy))
                 TextField("1.70", text: $statureText)
