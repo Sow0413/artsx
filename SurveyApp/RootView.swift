@@ -218,6 +218,17 @@ struct RootView: View {
             ManualPointSheet(field: field)
                 .id(field.manualPointToken)
         }
+        .sheet(isPresented: $field.showsPaperCapture) {
+            PaperCaptureSheet(field: field)
+        }
+        .sheet(isPresented: Binding(
+            get: { field.drawing.pointTable != nil },
+            set: { if !$0 { field.drawing.pointTable = nil } }
+        )) {
+            PointTableSheet(drawing: field.drawing) {
+                field.ensureMapCad()
+            }
+        }
         .sheet(isPresented: Binding(
             get: { field.selectedControlPoint != nil },
             set: { if !$0 { field.dismissBenchmark() } }

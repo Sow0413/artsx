@@ -51,10 +51,10 @@ public enum FieldIntake {
         let ext = fileExtension(fileName)
         if ext == "pdf" || data.starts(with: Data("%PDF".utf8)) { return .pdf }
         if ext == "dxf" || ext == "sfc" { return .drawing }
-        guard let text = decode(data) else { return .unknown }
+        guard let text = decode(data) ?? PointTextEncoding.decode(data)?.text else { return .unknown }
         if isSIMA(text) { return .sima }
         if isDXF(text) { return .drawing }
-        if coordinateRowCount(text) > 0 { return .list }
+        if coordinateRowCount(text) > 0 || PointTableReader.containsCoordinates(text) { return .list }
         return .unknown
     }
 

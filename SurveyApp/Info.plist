@@ -40,7 +40,7 @@
 		<string>_survey-ptt._udp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>水準器の十字線、顔から端末までの距離、丁張の相対高、位置出しの杖と、歩行の位置をつなぐ視覚慣性に使います。映像は保存せず、誰かを識別するためにも使いません。</string>
+	<string>水準器の十字線、顔から端末までの距離、丁張の相対高、位置出しの杖、歩行の位置をつなぐ視覚慣性、座標表の読み取りに使います。映像は保存せず、誰かを識別するためにも使いません。</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>同じ現場の端末と、測点や無線のパケットを直接受け渡すために使います。現場の外へは出しません。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

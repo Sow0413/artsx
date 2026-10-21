@@ -89,6 +89,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
     public var alignToleranceMillimeters: Double?
     /// 距離差の比の分母。1/N の N。無いときは 5000。
     public var alignToleranceDenominator: Double?
+    /// 座標 CSV の列の役割。同じ列数の次のファイルに使う。
+    public var pointColumnMap: PointColumnMap?
 
     public init(
         id: String = UUID().uuidString,
@@ -119,7 +121,8 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         place: String? = nil,
         workDate: String? = nil,
         alignToleranceMillimeters: Double? = nil,
-        alignToleranceDenominator: Double? = nil
+        alignToleranceDenominator: Double? = nil,
+        pointColumnMap: PointColumnMap? = nil
     ) {
         self.id = id
         self.name = name
@@ -150,6 +153,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         self.workDate = workDate
         self.alignToleranceMillimeters = alignToleranceMillimeters
         self.alignToleranceDenominator = alignToleranceDenominator
+        self.pointColumnMap = pointColumnMap
     }
 
     public var listDate: String {
@@ -166,7 +170,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         case stationIntervalMeters, stationOrigin, stationLine
         case cautionMeters, proximityMarginMeters, approachLeadMeters, approachRepeatSeconds, weather
         case siteAid, siteFence, workHours, place, workDate
-        case alignToleranceMillimeters, alignToleranceDenominator
+        case alignToleranceMillimeters, alignToleranceDenominator, pointColumnMap
     }
 
     public init(from decoder: Decoder) throws {
@@ -200,6 +204,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         workDate = try container.decodeIfPresent(String.self, forKey: .workDate)
         alignToleranceMillimeters = try container.decodeIfPresent(Double.self, forKey: .alignToleranceMillimeters)
         alignToleranceDenominator = try container.decodeIfPresent(Double.self, forKey: .alignToleranceDenominator)
+        pointColumnMap = try container.decodeIfPresent(PointColumnMap.self, forKey: .pointColumnMap)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -233,6 +238,7 @@ public struct SurveyProject: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(workDate, forKey: .workDate)
         try container.encodeIfPresent(alignToleranceMillimeters, forKey: .alignToleranceMillimeters)
         try container.encodeIfPresent(alignToleranceDenominator, forKey: .alignToleranceDenominator)
+        try container.encodeIfPresent(pointColumnMap, forKey: .pointColumnMap)
     }
 }
 

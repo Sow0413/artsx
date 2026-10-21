@@ -124,6 +124,7 @@ final class FieldModel: ObservableObject {
     @Published var showsPhoneAverage = false
     @Published var showsKnownShift = false
     @Published var showsManualPoint = false
+    @Published var showsPaperCapture = false
     @Published var manualPointName = ""
     @Published var manualPointCoordinate = ""
     @Published var manualPointToken = UUID()
@@ -2106,6 +2107,15 @@ final class FieldModel: ObservableObject {
         manualPointCoordinate = coordinate
         manualPointToken = UUID()
         showsManualPoint = true
+    }
+
+    func beginPaperCapture() {
+        guard drawing.project != nil else {
+            drawing.report("先にプロジェクトを作ってください。")
+            showsProjects = true
+            return
+        }
+        showsPaperCapture = true
     }
 
     func showRecordList() {

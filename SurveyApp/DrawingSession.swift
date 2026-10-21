@@ -84,6 +84,8 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var importProgress: WorkProgress?
     @Published private(set) var fieldPoints: [FieldPoint] = []
     @Published var pendingIntake: PendingIntake?
+    /// 座標の CSV か用紙。確認するまで点にはしない。
+    @Published var pointTable: PointTable?
     @Published var twoPointMode = false
     @Published var placingArbitrary = false
     @Published var draftPoint: FieldPoint?
@@ -1806,8 +1808,59 @@ final class DrawingSession: ObservableObject {
         )
     }
 
+    func presentPointTable(_ table: PointTable) {
+        let number = ensureZone()
+        var next = table
+        if let saved = project?.pointColumnMap, saved.roles.count == next.columnCount {
+            next.roles = saved.roles
+            next.hasHeader = saved.hasHeader
+        }
+        pointTable = PointTableReader.evaluate(next, zone: number)
+        message = nil
+    }
+
+    func confirmPointTable(_ table: PointTable) -> String? {
+        guard project != nil else { return "先にプロジェクトを作ってください。" }
+        let outcome = PointTableReader.assess(table, zone: zone)
+        guard !outcome.points.isEmpty else {
+            pointTable = PointTableReader.evaluate(table, zone: zone)
+            if let issue = outcome.issues.first {
+                return "\(issue.row + 1)行目: \(issue.message)"
+            }
+            return "点を読めませんでした。"
+        }
+        storePoints(outcome.points)
+        if var current = project {
+            current.pointColumnMap = PointColumnMap(roles: table.roles, hasHeader: table.hasHeader)
+            project = current
+            persistProject()
+        }
+        let bad = outcome.issues.count
+        if bad == 0, let warning = outcome.axisWarning {
+            message = "\(outcome.points.count)点。\(warning)"
+        } else if bad == 0 {
+            message = "\(outcome.points.count)点"
+        } else {
+            message = "\(outcome.points.count)点。読めない行 \(bad)"
+        }
+        if let name = outcome.points.first?.name,
+           let saved = fieldPoints.first(where: { $0.name == name && $0.origin == .list }) {
+            selectedPointID = saved.id
+        }
+        pointTable = nil
+        return nil
+    }
+
     private func importCoordinates(data: Data, fileName: String, heightMap: HeightColumnMap?) {
         let number = ensureZone()
+        if FieldIntake.detect(data: data, fileName: fileName) == .list {
+            if let table = PointTableReader.read(data: data, fileName: fileName) {
+                presentPointTable(table)
+                return
+            }
+            message = "点を読めませんでした。"
+            return
+        }
         let result = FieldIntake.read(data: data, fileName: fileName, zone: number, heightMap: heightMap)
         if result.needsHeightMap {
             pendingIntake = PendingIntake(

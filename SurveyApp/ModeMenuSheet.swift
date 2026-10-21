@@ -386,6 +386,10 @@ struct ModeMenuSheet: View {
             field.modeMenu = nil
             field.beginManualPoint()
         }
+        flowRow("用紙を読む", icon: "doc.text.viewfinder") {
+            field.modeMenu = nil
+            field.beginPaperCapture()
+        }
         flowRow("水準器", icon: "level") {
             handoff = .crosshair
             field.modeMenu = nil
