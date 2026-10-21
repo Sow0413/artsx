@@ -152,7 +152,9 @@ struct DrawingTabView: View {
             compactAction("全体", accent: false) { drawing.showWholeDrawing() }
             compactAction("数値", accent: false) { showsSetup = true }
             if drawing.document != nil {
-                compactAction(drawing.twoPointMode ? "合わせ中" : "① 2点合わせ", accent: step == .align) {
+                let suggestAlign = !drawing.isGeoreferenced
+                let alignTitle = drawing.twoPointMode ? "合わせ中" : (suggestAlign ? "① 2点合わせ" : "2点合わせ")
+                compactAction(alignTitle, accent: step == .align) {
                     FieldFlow.perform(.align, field: field, fromMenu: false)
                 }
             }

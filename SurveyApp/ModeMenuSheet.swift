@@ -60,7 +60,8 @@ enum FieldFlow {
         if drawing.document == nil, drawing.pdfData == nil { return .importFile }
         if drawing.twoPointMode { return nil }
         if drawing.draftPoint != nil { return .sendStakeout }
-        if drawing.activeTransform == nil, drawing.document != nil { return .align }
+        // 選んだ系の公共座標に載る図面は、そのまま地図へ出す。2点合わせは紙の座標のときだけ。
+        if drawing.activeTransform == nil, drawing.document != nil, !drawing.isGeoreferenced { return .align }
         if drawing.canPlaceArbitrary, drawing.stakeoutPointID == nil { return .arbitrary }
         if drawing.stakeoutPointID != nil || drawing.activeTransform != nil {
             return .openExport

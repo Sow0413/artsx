@@ -1481,8 +1481,22 @@ final class DrawingSession: ObservableObject {
             zone = number
         }
         restoreAlignment(named: fileName)
+        readPublicSFCOnTheSelectedZone()
         refresh()
         refreshPlacement(latitude: nil, longitude: nil, overrideZone: false)
+    }
+
+    /// ミリの公共座標 SFC は、選んだ系で X を東、Y を北として地図に載せる。
+    /// sfig_locate の紙面上の配置は図形に掛けない。原点付近の紙の座標だけ 2点合わせにする。
+    private func readPublicSFCOnTheSelectedZone() {
+        guard (fileName as NSString?)?.pathExtension.lowercased() == "sfc" else { return }
+        guard activeTransform == nil, isGeoreferenced else { return }
+        guard axis != .cadEastNorth else { return }
+        axis = .cadEastNorth
+        if project?.axis != .cadEastNorth {
+            project?.axis = .cadEastNorth
+            persistProject()
+        }
     }
 
     private func storedProject(_ id: String) -> SurveyProject? {

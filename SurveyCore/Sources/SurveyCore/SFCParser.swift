@@ -169,6 +169,8 @@ public enum SFCParser {
         )
     }
 
+    /// sfig_locate_feature は図郭を用紙へ置く配置（挿入点と縮尺）なので、座標には掛けない。
+    /// 公共座標はポリライン側のミリメートルをメートルにした値。紙の配置では 2点合わせにしない。
     private static let supported: Set<String> = [
         "line_feature", "polyline_feature", "circle_feature", "arc_feature",
         "text_string_feature", "point_feature", "point_marker_feature"

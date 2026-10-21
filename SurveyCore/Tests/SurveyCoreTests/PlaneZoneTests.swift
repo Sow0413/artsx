@@ -38,6 +38,62 @@ final class PlaneZoneTests: XCTestCase {
         XCTAssertTrue(PlaneZoneCatalog.summary(prefecture: "北海道", area: "函館市", zone: 11).contains("XI系"))
     }
 
+    func testCaptainBaseMapIsPublicMillimetresInZoneSix() throws {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/captain-site.sfc")
+        let document = try SFCParser.parse(Data(contentsOf: url))
+        XCTAssertGreaterThan(document.unsupportedCounts["sfig_locate_feature"] ?? 0, 0)
+        XCTAssertFalse(document.entities.contains { entity in
+            GeoMath.hypotenuse(entity.bounds.midX, entity.bounds.midY) < 1_000
+        })
+        let sample = try XCTUnwrap(document.entities.lazy.compactMap { entity -> PlanarPoint? in
+            entity.samplePoints.first { point in
+                abs(point.x - 37_999.999956) < 0.01 && abs(point.y + 123_705.59998) < 0.01
+            }
+        }.first)
+        XCTAssertEqual(sample.x, 37_999.999956, accuracy: 0.01)
+        XCTAssertEqual(sample.y, -123_705.59998, accuracy: 0.01)
+        let placement = PlanePlacementChooser.choose(
+            x: document.bounds.midX,
+            y: document.bounds.midY,
+            prefecture: "三重県",
+            latitude: nil,
+            longitude: nil,
+            zone: 6,
+            area: nil
+        )
+        XCTAssertFalse(placement.looksLocal)
+        XCTAssertFalse(placement.note.contains("2点合わせ"))
+        XCTAssertTrue(placement.note.contains("VI系"))
+        XCTAssertTrue(PlanePlacementChooser.isGeoreferenced(
+            midX: document.bounds.midX,
+            midY: document.bounds.midY,
+            zone: 6,
+            hasTransform: false,
+            prefecture: "三重県"
+        ))
+        let geo = try XCTUnwrap(DrawingPlacement.geographic(
+            PlanarPoint(x: document.bounds.midX, y: document.bounds.midY),
+            zone: 6,
+            axis: .cadEastNorth,
+            transform: nil
+        ))
+        XCTAssertEqual(geo.latitudeDegrees, 34.883, accuracy: 0.01)
+        XCTAssertEqual(geo.longitudeDegrees, 136.427, accuracy: 0.01)
+        let swapped = try XCTUnwrap(DrawingPlacement.geographic(
+            PlanarPoint(x: document.bounds.midX, y: document.bounds.midY),
+            zone: 6,
+            axis: .surveyNorthEast,
+            transform: nil
+        ))
+        XCTAssertFalse(PlaneZoneCatalog.named("三重県")?.contains(
+            latitude: swapped.latitudeDegrees,
+            longitude: swapped.longitudeDegrees
+        ) == true)
+    }
+
     func testLocalDrawingCoordinatesAskForTwoPointAlignment() {
         let near = PlanePlacementChooser.gridFit(x: 12, y: -4, zone: 6, prefecture: "三重県")
         XCTAssertTrue(near.looksLocal)
