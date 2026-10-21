@@ -129,7 +129,10 @@ public enum GSITileCatalog {
     public static let attribution = "地理院タイル"
     public static let sourceCredit = "出典：国土地理院"
     public static let standardHost = "https://cyberjapandata.gsi.go.jp/xyz"
+    /// 標準地図のタイルが実在する範囲。これより深い縮尺は親タイルを拡大する。
     public static let standardZoomRange: ClosedRange<Int> = 0...18
+    /// MapKit に要求させる範囲。ソースの最大より深くして、無いズームも loadTile で埋める。
+    public static let displayZoomRange: ClosedRange<Int> = 0...21
     public static let userAgent = "SurveyField/0.1 (iOS; GSI tile cache)"
 
     public static func url(for tile: TileID) -> URL {
@@ -142,6 +145,91 @@ public enum GSITileCatalog {
 
     public static func urlTemplate(for style: BaseMapStyle) -> String {
         "\(standardHost)/\(style.rawValue)/{z}/{x}/{y}.png"
+    }
+}
+
+/// 要求ズームの1枚を、実在するタイルのどれで描くか。
+public enum TileCoverage: Equatable, Sendable {
+    /// そのズームのタイルがそのままある。
+    case native(TileID)
+    /// 要求がソース最大より深い。最大ズームの親を、指定の升目だけ拡大する。
+    case crop(source: TileID, column: Int, row: Int, factor: Int)
+    /// 要求がソース最小より広い。最小ズームの子を格子にして縮小する。行優先、北が先頭。
+    case mosaic(tiles: [TileID], grid: Int)
+}
+
+public enum TileSampler {
+    /// これより広いアンダーズームは、中央の子タイル1枚を引き伸ばす。通信とキャッシュを増やさない。
+    public static let maxMosaicShift = 2
+
+    public static func coverage(
+        z: Int,
+        x: Int,
+        y: Int,
+        style: BaseMapStyle,
+        range: ClosedRange<Int>
+    ) -> TileCoverage {
+        let zoom = min(max(z, 0), 30)
+        let limit = (1 << min(zoom, 30)) - 1
+        let clampedX = min(max(x, 0), limit)
+        let clampedY = min(max(y, 0), limit)
+        if zoom > range.upperBound {
+            let frame = descend(x: clampedX, y: clampedY, from: zoom, to: range.upperBound)
+            return .crop(source: TileID(style: style, z: range.upperBound, x: frame.x, y: frame.y), column: frame.column, row: frame.row, factor: frame.factor)
+        }
+        if zoom < range.lowerBound {
+            let shift = range.lowerBound - zoom
+            if shift <= maxMosaicShift {
+                let grid = 1 << shift
+                let originX = clampedX << shift
+                let originY = clampedY << shift
+                var tiles: [TileID] = []
+                tiles.reserveCapacity(grid * grid)
+                for row in 0..<grid {
+                    for column in 0..<grid {
+                        tiles.append(TileID(style: style, z: range.lowerBound, x: originX + column, y: originY + row))
+                    }
+                }
+                return .mosaic(tiles: tiles, grid: grid)
+            }
+            var childX = clampedX
+            var childY = clampedY
+            var level = zoom
+            while level < range.lowerBound {
+                childX *= 2
+                childY *= 2
+                level += 1
+            }
+            let half = 1 << min(shift - 1, 12)
+            return .crop(
+                source: TileID(style: style, z: range.lowerBound, x: childX + half, y: childY + half),
+                column: 0,
+                row: 0,
+                factor: 1
+            )
+        }
+        return .native(TileID(style: style, z: zoom, x: clampedX, y: clampedY))
+    }
+
+    /// 深いタイルから親へ上がる。column は西から、row は北から。32bit でも桁があふれない。
+    private static func descend(x: Int, y: Int, from zoom: Int, to sourceZoom: Int) -> (x: Int, y: Int, column: Int, row: Int, factor: Int) {
+        var parentX = x
+        var parentY = y
+        var column = 0
+        var row = 0
+        var factor = 1
+        var level = zoom
+        while level > sourceZoom {
+            if factor < 256 {
+                column += (parentX & 1) * factor
+                row += (parentY & 1) * factor
+                factor *= 2
+            }
+            parentX >>= 1
+            parentY >>= 1
+            level -= 1
+        }
+        return (parentX, parentY, column, row, factor)
     }
 }
 
