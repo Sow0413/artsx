@@ -97,6 +97,7 @@ Xcode のターゲットは `project.yml` が `SurveyApp/` 全体（Info.plist �
 ## 6. 実機でまだ見ること
 
 この環境では iOS をビルドしていない。Linux の `swift test` は NMEA と設定 JSON だけ。
+`SurveyCore/Package.swift` は macOS 12 / iOS 17 / watchOS 10 を明示する。未指定のままだと、Mac の `swift test` が macOS 10.13 扱いで `AsyncStream` と `URLSession.data(for:)` をエラーにする。
 
 - ViDoc の広告名が `vidoc` / `vida` に合うか。合わなければスキャンが素通りする。
 - `<STX>nmea<ETX>` のあと FFF1 に GGA/GST/GSA が来て、バッジが単独→DGPS→FLOAT→FIX と変わるか。
