@@ -25,6 +25,9 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertFalse(app.buttons["水準器"].exists, "水準器がベーシックの地図に出ている")
         XCTAssertTrue(app.scrollViews["map-controls"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["rtk-entry"].waitForExistence(timeout: 5), "RTK のボタンが画面に無い")
+        let tiles = expectation(description: "地理院タイル")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { tiles.fulfill() }
+        wait(for: [tiles], timeout: 12)
         shot("01-map")
 
         app.scrollViews["map-controls"].swipeUp()

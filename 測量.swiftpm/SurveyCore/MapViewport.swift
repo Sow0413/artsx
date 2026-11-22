@@ -32,6 +32,10 @@ public enum MapViewportPolicy {
     public static let minimumSpanMeters = 80.0
     public static let maximumSpanMeters = 8_000.0
     public static let accuracyPadding = 8.0
+    /// 地理院の標準地図は z18 まで。これより寄るとタイルが無く、下の地図も隠れる。
+    public static let basemapMaximumZoom = 18
+    /// iPhone の幅より少し広く取り、追従しても z18 を超えないようにする。
+    public static let basemapScreenWidthPoints = 480.0
 
     public static let japanOverview = MapViewport(
         centerLatitude: 36.2,
@@ -48,15 +52,26 @@ public enum MapViewportPolicy {
     /// 現在地を画面の中央に大きく置く。精度円が収まり、かつ周辺も見える。
     public static func following(_ position: GeodeticPosition) -> MapViewport {
         let meters = spanMeters(forHorizontalAccuracy: position.horizontalAccuracyMeters)
-        let latitudeDelta = meters / 111_320
+        var latitudeDelta = meters / 111_320
         let cosine = max(abs(GeoMath.cosine(GeoMath.radians(fromDegrees: position.latitudeDegrees))), 0.01)
-        let longitudeDelta = meters / (111_320 * cosine)
+        var longitudeDelta = meters / (111_320 * cosine)
+        let floorLongitude = minimumLongitudeDelta(screenWidthPoints: basemapScreenWidthPoints)
+        if longitudeDelta < floorLongitude {
+            longitudeDelta = floorLongitude
+            latitudeDelta = floorLongitude * cosine
+        }
         return MapViewport(
             centerLatitude: position.latitudeDegrees,
             centerLongitude: position.longitudeDegrees,
             latitudeDelta: latitudeDelta,
             longitudeDelta: longitudeDelta
         )
+    }
+
+    /// `MapZoom.level` が `basemapMaximumZoom` を超えない経度幅。
+    public static func minimumLongitudeDelta(screenWidthPoints: Double, maxZoom: Int = basemapMaximumZoom) -> Double {
+        guard screenWidthPoints > 0, maxZoom >= 0 else { return 0 }
+        return 360 * screenWidthPoints / (256 * pow(2, Double(maxZoom)))
     }
 }
 

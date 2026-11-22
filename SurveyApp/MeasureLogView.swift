@@ -92,7 +92,7 @@ struct MeasureLogView: View {
                 if field.operation.level == .skilled || field.operation.controlOpen || field.operation.showsDetail {
                     controlSection
                 }
-                if let message = field.captureMessage {
+                if !SurveyBuild.basicMode, let message = field.captureMessage {
                     Text(message)
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.amber)
@@ -122,7 +122,7 @@ struct MeasureLogView: View {
                 }
             }
             .padding(20)
-            .padding(.bottom, 120)
+            .padding(.bottom, 200)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()

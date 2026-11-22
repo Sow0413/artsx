@@ -139,6 +139,25 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="-" \
             build-for-testing
+      - name: Fetch one GSI tile
+        run: |
+          set -euo pipefail
+          read -r z x y <<<"$(python3 - <<'PY'
+          import math
+          lat, lon, z = 35.1156, 136.9021, 16
+          n = 2 ** z
+          x = int((lon + 180.0) / 360.0 * n)
+          lat_rad = math.radians(lat)
+          y = int((1 - math.asinh(math.tan(lat_rad)) / math.pi) / 2 * n)
+          print(f"{z} {x} {y}")
+          PY
+          )"
+          url="https://cyberjapandata.gsi.go.jp/xyz/std/${z}/${x}/${y}.png"
+          echo "tile ${url}"
+          code="$(curl -sS -L -A "SurveyField/0.1 (CI tile check)" -o /tmp/gsi-tile.png -w "%{http_code}" "$url")"
+          echo "HTTP ${code} bytes $(wc -c < /tmp/gsi-tile.png)"
+          test "$code" = "200"
+          file /tmp/gsi-tile.png
       - name: Screenshot launch, +5s, and +15s
         run: |
           set -euo pipefail
@@ -156,6 +175,8 @@ jobs:
           xcrun simctl privacy "$udid" grant camera "$bundle" || true
           xcrun simctl location "$udid" set 35.1156,136.9021
           xcrun simctl launch "$udid" "$bundle" -skipStatureAsk
+          sleep 10
+          xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/map-after-10s.png"
           xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/launch.png"
           sleep 5
           xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/plus5.png"

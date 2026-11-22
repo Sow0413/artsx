@@ -35,7 +35,11 @@ final class CoordinateAndMapTests: XCTestCase {
         let position = samplePosition(accuracy: 3.2)
         let viewport = MapViewportPolicy.following(position)
         XCTAssertEqual(viewport.centerLatitude, position.latitudeDegrees, accuracy: 1e-9)
-        XCTAssertEqual(viewport.groundSpanMeters, 80, accuracy: 0.05)
+        XCTAssertGreaterThan(viewport.groundSpanMeters, 80)
+        XCTAssertLessThanOrEqual(
+            MapZoom.level(longitudeDelta: viewport.longitudeDelta, screenWidthPoints: 393),
+            MapViewportPolicy.basemapMaximumZoom
+        )
         XCTAssertGreaterThan(viewport.longitudeDelta, viewport.latitudeDelta)
         XCTAssertTrue(viewport.bounds.contains(latitude: position.latitudeDegrees, longitude: position.longitudeDegrees))
     }
@@ -58,7 +62,10 @@ final class CoordinateAndMapTests: XCTestCase {
         let wider = samplePosition(accuracy: 20)
         let viewport = camera.update(for: wider)
         XCTAssertEqual(viewport.latitudeDelta, MapViewportPolicy.following(wider).latitudeDelta, accuracy: 1e-12)
-        XCTAssertEqual(viewport.groundSpanMeters, 160, accuracy: 0.2)
+        XCTAssertLessThanOrEqual(
+            MapZoom.level(longitudeDelta: viewport.longitudeDelta, screenWidthPoints: 393),
+            MapViewportPolicy.basemapMaximumZoom
+        )
     }
 
     func testZoomLevelFromLongitudeSpan() {
