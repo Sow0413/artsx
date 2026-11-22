@@ -132,10 +132,24 @@ final class MapResponsivenessTests: XCTestCase {
 
     private func reveal(_ element: XCUIElement, in sheet: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 5))
-        for _ in 0..<6 where !element.isHittable {
-            sheet.swipeUp()
+        for _ in 0..<8 {
+            if clearOfTabBar(element) { return }
+            if element.frame.minY < 120 {
+                sheet.swipeDown()
+            } else {
+                sheet.swipeUp()
+            }
         }
-        XCTAssertTrue(element.isHittable, "欄がタブバーに隠れたまま")
+        XCTAssertTrue(clearOfTabBar(element), "欄がタブバーに隠れたまま")
+    }
+
+    private func clearOfTabBar(_ element: XCUIElement) -> Bool {
+        guard element.exists, element.isHittable else { return false }
+        let tabTop = ["tab-map", "tab-measure", "tab-export"].compactMap { identifier -> CGFloat? in
+            let tab = app.buttons[identifier]
+            return tab.exists ? tab.frame.minY : nil
+        }.min() ?? app.frame.maxY
+        return element.frame.maxY <= tabTop - 8
     }
 
     private func tapInMeasure(_ identifier: String, sheet: XCUIElement) {
