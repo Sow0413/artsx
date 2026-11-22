@@ -283,14 +283,13 @@ public enum BenchmarkText {
             return "水平の報告精度が無いので、楽観かどうかは出せません。"
         }
         let claim = "報告した水平精度の平均は \(meters(reported))。"
-        switch statistics.horizontalOptimistic {
-        case true:
+        if statistics.horizontalOptimistic == true {
             return claim + "実際のずれより楽観的です。"
-        case false:
-            return claim + "実際のずれを包んでいます。"
-        case nil:
-            return claim
         }
+        if statistics.horizontalOptimistic == false {
+            return claim + "実際のずれを包んでいます。"
+        }
+        return claim
     }
 
     public static func verticalNote(_ statistics: BenchmarkStatistics) -> String {
@@ -378,10 +377,12 @@ public enum BenchmarkCSV {
 
     private static func summaryNote(_ statistics: BenchmarkStatistics) -> String {
         let optimism: String
-        switch statistics.horizontalOptimistic {
-        case true: optimism = "horizontal_optimistic"
-        case false: optimism = "horizontal_covers"
-        case nil: optimism = "horizontal_unknown"
+        if statistics.horizontalOptimistic == true {
+            optimism = "horizontal_optimistic"
+        } else if statistics.horizontalOptimistic == false {
+            optimism = "horizontal_covers"
+        } else {
+            optimism = "horizontal_unknown"
         }
         return "\(optimism); std=\(number(statistics.horizontalStdMeters, digits: 3)); p95=\(number(statistics.horizontal95Meters, digits: 3))"
     }

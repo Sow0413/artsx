@@ -143,13 +143,13 @@ struct DisasterSheet: View {
                     photo: photoData
                 )
             }
+            .buttonStyle(DisasterButtonStyle(fill: SurveyColor.red))
             if let formNote {
                 Text(formNote)
                     .font(SurveyType(13, .heavy))
                     .foregroundStyle(SurveyColor.amber)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .buttonStyle(DisasterButtonStyle(fill: SurveyColor.red))
             if field.disasterSites.isEmpty {
                 Text("被災箇所はまだありません。")
                     .font(SurveyType(14, .medium))

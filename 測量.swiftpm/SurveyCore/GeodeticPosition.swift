@@ -144,14 +144,15 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         self.headingDegrees = headingDegrees
     }
 
-    /// バッジに常時出す解の文字。iPhone が Fix と名乗っても単独。
+    /// バッジに常時出す解の文字。iPhone が Fix と名乗っても単独。外部の DGPS は DGPS。
     public var solutionLabel: String {
         if receiver == .iphoneGPS { return "単独" }
         switch fixQuality {
         case .rtkFix: return receiver == .clas ? "CLAS" : "FIX"
         case .float: return "FLOAT"
         case .clas: return "CLAS"
-        case .standalone, .dgps, .none: return "単独"
+        case .dgps: return "DGPS"
+        case .standalone, .none: return "単独"
         }
     }
 

@@ -120,7 +120,7 @@ private final class ARSessionBox: NSObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        preview?.session(session, didUpdate: frame)
+        forward(session, frame: frame)
         let now = Date()
         guard now.timeIntervalSince(last) >= 0.1 else { return }
         last = now
@@ -159,15 +159,36 @@ private final class ARSessionBox: NSObject, ARSessionDelegate {
     }
 
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        preview?.session(session, didAdd: anchors)
+        forward(session, added: anchors)
     }
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-        preview?.session(session, didUpdate: anchors)
+        forward(session, updated: anchors)
     }
 
     func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-        preview?.session(session, didRemove: anchors)
+        forward(session, removed: anchors)
+    }
+
+    /// ARSCNView.session はプロパティ。プロトコル型にしてから、引数型ごとに省略可能メソッドを呼ぶ。
+    private func forward(_ session: ARSession, frame: ARFrame) {
+        guard let delegate = preview as? ARSessionDelegate else { return }
+        delegate.session?(session, didUpdate: frame)
+    }
+
+    private func forward(_ session: ARSession, added anchors: [ARAnchor]) {
+        guard let delegate = preview as? ARSessionDelegate else { return }
+        delegate.session?(session, didAdd: anchors)
+    }
+
+    private func forward(_ session: ARSession, updated anchors: [ARAnchor]) {
+        guard let delegate = preview as? ARSessionDelegate else { return }
+        delegate.session?(session, didUpdate: anchors)
+    }
+
+    private func forward(_ session: ARSession, removed anchors: [ARAnchor]) {
+        guard let delegate = preview as? ARSessionDelegate else { return }
+        delegate.session?(session, didRemove: anchors)
     }
 
     private static func ground(in frame: ARFrame, cameraX: Float, cameraZ: Float) -> (y: Double?, source: String) {

@@ -7,7 +7,7 @@ import NearbyInteraction
 /// UWB が使える端末だけ。距離は GNSS より優先する。発見と測距は未確認。
 final class SystemUWB: NSObject, NISessionDelegate {
     private var session: NISession?
-    private var peers: [NIDiscoveryToken: String] = []
+    private var peers: [NIDiscoveryToken: String] = [:]
     var onDistance: ((String, Double) -> Void)?
 
     func start() {

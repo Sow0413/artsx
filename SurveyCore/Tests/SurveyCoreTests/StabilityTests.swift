@@ -115,16 +115,15 @@ final class StabilityTests: XCTestCase {
         link.resume()
         wait(for: [live], timeout: 2)
 
-        let started = Date()
-        radio.drop()
-        XCTAssertLessThan(Date().timeIntervalSince(started), 0.05)
-
         let again = expectation(description: "reconnected")
         var sawDrop = false
         link.onState = { state in
             if state == .reconnecting { sawDrop = true }
             if state == .live, sawDrop { again.fulfill() }
         }
+        let started = Date()
+        radio.drop()
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.05)
         wait(for: [again], timeout: 2)
         XCTAssertGreaterThanOrEqual(radio.starts, 2)
         XCTAssertEqual(link.state, .live)

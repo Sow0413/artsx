@@ -131,16 +131,16 @@ final class FieldModel: ObservableObject {
     #endif
     @Published var disasterMode = false
     @Published var batterySaver = false
-    @Published private(set) var disasterSites: [DisasterSite] = []
-    @Published private(set) var disasterSegments: [PassageSegment] = []
-    @Published private(set) var disasterPeers: [DisasterPosition] = []
-    @Published private(set) var disasterTexts: [DisasterText] = []
-    @Published private(set) var disasterPending = 0
-    @Published private(set) var disasterMessage: String?
+    @Published var disasterSites: [DisasterSite] = []
+    @Published var disasterSegments: [PassageSegment] = []
+    @Published var disasterPeers: [DisasterPosition] = []
+    @Published var disasterTexts: [DisasterText] = []
+    @Published var disasterPending = 0
+    @Published var disasterMessage: String?
     @Published var showsDisaster = false
-    @Published private(set) var meshBattery: Int?
-    @Published private(set) var meshCharging = false
-    @Published private(set) var meshPresence: MeshDuty.Presence = .active
+    @Published var meshBattery: Int?
+    @Published var meshCharging = false
+    @Published var meshPresence: MeshDuty.Presence = .active
     @Published private(set) var firstEpisode: FirstEpisode?
     @Published private(set) var firstView: FirstView?
     @Published private(set) var aidArrows: [AidArrow] = []
@@ -163,6 +163,9 @@ final class FieldModel: ObservableObject {
     @Published private(set) var privacyMessage: String?
     @Published var extras: ExtraSwitches
     @Published var showsExtras = false
+    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+    @Published var showsRTK = false
+    #endif
     @Published private(set) var gnssState: GNSSLinkState = .idle
     @Published private(set) var gnssChoices: [GNSSChoice] = []
     @Published private(set) var observationCount = 0
@@ -180,6 +183,9 @@ final class FieldModel: ObservableObject {
     private var prefixStore: PointPrefixStore
     private var lastFixSave = Date.distantPast
     private let source: any PositionSource
+    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+    var rtkSession: RTKPositionSession? { source as? RTKPositionSession }
+    #endif
     private var camera: MapCameraFollow
     private var readTask: Task<Void, Never>?
     private var downloadTask: Task<Void, Never>?
@@ -1021,7 +1027,7 @@ final class FieldModel: ObservableObject {
         return StakeoutPace.guide(
             distanceMeters: inverse.distanceMeters,
             azimuthDegrees: inverse.azimuthDegrees,
-            facingDegrees: facing?.degrees,
+            facingDegrees: facing,
             strideMeters: pace.strideMeters,
             unit: stakeoutUnit.unit,
             precision: StakeoutPrecision.decide(drawing.stakeoutAccuracy)
@@ -2243,19 +2249,35 @@ final class FieldModel: ObservableObject {
     }
 
     func resumeGNSS() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        if showsRTK || rtkSession?.mode == .rtk { return }
+        #endif
         gnss.resume()
     }
+
+    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+    func openRTK() {
+        pauseGNSS()
+        showsRTK = true
+    }
+    #endif
 
     func pauseGNSS() {
         gnss.pause()
     }
 
     func scanGNSS() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        if rtkSession?.mode == .rtk { return }
+        #endif
         gnssChoices = []
         gnss.scan()
     }
 
     func chooseGNSS(_ id: String) {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        if rtkSession?.mode == .rtk { return }
+        #endif
         gnss.choose(id)
     }
 

@@ -169,7 +169,7 @@ final class DrawingSession: ObservableObject {
                 return
             }
             do {
-                let parsed = try DrawingImport.load(data: data, fileName: drawingName) { progress in
+                let parsed = try DrawingImport.load(data, fileName: drawingName) { progress in
                     DispatchQueue.main.async {
                         guard generation == self.loadGeneration else { return }
                         self.importProgress = progress
@@ -209,7 +209,7 @@ final class DrawingSession: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             var current = snapshot
             do {
-                let parsed = try DrawingImport.load(data: data, fileName: rawName) { progress in
+                let parsed = try DrawingImport.load(data, fileName: rawName) { progress in
                     DispatchQueue.main.async {
                         guard generation == self.loadGeneration else { return }
                         self.importProgress = progress

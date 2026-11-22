@@ -217,7 +217,8 @@ struct ExportTabView: View {
         case .rtkFix: return entry.receiverLabel == "CLAS" ? "CLAS" : "FIX"
         case .float: return "FLOAT"
         case .clas: return "CLAS"
-        case .standalone, .dgps, .none: return "単独"
+        case .dgps: return "DGPS"
+        case .standalone, .none: return "単独"
         }
     }
 }

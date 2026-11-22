@@ -63,6 +63,25 @@ struct ExtraSettingsSheet: View {
     }
 }
 
+struct RTKEntryButton: View {
+    var action: () -> Void
+
+    var body: some View {
+        Button("RTK", action: action)
+            .font(SurveyType(14, .heavy))
+            .foregroundStyle(SurveyColor.text)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(SurveyColor.card)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .accessibilityLabel("RTK 設定")
+    }
+}
+
 struct ExtraEntryButton: View {
     var action: () -> Void
 
