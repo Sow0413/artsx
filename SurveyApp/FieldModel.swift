@@ -86,6 +86,8 @@ final class FieldModel: ObservableObject {
     @Published var showsBatter = false
     @Published var showsPace = false
     @Published var showsARStakeout = false
+    @Published var basicTarget: CoordinateBookEntry?
+    @Published private(set) var basicRevision = 0
     @Published var pace = PaceProfile.load()
     @Published var stakeoutUnit = StakeoutPacePreference.load()
     @Published var stakeoutSpeechStyle = StakeoutSpeechPreference.load()
@@ -316,6 +318,9 @@ final class FieldModel: ObservableObject {
         }
         if SurveyBuild.basicMode, !FieldTab.bar.contains(self.tab) {
             self.tab = .map
+        }
+        if SurveyBuild.basicMode, pointPrefix.isEmpty {
+            pointPrefix = "T"
         }
         if let workID = saved.workID, workCatalog.works.contains(where: { $0.id == workID }) {
             workCatalog = workCatalog.selecting(workID)
@@ -1169,6 +1174,7 @@ final class FieldModel: ObservableObject {
 
     @discardableResult
     func captureObservation() -> Bool {
+        guard basicProjectReady() else { return false }
         guard StageGate.allowsRecording(workID: workCatalog.selected.id, stage: stageTransition.stage) else {
             captureMessage = Self.stageDroppedRecording
             return false
@@ -1210,6 +1216,7 @@ final class FieldModel: ObservableObject {
 
     @discardableResult
     func recordControlPoint() -> Bool {
+        guard basicProjectReady() else { return false }
         guard StageGate.allowsRecording(workID: "boundary", stage: stageTransition.stage) else {
             captureMessage = Self.stageDroppedRecording
             return false
@@ -1242,7 +1249,7 @@ final class FieldModel: ObservableObject {
             condition: condition
         )
         store(observation)
-        remember(CoordinateBookIndex.entry(from: observation, kind: "基準点"))
+        remember(CoordinateBookIndex.entry(from: observation, kind: SurveyBuild.basicMode ? "GCP" : "基準点"))
         let satellites = condition.satelliteNote
         let vertical = fix.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
         captureMessage = "\(name)を基準点にしました。\(condition.solutionLabel) \(Int(fix.fixDurationSeconds.rounded()))秒、水平 \(CoordinateText.accuracyMeters(fix.horizontalAccuracyMeters))、高さ \(vertical)、衛星 \(satellites)。"
@@ -2253,6 +2260,197 @@ final class FieldModel: ObservableObject {
         try? journal.upsertBook(entry)
         if let project = drawing.project {
             try? ProjectStore.saveCoordinate(entry, projectName: project.name, at: drawing.projectsRoot)
+        }
+        if SurveyBuild.basicMode { basicRevision += 1 }
+    }
+
+    private func basicProjectReady() -> Bool {
+        guard SurveyBuild.basicMode else { return true }
+        guard drawing.project != nil else {
+            captureMessage = "先にプロジェクトを作ってください。"
+            return false
+        }
+        return true
+    }
+
+    func basicPoints() -> [CoordinateBookEntry] {
+        guard let project = drawing.project else { return [] }
+        return ProjectStore.coordinateBookEntries(projectName: project.name, at: drawing.projectsRoot)
+    }
+
+    func renameBasicPoint(from oldName: String, to rawName: String) {
+        guard let project = drawing.project else {
+            captureMessage = "先にプロジェクトを作ってください。"
+            return
+        }
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, var entry = basicPoints().first(where: { $0.name == oldName }) else { return }
+        guard name != oldName else { return }
+        entry.name = name
+        do {
+            try ProjectStore.deleteCoordinate(name: oldName, projectName: project.name, at: drawing.projectsRoot)
+            try ProjectStore.saveCoordinate(entry, projectName: project.name, at: drawing.projectsRoot)
+            if basicTarget?.name == oldName { basicTarget = entry }
+            basicRevision += 1
+            captureMessage = "\(oldName) を \(name) に変えました。"
+        } catch {
+            captureMessage = "点の名前を変えられませんでした。"
+        }
+    }
+
+    func aimBasic(name: String, latitude: String, longitude: String, height: String) {
+        guard let latitudeDegrees = Double(latitude), let longitudeDegrees = Double(longitude) else {
+            captureMessage = "緯度と経度を数にしてください。"
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        basicTarget = CoordinateBookEntry(
+            name: trimmed.isEmpty ? "入力" : trimmed,
+            latitudeDegrees: latitudeDegrees,
+            longitudeDegrees: longitudeDegrees,
+            ellipsoidalHeightMeters: Double(height),
+            horizontalAccuracyMeters: 0,
+            verticalAccuracyMeters: nil,
+            satelliteCount: nil,
+            fixDurationSeconds: 0,
+            recordedAt: Date(),
+            kind: "設計"
+        )
+        captureMessage = "\(basicTarget?.name ?? "入力") へ測設します。"
+    }
+
+    func aimBasic(_ entry: CoordinateBookEntry) {
+        basicTarget = entry
+        captureMessage = "\(entry.name) へ測設します。"
+    }
+
+    var basicStakeoutLine: String? {
+        guard SurveyBuild.basicMode, let target = basicTarget else { return nil }
+        guard let position = navigationReading.position, position.isPlottable else {
+            return "\(target.name) 位置を待っています"
+        }
+        guard let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else { return nil }
+        return "\(target.name) \(guide.line)"
+    }
+
+    @discardableResult
+    func recordStake() -> Bool {
+        guard basicProjectReady() else { return false }
+        guard let target = basicTarget else {
+            captureMessage = "先に測設する座標を選んでください。"
+            return false
+        }
+        guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
+            captureMessage = "位置が無いので残せません。"
+            return false
+        }
+        guard let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else {
+            captureMessage = "目標までの距離を出せません。"
+            return false
+        }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return false
+        }
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: stageTransition.stage,
+            durationSeconds: epochWatch.duration(at: position.timestamp),
+            epochCount: epochWatch.count,
+            stature: stature,
+            sight: liveSight
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: workCatalog.selected.id,
+            captured: position,
+            condition: condition
+        )
+        store(observation)
+        var entry = CoordinateBookIndex.entry(from: observation, kind: "測設")
+        let height = guide.heightMeters.map { String(format: "%+.3f", $0) } ?? "—"
+        entry.source = String(format: "設計差 北 %+.3f 東 %+.3f 高 %@ %@", guide.northMeters, guide.eastMeters, height, condition.solutionLabel)
+        remember(entry)
+        captureMessage = "\(name)を測設として残しました。\(entry.source ?? "")"
+        return true
+    }
+
+    func exportBasic(_ format: DeliveryFormat) {
+        guard let project = drawing.project else {
+            exportMessage = "先にプロジェクトを作ってください。"
+            exportURL = nil
+            return
+        }
+        let entries = ProjectStore.coordinateBookEntries(projectName: project.name, at: drawing.projectsRoot)
+        guard !entries.isEmpty else {
+            exportMessage = "座標簿に点がありません。"
+            exportURL = nil
+            return
+        }
+        let bytes = CoordinateDelivery.data(entries, format: format, zone: drawing.zone)
+        do {
+            let folder = try Self.deliveryFolder(projectName: project.name, root: drawing.projectsRoot, site: siteDirectory)
+            let url = folder.appendingPathComponent(format.filename)
+            try bytes.write(to: url, options: .atomic)
+            exportURL = url
+            exportMessage = "\(format.label)を書きました。"
+        } catch {
+            exportURL = nil
+            exportMessage = "書き出せませんでした。"
+        }
+    }
+
+    func importBasic(data: Data, filename: String) {
+        guard let project = drawing.project else {
+            exportMessage = "先にプロジェクトを作ってください。"
+            return
+        }
+        let entries = CoordinateExchange.parse(data: data, filename: filename, zone: drawing.zone)
+        guard !entries.isEmpty else {
+            exportMessage = "読める点がありません。"
+            return
+        }
+        do {
+            try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
+            basicRevision += 1
+            exportMessage = "\(entries.count)点を読みました。"
+        } catch {
+            exportMessage = "読み込めませんでした。"
+        }
+    }
+
+    func makeBasicBackup() {
+        let backup = BasicBackup.capture(at: drawing.projectsRoot)
+        guard let data = backup.data() else {
+            exportMessage = "バックアップを作れませんでした。"
+            return
+        }
+        let url = siteDirectory.appendingPathComponent("バックアップ.json")
+        do {
+            try data.write(to: url, options: .atomic)
+            exportURL = url
+            exportMessage = "バックアップを作りました。ファイルに保存すると、入れ直したあとも戻せます。"
+        } catch {
+            exportMessage = "バックアップを書けませんでした。"
+        }
+    }
+
+    func restoreBasicBackup(data: Data) {
+        guard let backup = BasicBackup.load(data) else {
+            exportMessage = "バックアップを読めませんでした。"
+            return
+        }
+        do {
+            let count = try backup.restore(at: drawing.projectsRoot)
+            drawing.reload()
+            if let current = backup.projects.last?.project,
+               let match = drawing.projects.first(where: { $0.name == current.name }) {
+                drawing.select(match)
+            }
+            basicRevision += 1
+            exportMessage = "\(count)点を戻しました。"
+        } catch {
+            exportMessage = "戻せませんでした。"
         }
     }
 

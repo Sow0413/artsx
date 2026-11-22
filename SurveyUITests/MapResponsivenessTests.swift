@@ -41,12 +41,63 @@ final class MapResponsivenessTests: XCTestCase {
         openTab("tab-measure", showing: "screen-measure")
         XCTAssertTrue(app.descendants(matching: .any)["rtk-status"].waitForExistence(timeout: 5), "測る画面に RTK の状態が無い")
         shot("04-measure")
+        let sheet = app.scrollViews["screen-measure"]
+        sheet.swipeUp()
+
+        let project = app.textFields["basic-project-name"]
+        XCTAssertTrue(project.waitForExistence(timeout: 5), "プロジェクト名が無い")
+        project.tap()
+        project.typeText("SiteA")
+        app.buttons["basic-create"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteA'")).firstMatch.waitForExistence(timeout: 5), "プロジェクトを作れない")
+        shot("07-project")
+
+        app.buttons["現在地を残す"].tap()
+        let confirm = app.buttons["この点を確定"]
+        if confirm.waitForExistence(timeout: 3) {
+            confirm.tap()
+        }
+        shot("08-save")
+        XCTAssertTrue(app.descendants(matching: .any)["basic-book"].waitForExistence(timeout: 5))
+        shot("09-book")
+
+        app.buttons["basic-export-csv"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '書き' OR label CONTAINS '点'")).firstMatch.waitForExistence(timeout: 5))
+        shot("10-export")
+        app.buttons["basic-import"].tap()
+        shot("11-import")
+        dismissPicker()
+        app.buttons["basic-backup"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'バックアップ'")).firstMatch.waitForExistence(timeout: 5))
+        shot("12-backup")
+        app.buttons["basic-restore"].tap()
+        shot("13-restore")
+        dismissPicker()
+
+        let stake = app.buttons["basic-stakeout"]
+        if !stake.isHittable {
+            sheet.swipeUp()
+        }
+        stake.tap()
+        openTab("tab-map", showing: "stakeout-guide")
+        shot("14-stakeout")
+        app.buttons["basic-gcp"].tap()
+        shot("15-gcp")
 
         openTab("tab-export", showing: "screen-export")
         shot("05-export")
-
         openTab("tab-map", showing: "map-controls")
         shot("06-map-return")
+    }
+
+    private func dismissPicker() {
+        let cancel = app.buttons["Cancel"]
+        let japanese = app.buttons["キャンセル"]
+        if cancel.waitForExistence(timeout: 2) {
+            cancel.tap()
+        } else if japanese.waitForExistence(timeout: 1) {
+            japanese.tap()
+        }
     }
 
     private func openTab(_ identifier: String, showing needle: String) {

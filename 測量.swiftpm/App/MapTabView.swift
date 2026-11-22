@@ -85,6 +85,18 @@ struct MapTabView: View {
                         }
                     }
                     #endif
+                    if SurveyBuild.basicMode {
+                        Button("GCPを残す") {
+                            field.recordControlPoint()
+                        }
+                        .font(SurveyType(14, .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(SurveyColor.card)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .accessibilityIdentifier("basic-gcp")
+                    }
                     if !SurveyBuild.basicMode, field.extras.pushToTalk {
                         Button(field.radio.spaceAudio ? "定位オン" : "定位") {
                             field.radio.setSpaceAudio(!field.radio.spaceAudio)
@@ -150,6 +162,17 @@ struct MapTabView: View {
                     mapPickBanner
                 }
                 // 操作の列は上に残す。空いたところは地図で、下のカードだけスクロールする。
+                if let line = field.basicStakeoutLine {
+                    Text(line)
+                        .font(SurveyType(16, .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(SurveyColor.card)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                        .accessibilityIdentifier("stakeout-guide")
+                }
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)

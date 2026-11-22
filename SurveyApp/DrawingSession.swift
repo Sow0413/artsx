@@ -112,6 +112,25 @@ final class DrawingSession: ObservableObject {
         projects = (try? ProjectStore.list(at: projectsRoot)) ?? []
     }
 
+    func renameProject(to rawName: String) {
+        guard let current = project else {
+            message = "先にプロジェクトを選んでください。"
+            return
+        }
+        do {
+            let renamed = try ProjectStore.rename(current, to: rawName, at: projectsRoot)
+            reload()
+            if let match = projects.first(where: { $0.name == renamed.name }) {
+                select(match)
+            }
+            message = "\(renamed.name) に変えました。"
+        } catch let error as ProjectStoreError {
+            message = error.description
+        } catch {
+            message = "名前を変えられませんでした。"
+        }
+    }
+
     func createProject(named rawName: String) {
         do {
             let created = try ProjectStore.create(name: rawName, at: projectsRoot)

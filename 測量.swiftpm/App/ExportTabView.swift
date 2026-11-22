@@ -33,7 +33,9 @@ struct ExportTabView: View {
                 Text("\(preview.count) 点")
                     .font(SurveyType(18, .heavy))
                 names(preview.sample)
-                ForEach(DeliveryFormat.allCases) { format in
+                ForEach(DeliveryFormat.allCases.filter { format in
+                    !SurveyBuild.basicMode || format == .csv || format == .sima
+                }) { format in
                     Button {
                         field.exportDelivery(format)
                     } label: {

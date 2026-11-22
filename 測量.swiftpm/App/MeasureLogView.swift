@@ -97,19 +97,24 @@ struct MeasureLogView: View {
                 if SurveyBuild.basicMode || (field.gnssAvailable && field.operation.showsAdvanced) {
                     gnssSection
                 }
-                if field.observations.observations.isEmpty {
+                if SurveyBuild.basicMode {
+                    BasicDesk(field: field)
+                }
+                if !SurveyBuild.basicMode, field.observations.observations.isEmpty {
                     Text(field.observationCount == 0 ? "まだ点がありません。" : "点は端末に残しています。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
-                if field.observationCount > field.observations.observations.count {
+                if !SurveyBuild.basicMode, field.observationCount > field.observations.observations.count {
                     Text("画面には新しい \(field.observations.observations.count) 点だけ出します。ほか \(field.observationCount - field.observations.observations.count) 点は端末に残しています。")
                         .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if !SurveyBuild.basicMode {
                 ForEach(field.observations.observations.reversed()) { observation in
                     observationRow(observation)
+                }
                 }
             }
             .padding(20)
