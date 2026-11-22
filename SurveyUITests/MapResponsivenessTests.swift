@@ -137,14 +137,25 @@ final class MapResponsivenessTests: XCTestCase {
 
     private func replace(_ field: XCUIElement, with text: String) {
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
-        let current = field.value as? String ?? ""
-        if !current.isEmpty, current != "プロジェクト名" {
-            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: min(current.count, 40)))
+        var entered = false
+        for _ in 0..<2 {
+            field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            let current = (field.value as? String) ?? ""
+            if current.contains(text) {
+                entered = true
+                break
+            }
+            if !current.isEmpty, current != "プロジェクト名" {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: min(current.count, 40)))
+            }
+            field.typeText(text)
+            let typed = expectation(for: NSPredicate(format: "value CONTAINS %@", text), evaluatedWith: field)
+            if XCTWaiter().wait(for: [typed], timeout: 4) == .completed {
+                entered = true
+                break
+            }
         }
-        field.typeText(text)
-        let typed = expectation(for: NSPredicate(format: "value CONTAINS %@", text), evaluatedWith: field)
-        XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 5), .completed, "\(text) が欄に入らない")
+        XCTAssertTrue(entered, "\(text) が欄に入らない")
         let keys = ["Return", "改行", "完了", "Done"]
         for key in keys where app.keyboards.buttons[key].exists {
             app.keyboards.buttons[key].tap()
