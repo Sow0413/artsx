@@ -188,12 +188,13 @@ struct BasicDesk: View {
     private func line(_ entry: CoordinateBookEntry) -> String {
         let quality: String
         switch entry.solution {
-        case .rtkFix: quality = "FIX"
-        case .float: quality = "FLOAT"
-        case .dgps: quality = "DGPS"
-        case .clas: quality = "CLAS"
-        case .standalone: quality = "単独"
-        case .none, nil: quality = ""
+        case .some(.rtkFix): quality = "FIX"
+        case .some(.float): quality = "FLOAT"
+        case .some(.dgps): quality = "DGPS"
+        case .some(.clas): quality = "CLAS"
+        case .some(.standalone): quality = "単独"
+        case .some(.none): quality = ""
+        case nil: quality = ""
         }
         let accuracy = String(format: "±%.2fm", entry.horizontalAccuracyMeters)
         return "\(quality) \(accuracy) \(entry.source ?? "")"
