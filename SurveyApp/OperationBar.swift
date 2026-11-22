@@ -5,6 +5,7 @@ struct OperationBar: View {
     @ObservedObject var field: FieldModel
     var showsSkill: Bool
     var compact: Bool = false
+    var showsCoach: Bool = true
     var saveIdentifier: String? = nil
 
     var body: some View {
@@ -12,11 +13,13 @@ struct OperationBar: View {
             if showsSkill {
                 skillSwitch
             }
-            Text(field.operation.coach)
-                .font(SurveyType(15, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .lineLimit(compact ? 2 : nil as Int?)
-                .fixedSize(horizontal: false, vertical: true)
+            if showsCoach {
+                Text(field.operation.coach)
+                    .font(SurveyType(15, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .lineLimit(compact ? 2 : nil as Int?)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if field.operation.phase == .review {
                 Text(reviewLine)
                     .font(SurveyType(20, .heavy))

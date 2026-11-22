@@ -153,6 +153,7 @@ struct BasicDesk: View {
                 .accessibilityIdentifier("stakeout-longitude")
             TextField("楕円体高", text: $height)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("stakeout-height")
             Button("この座標へ") {
                 field.aimBasic(name: rename, latitude: latitude, longitude: longitude, height: height)
             }

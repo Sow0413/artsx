@@ -174,6 +174,16 @@ struct MapTabView: View {
                         .padding(.top, 6)
                         .accessibilityIdentifier("stakeout-guide")
                 }
+                if SurveyBuild.basicMode, let message = field.captureMessage {
+                    Text(message)
+                        .font(SurveyType(15, .heavy))
+                        .foregroundStyle(SurveyColor.amber)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                        .accessibilityIdentifier("gcp-saved")
+                }
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)

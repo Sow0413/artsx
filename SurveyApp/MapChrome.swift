@@ -51,6 +51,7 @@ struct AccuracyBadgeView: View {
                 .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
         .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("accuracy-badge")
         .accessibilityLabel(badge.accessibilityText)
     }
 

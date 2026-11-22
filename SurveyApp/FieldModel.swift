@@ -1214,9 +1214,42 @@ final class FieldModel: ObservableObject {
         return true
     }
 
+    /// ベーシックは、今の位置を GCP として残す。RTK が無いときは、その解のまま書く。
+    @discardableResult
+    private func recordBasicGCP() -> Bool {
+        guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
+            captureMessage = "位置が無いので残せません。"
+            return false
+        }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return false
+        }
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: stageTransition.stage,
+            durationSeconds: epochWatch.duration(at: position.timestamp),
+            epochCount: epochWatch.count
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: "boundary",
+            captured: position,
+            condition: condition
+        )
+        store(observation)
+        remember(CoordinateBookIndex.entry(from: observation, kind: "GCP"))
+        let vertical = position.verticalAccuracyMeters.map { CoordinateText.accuracyMeters($0) } ?? "—"
+        captureMessage = "\(name)を基準点にしました。\(condition.solutionLabel) 水平 \(CoordinateText.accuracyMeters(position.horizontalAccuracyMeters))、高さ \(vertical)。"
+        return true
+    }
+
     @discardableResult
     func recordControlPoint() -> Bool {
         guard basicProjectReady() else { return false }
+        if SurveyBuild.basicMode {
+            return recordBasicGCP()
+        }
         guard StageGate.allowsRecording(workID: "boundary", stage: stageTransition.stage) else {
             captureMessage = Self.stageDroppedRecording
             return false

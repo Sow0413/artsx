@@ -6,6 +6,8 @@ struct ExportTabView: View {
     @State private var accuracyText = ""
     @State private var importedDay = ""
 
+    private let listBottomClearance: CGFloat = 68 + 24
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -69,10 +71,14 @@ struct ExportTabView: View {
                     .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                Color.clear
+                    .frame(height: listBottomClearance)
+                    .accessibilityHidden(true)
             }
             .padding(20)
-            .padding(.bottom, 200)
         }
+        .contentMargins(.bottom, listBottomClearance, for: .scrollContent)
+        .safeAreaPadding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
         .accessibilityIdentifier("screen-export")

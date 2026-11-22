@@ -5,11 +5,39 @@ import SurveyCore
 struct MeasureLogView: View {
     @ObservedObject var field: FieldModel
 
+    private let listBottomClearance: CGFloat = 68 + 24
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if SurveyBuild.basicMode {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("測る")
+                        .font(SurveyType(28, .heavy))
+                    Text(field.operation.coach)
+                        .font(SurveyType(15, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            measureList
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .background(SurveyColor.background)
+        .foregroundStyle(SurveyColor.text)
+    }
+
+    private var measureList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if !SurveyBuild.basicMode {
                 Text("測る")
                     .font(SurveyType(28, .heavy))
+                }
                 if !SurveyBuild.basicMode {
                 Button {
                     field.showsStature = true
@@ -72,6 +100,7 @@ struct MeasureLogView: View {
                 OperationBar(
                     field: field,
                     showsSkill: !SurveyBuild.basicMode,
+                    showsCoach: !SurveyBuild.basicMode,
                     saveIdentifier: SurveyBuild.basicMode ? "basic-save" : nil
                 )
                 if field.operation.showsAdvanced {
@@ -120,15 +149,16 @@ struct MeasureLogView: View {
                     observationRow(observation)
                 }
                 }
+                Color.clear
+                    .frame(height: listBottomClearance)
+                    .accessibilityHidden(true)
             }
             .padding(20)
-            .padding(.bottom, 200)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .clipped()
+        .contentMargins(.bottom, listBottomClearance, for: .scrollContent)
+        .safeAreaPadding(.bottom, 24)
         .accessibilityIdentifier("screen-measure")
-        .background(SurveyColor.background)
-        .foregroundStyle(SurveyColor.text)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func observationRow(_ observation: FieldObservation) -> some View {
