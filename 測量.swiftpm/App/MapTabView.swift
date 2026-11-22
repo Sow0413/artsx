@@ -160,6 +160,7 @@ struct MapTabView: View {
             }
             .background(SurveyColor.mapBackdrop)
         }
+        .clipped()
         .overlay {
             ZStack {
                 if field.extras.proximity {

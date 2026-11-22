@@ -155,7 +155,7 @@ jobs:
           xcrun simctl privacy "$udid" grant microphone "$bundle" || true
           xcrun simctl privacy "$udid" grant camera "$bundle" || true
           xcrun simctl location "$udid" set 35.1156,136.9021
-          xcrun simctl launch "$udid" "$bundle"
+          xcrun simctl launch "$udid" "$bundle" -skipStatureAsk
           xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/launch.png"
           sleep 5
           xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/plus5.png"
@@ -178,6 +178,16 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="-" \
             test-without-building
+      - name: Collect step screenshots
+        if: always()
+        run: |
+          set -euo pipefail
+          udid="${{ steps.sim.outputs.udid }}"
+          dest="$PWD/build/ui-screenshots/steps"
+          mkdir -p "$dest"
+          device="$HOME/Library/Developer/CoreSimulator/Devices/$udid"
+          find "$device/data" -path '*/survey-ui-shots/*.png' -exec cp {} "$dest/" \; || true
+          ls -l "$PWD/build/ui-screenshots" "$dest" || true
       - name: Upload screenshots and xcresult
         if: always()
         uses: actions/upload-artifact@v4

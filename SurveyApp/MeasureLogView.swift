@@ -113,6 +113,8 @@ struct MeasureLogView: View {
             .padding(20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .accessibilityIdentifier("screen-measure")
         .background(SurveyColor.background)
         .foregroundStyle(SurveyColor.text)
     }

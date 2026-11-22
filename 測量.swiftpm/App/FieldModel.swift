@@ -1644,7 +1644,7 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
-        if stature.statureMeters == nil {
+        if stature.statureMeters == nil, !ProcessInfo.processInfo.arguments.contains("-skipStatureAsk") {
             asksStature = true
         }
         consumePendingConfirm()

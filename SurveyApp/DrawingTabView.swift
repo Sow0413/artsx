@@ -30,10 +30,13 @@ struct DrawingTabView: View {
             } else {
                 VStack(spacing: 0) {
                     canvas.frame(height: max(260, geo.size.height * 0.46))
-                    controls
+                    controls.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+        .accessibilityIdentifier("screen-drawing")
         .background(SurveyColor.background)
         .overlay {
             ZStack {

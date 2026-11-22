@@ -69,6 +69,8 @@ struct ExportTabView: View {
             .padding(20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .accessibilityIdentifier("screen-export")
         .background(SurveyColor.background)
         .foregroundStyle(SurveyColor.text)
     }
