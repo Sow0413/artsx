@@ -144,6 +144,7 @@ struct BasicDesk: View {
                 .font(SurveyType(18, .heavy))
             TextField("点名", text: $rename)
                 .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("basic-stake-name")
             TextField("緯度", text: $latitude)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("stakeout-latitude")

@@ -123,6 +123,7 @@ struct ExportTabView: View {
                 TextField("2026-10-20", text: $importedDay)
                     .keyboardType(.numbersAndPunctuation)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier("book-imported-day")
                     .onChange(of: importedDay) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespaces)
                         field.bookQuery.importedDay = trimmed.isEmpty ? nil : trimmed

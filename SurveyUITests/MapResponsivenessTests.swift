@@ -44,25 +44,29 @@ final class MapResponsivenessTests: XCTestCase {
 
         openTab("tab-measure", showing: "screen-measure")
         XCTAssertTrue(app.descendants(matching: .any)["rtk-status"].waitForExistence(timeout: 5), "測る画面に RTK の状態が無い")
-        shot("04-measure")
         let sheet = app.scrollViews["screen-measure"]
-        sheet.swipeUp()
+        reveal(app.textFields["basic-stake-name"], in: sheet)
+        shot("04-measure")
 
         let project = app.textFields["basic-project-name"]
-        XCTAssertTrue(project.waitForExistence(timeout: 5), "プロジェクト名が無い")
-        project.tap()
-        project.typeText("SiteA")
+        reveal(project, in: sheet)
+        replace(project, with: "SiteA")
         app.buttons["basic-create"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteA'")).firstMatch.waitForExistence(timeout: 5), "プロジェクトを作れない")
         shot("07-project")
-        project.tap()
-        project.typeText("SiteB")
-        app.buttons["basic-rename"].tap()
+        replace(project, with: "SiteB")
+        let rename = app.buttons["basic-rename"]
+        reveal(rename, in: sheet)
+        rename.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteB'")).firstMatch.waitForExistence(timeout: 5), "名前を変えられない")
         shot("07b-rename")
 
         let save = app.scrollViews["screen-measure"].buttons["basic-save"]
         XCTAssertTrue(save.waitForExistence(timeout: 5), "測る画面の中に保存ボタンが無い")
+        for _ in 0..<6 where !save.isHittable {
+            sheet.swipeDown()
+        }
+        XCTAssertTrue(save.isHittable, "現在地を残すが押せない")
         XCTAssertEqual(app.scrollViews["screen-measure"].buttons.matching(identifier: "basic-save").count, 1)
         save.tap()
         let confirm = app.scrollViews["screen-measure"].buttons["この点を確定"]
@@ -103,9 +107,35 @@ final class MapResponsivenessTests: XCTestCase {
         shot("15-gcp")
 
         openTab("tab-export", showing: "screen-export")
+        reveal(app.textFields["book-imported-day"], in: app.scrollViews["screen-export"])
         shot("05-export")
         openTab("tab-map", showing: "map-controls")
         shot("06-map-return")
+    }
+
+    private func replace(_ field: XCUIElement, with text: String) {
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        let current = field.value as? String ?? ""
+        if !current.isEmpty, current != "プロジェクト名" {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: min(current.count, 40)))
+        }
+        field.typeText(text)
+        let typed = expectation(for: NSPredicate(format: "value CONTAINS %@", text), evaluatedWith: field)
+        XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 5), .completed, "\(text) が欄に入らない")
+        let keys = ["Return", "改行", "完了", "Done"]
+        for key in keys where app.keyboards.buttons[key].exists {
+            app.keyboards.buttons[key].tap()
+            return
+        }
+    }
+
+    private func reveal(_ element: XCUIElement, in sheet: XCUIElement) {
+        XCTAssertTrue(element.waitForExistence(timeout: 5))
+        for _ in 0..<6 where !element.isHittable {
+            sheet.swipeUp()
+        }
+        XCTAssertTrue(element.isHittable, "欄がタブバーに隠れたまま")
     }
 
     private func tapInMeasure(_ identifier: String, sheet: XCUIElement) {
