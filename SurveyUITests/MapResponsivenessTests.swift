@@ -166,13 +166,16 @@ final class MapResponsivenessTests: XCTestCase {
             let frame = element.frame
             let top = tabBarTop()
             let delta: CGFloat
-            if element.isHittable, frame.minY < 72 {
-                delta = min(max(72 - frame.minY, 48), 340)
+            if frame.maxY > top - 12 {
+                delta = -min(frame.maxY - (top - 12) + 20, 360)
+            } else if !element.isHittable || frame.minY < 72 {
+                let gap = frame.maxY < 100 ? 160 - frame.maxY : 140 - frame.minY
+                delta = min(max(gap, 100), 360)
             } else {
-                let overlap = frame.maxY > top - 12 ? frame.maxY - (top - 12) : 260
-                delta = -min(max(overlap + 24, 80), 340)
+                delta = 0
             }
-            let start = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.58))
+            if delta == 0 { break }
+            let start = sheet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
             start.press(forDuration: 0.02, thenDragTo: start.withOffset(CGVector(dx: 0, dy: delta)))
         }
         XCTAssertTrue(clearOfTabBar(element), "欄がタブバーに隠れたまま")
