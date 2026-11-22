@@ -50,6 +50,7 @@ struct DrawingTabView: View {
                     SOSRim(pointer: field.sosPointer)
                 }
             }
+            .allowsHitTesting(false)
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: drawingTypes) { result in
             switch result {

@@ -79,6 +79,7 @@ struct RTKEntryButton: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityLabel("RTK 設定")
+            .accessibilityIdentifier("rtk-entry")
     }
 }
 

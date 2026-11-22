@@ -5,8 +5,7 @@ struct MapTabView: View {
     @ObservedObject var field: FieldModel
 
     var body: some View {
-        ZStack {
-            SurveyMapView(field: field)
+        GeometryReader { geo in
             VStack(spacing: 0) {
                 WorkBar(field: field)
                 if let guide = field.stakeoutGuide {
@@ -143,11 +142,24 @@ struct MapTabView: View {
                 } else if field.drawing.pick == .mapPoint {
                     mapPickBanner
                 }
-                Spacer(minLength: 0)
-                bottomChrome
+                // 操作の列は上に残す。空いたところは地図で、下のカードだけスクロールする。
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                ScrollView {
+                    bottomChrome
+                }
+                .layoutPriority(1)
+                .frame(minHeight: 220, maxHeight: max(240, geo.size.height * 0.46))
+                .accessibilityIdentifier("map-controls")
             }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+            .background {
+                SurveyMapView(field: field)
+            }
+            .background(SurveyColor.mapBackdrop)
         }
-        .background(SurveyColor.mapBackdrop)
         .overlay {
             ZStack {
                 if field.extras.proximity {
@@ -163,6 +175,7 @@ struct MapTabView: View {
                     SOSRim(pointer: field.sosPointer)
                 }
             }
+            .allowsHitTesting(false)
         }
         .sheet(isPresented: $field.showsIncidentStats) {
             IncidentStatsSheet(field: field)

@@ -102,6 +102,11 @@ final class FieldModel: ObservableObject {
     @Published private(set) var measuredEyeDistance: Double?
     let deviceMachine = DeviceIdentity.machine
     private var sightInForeground = false
+    private let tiltUI = UIThrottle()
+    private let distanceUI = UIThrottle()
+    private let crosshairUI = UIThrottle()
+    private let readingUI = UIThrottle()
+    private var pendingReading: PositionReading?
     private var announcedEyeLevel = false
     private var epochWatch = EpochWatch()
 
@@ -1254,7 +1259,10 @@ final class FieldModel: ObservableObject {
         #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
         if on {
             SystemMotion.shared.onCrosshairPitch = { [weak self] pitch in
-                self?.crosshairTilt = StatureMath.tiltFromVertical(pitchRadians: pitch)
+                let tilt = StatureMath.tiltFromVertical(pitchRadians: pitch)
+                self?.crosshairUI.submit { [weak self] in
+                    self?.crosshairTilt = tilt
+                }
             }
             SystemMotion.shared.setCrosshairPitch(true)
         } else {
@@ -1721,7 +1729,9 @@ final class FieldModel: ObservableObject {
         PhoneSight.setEnabled(on) { [weak self] tilt in
             self?.noteTilt(tilt)
         } onDistance: { [weak self] meters in
-            self?.measuredEyeDistance = meters
+            self?.distanceUI.submit { [weak self] in
+                self?.measuredEyeDistance = meters
+            }
         }
         if !on {
             sightTiltRadians = nil
@@ -1731,13 +1741,15 @@ final class FieldModel: ObservableObject {
     }
 
     private func noteTilt(_ tilt: Double?) {
-        sightTiltRadians = tilt
         let level = tilt.map(StatureMath.isEyeLevel) ?? false
         if level && !announcedEyeLevel {
             LevelCue.play()
             announcedEyeLevel = true
         } else if !level {
             announcedEyeLevel = false
+        }
+        tiltUI.submit { [weak self] in
+            self?.sightTiltRadians = tilt
         }
     }
 
@@ -2282,6 +2294,15 @@ final class FieldModel: ObservableObject {
     }
 
     private func apply(_ reading: PositionReading) {
+        pendingReading = reading
+        readingUI.submit { [weak self] in
+            guard let self, let reading = self.pendingReading else { return }
+            self.commit(reading)
+        }
+    }
+
+    /// 画面へ出す位置は秒10回まで。方位のたびに全体を描き直すと、タップが届かなくなる。
+    private func commit(_ reading: PositionReading) {
         self.reading = reading
         if let position = reading.position {
             let wasRecording = controlFix.canRecord
@@ -2760,5 +2781,36 @@ final class FieldModel: ObservableObject {
         case .nothingSaved:
             return "保存できませんでした。電波を確認してください。"
         }
+    }
+}
+
+/// センサの表示更新を秒10回に揃える。連続した値は最後の一つを残す。
+private final class UIThrottle {
+    private let interval: TimeInterval
+    private var last = Date.distantPast
+    private var trailing: DispatchWorkItem?
+
+    init(interval: TimeInterval = 0.1) {
+        self.interval = interval
+    }
+
+    func submit(_ body: @escaping () -> Void) {
+        let elapsed = Date().timeIntervalSince(last)
+        if elapsed >= interval {
+            last = Date()
+            trailing?.cancel()
+            trailing = nil
+            body()
+            return
+        }
+        trailing?.cancel()
+        let wait = interval - elapsed
+        let item = DispatchWorkItem { [weak self] in
+            self?.last = Date()
+            self?.trailing = nil
+            body()
+        }
+        trailing = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: item)
     }
 }

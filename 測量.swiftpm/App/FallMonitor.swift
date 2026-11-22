@@ -232,11 +232,21 @@ final class SystemMotion {
     /// ユーザー加速度と重力。どちらも端末座標、単位は g。丁張の相対高だけが読む。
     var onRelativeSample: ((Double, Double, Double, Double, Double, Double) -> Void)?
     private let manager = CMMotionManager()
+    private let queue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "survey.device-motion"
+        queue.maxConcurrentOperationCount = 1
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
     private var fallOn = false
     private var staturePitch = false
     private var crosshairPitch = false
     private var relativeMotion = false
     private var running = false
+    private var lastPitchHop = Date.distantPast
+    private var lastCrosshairHop = Date.distantPast
+    private var lastRelativeHop = Date.distantPast
 
     private init() {}
 
@@ -280,24 +290,30 @@ final class SystemMotion {
                 let gravity = motion.gravity
                 let userG = Self.magnitude(user.x, user.y, user.z)
                 let totalG = Self.magnitude(user.x + gravity.x, user.y + gravity.y, user.z + gravity.z)
-                self.onSample?(FallSample(at: Date(), userG: userG, totalG: totalG))
+                let sample = FallSample(at: Date(), userG: userG, totalG: totalG)
+                DispatchQueue.main.async { self.onSample?(sample) }
             }
             if self.staturePitch {
-                self.onPitchRadians?(motion.attitude.pitch)
+                self.deliverPitch(motion.attitude.pitch)
             }
             if self.crosshairPitch {
-                self.onCrosshairPitch?(motion.attitude.pitch)
+                self.deliverCrosshair(motion.attitude.pitch)
             }
             if self.relativeMotion {
+                let now = Date()
+                guard now.timeIntervalSince(self.lastRelativeHop) >= 0.1 else { return }
+                self.lastRelativeHop = now
                 let user = motion.userAcceleration
                 let gravity = motion.gravity
-                self.onRelativeSample?(user.x, user.y, user.z, gravity.x, gravity.y, gravity.z)
+                DispatchQueue.main.async {
+                    self.onRelativeSample?(user.x, user.y, user.z, gravity.x, gravity.y, gravity.z)
+                }
             }
         }
         if CMMotionManager.availableAttitudeReferenceFrames().contains(.xArbitraryZVertical) {
-            manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main, withHandler: deliver)
+            manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue, withHandler: deliver)
         } else {
-            manager.startDeviceMotionUpdates(to: .main, withHandler: deliver)
+            manager.startDeviceMotionUpdates(to: queue, withHandler: deliver)
         }
     }
 
@@ -305,6 +321,20 @@ final class SystemMotion {
         guard running else { return }
         manager.stopDeviceMotionUpdates()
         running = false
+    }
+
+    private func deliverPitch(_ pitch: Double) {
+        let now = Date()
+        guard now.timeIntervalSince(lastPitchHop) >= 0.1 else { return }
+        lastPitchHop = now
+        DispatchQueue.main.async { [weak self] in self?.onPitchRadians?(pitch) }
+    }
+
+    private func deliverCrosshair(_ pitch: Double) {
+        let now = Date()
+        guard now.timeIntervalSince(lastCrosshairHop) >= 0.1 else { return }
+        lastCrosshairHop = now
+        DispatchQueue.main.async { [weak self] in self?.onCrosshairPitch?(pitch) }
     }
 
     private static func magnitude(_ x: Double, _ y: Double, _ z: Double) -> Double {

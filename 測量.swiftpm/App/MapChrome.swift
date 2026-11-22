@@ -82,6 +82,8 @@ struct SurveyTabBar: View {
                     .foregroundStyle(selection == tab ? SurveyColor.text : SurveyColor.muted)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityIdentifier("tab-\(tab.rawValue)")
                 .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
         }

@@ -70,6 +70,124 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             build
 
+  ios-ui:
+    name: iOS UI (simulator)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Xcode 26
+        run: |
+          set -euo pipefail
+          xcode_app="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$xcode_app"
+          echo "selected ${xcode_app}"
+          xcodebuild -version
+          echo "iOS SDK $(xcrun --sdk iphonesimulator --show-sdk-version)"
+      - name: Generate the Xcode project
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen generate
+      - name: Boot an iPhone 16 or 17 simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/sim.txt
+          import json, subprocess, sys
+          raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"])
+          data = json.loads(raw)
+          found = []
+          for runtime, devices in data.get("devices", {}).items():
+              if "iOS-26" not in runtime:
+                  continue
+              for device in devices:
+                  if device.get("isAvailable", True):
+                      found.append((device["name"], device["udid"]))
+          for preferred in ("iPhone 17", "iPhone 16"):
+              for name, udid in found:
+                  if name == preferred:
+                      print(udid)
+                      print(name)
+                      sys.exit(0)
+          for preferred in ("iPhone 17", "iPhone 16"):
+              for name, udid in found:
+                  if name.startswith(preferred):
+                      print(udid)
+                      print(name)
+                      sys.exit(0)
+          print("iPhone 16/17 on iOS 26 was not found", file=sys.stderr)
+          subprocess.run(["xcrun", "simctl", "list", "devices", "available"])
+          sys.exit(1)
+          PY
+          udid="$(sed -n '1p' /tmp/sim.txt)"
+          name="$(sed -n '2p' /tmp/sim.txt)"
+          echo "simulator ${name} ${udid}"
+          echo "udid=${udid}" >> "$GITHUB_OUTPUT"
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+      - name: Build for the simulator
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Survey.xcodeproj \
+            -scheme SurveyApp \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$PWD/build/ui" \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="-" \
+            build-for-testing
+      - name: Screenshot launch, +5s, and +15s
+        run: |
+          set -euo pipefail
+          udid="${{ steps.sim.outputs.udid }}"
+          app="$(find "$PWD/build/ui" -path '*iphonesimulator*' -name 'Survey.app' -type d | head -1)"
+          test -n "$app"
+          bundle="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")"
+          echo "bundle ${bundle}"
+          mkdir -p "$PWD/build/ui-screenshots"
+          xcrun simctl install "$udid" "$app"
+          xcrun simctl privacy "$udid" grant location "$bundle" || true
+          xcrun simctl privacy "$udid" grant location-always "$bundle" || true
+          xcrun simctl privacy "$udid" grant motion "$bundle" || true
+          xcrun simctl privacy "$udid" grant microphone "$bundle" || true
+          xcrun simctl privacy "$udid" grant camera "$bundle" || true
+          xcrun simctl location "$udid" set 35.1156,136.9021
+          xcrun simctl launch "$udid" "$bundle"
+          xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/launch.png"
+          sleep 5
+          xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/plus5.png"
+          sleep 10
+          xcrun simctl io "$udid" screenshot "$PWD/build/ui-screenshots/plus15.png"
+          xcrun simctl terminate "$udid" "$bundle" || true
+      - name: Run the UI test
+        run: |
+          set -euo pipefail
+          udid="${{ steps.sim.outputs.udid }}"
+          xcodebuild \
+            -project Survey.xcodeproj \
+            -scheme SurveyApp \
+            -destination "platform=iOS Simulator,id=${udid}" \
+            -derivedDataPath "$PWD/build/ui" \
+            -resultBundlePath "$PWD/build/ui/SurveyUI.xcresult" \
+            -only-testing:SurveyUITests \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="-" \
+            test-without-building
+      - name: Upload screenshots and xcresult
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui
+          path: |
+            build/ui-screenshots/
+            build/ui/SurveyUI.xcresult
+          if-no-files-found: warn
+
   testflight:
     name: TestFlight upload
     if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight

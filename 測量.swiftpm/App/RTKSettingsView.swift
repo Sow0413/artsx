@@ -80,6 +80,7 @@ struct RTKSettingsView: View {
                 }
             }
             .navigationTitle("RTK")
+            .accessibilityIdentifier("rtk-settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
