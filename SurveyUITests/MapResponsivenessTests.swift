@@ -9,6 +9,7 @@ final class MapResponsivenessTests: XCTestCase {
         continueAfterFailure = false
         try FileManager.default.createDirectory(at: shotDirectory, withIntermediateDirectories: true)
         app = XCUIApplication()
+        app.launchArguments = ["-surveyUITest"]
         app.launch()
         allowSystemPrompts()
         dismissStaturePrompt()
@@ -69,18 +70,18 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'T1'")).firstMatch.waitForExistence(timeout: 5), "残した点が座標簿に無い")
         shot("09-book")
 
-        app.buttons["basic-export-csv"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '書き' OR label CONTAINS '点'")).firstMatch.waitForExistence(timeout: 5))
+        tapInMeasure("basic-export-csv", sheet: sheet)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '書きました'")).firstMatch.waitForExistence(timeout: 5), "座標一覧を書き出せない")
         shot("10-export")
-        app.buttons["basic-import"].tap()
+        tapInMeasure("basic-import", sheet: sheet)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '読みました'")).firstMatch.waitForExistence(timeout: 5), "座標を読み込めない")
         shot("11-import")
-        dismissPicker()
-        app.buttons["basic-backup"].tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'バックアップ'")).firstMatch.waitForExistence(timeout: 5))
+        tapInMeasure("basic-backup", sheet: sheet)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'バックアップを作りました'")).firstMatch.waitForExistence(timeout: 5), "バックアップを作れない")
         shot("12-backup")
-        app.buttons["basic-restore"].tap()
+        tapInMeasure("basic-restore", sheet: sheet)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '戻しました'")).firstMatch.waitForExistence(timeout: 5), "バックアップから戻せない")
         shot("13-restore")
-        dismissPicker()
 
         let stake = app.buttons["basic-stakeout"]
         if !stake.isHittable {
@@ -104,14 +105,14 @@ final class MapResponsivenessTests: XCTestCase {
         shot("06-map-return")
     }
 
-    private func dismissPicker() {
-        let cancel = app.buttons["Cancel"]
-        let japanese = app.buttons["キャンセル"]
-        if cancel.waitForExistence(timeout: 2) {
-            cancel.tap()
-        } else if japanese.waitForExistence(timeout: 1) {
-            japanese.tap()
+    private func tapInMeasure(_ identifier: String, sheet: XCUIElement) {
+        let button = app.buttons[identifier]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "\(identifier) が無い")
+        for _ in 0..<6 where !button.isHittable {
+            sheet.swipeUp()
         }
+        XCTAssertTrue(button.isHittable, "\(identifier) がタブバーに隠れて押せない")
+        button.tap()
     }
 
     private func openTab(_ identifier: String, showing needle: String) {

@@ -71,7 +71,7 @@ struct ExportTabView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(20)
-            .padding(.bottom, 28)
+            .padding(.bottom, 120)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()

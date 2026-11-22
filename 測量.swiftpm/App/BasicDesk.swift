@@ -107,15 +107,23 @@ struct BasicDesk: View {
             .font(SurveyType(16, .heavy))
             HStack {
                 Button("読み込む") {
-                    file = .importBook
-                    presentingFile = true
+                    if Self.uiTest, let url = field.exportURL, let data = try? Data(contentsOf: url) {
+                        field.importBasic(data: data, filename: url.lastPathComponent)
+                    } else {
+                        file = .importBook
+                        presentingFile = true
+                    }
                 }
                     .accessibilityIdentifier("basic-import")
                 Button("バックアップ") { field.makeBasicBackup() }
                     .accessibilityIdentifier("basic-backup")
                 Button("復元") {
-                    file = .restore
-                    presentingFile = true
+                    if Self.uiTest, let url = field.exportURL, let data = try? Data(contentsOf: url) {
+                        field.restoreBasicBackup(data: data)
+                    } else {
+                        file = .restore
+                        presentingFile = true
+                    }
                 }
                     .accessibilityIdentifier("basic-restore")
             }
@@ -207,6 +215,10 @@ struct BasicDesk: View {
         let accuracy = String(format: "±%.2fm", entry.horizontalAccuracyMeters)
         return "\(quality) \(accuracy) \(entry.source ?? "")"
     }
+}
+
+private extension BasicDesk {
+    static var uiTest: Bool { ProcessInfo.processInfo.arguments.contains("-surveyUITest") }
 }
 
 private enum BasicFile {

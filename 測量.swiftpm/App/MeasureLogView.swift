@@ -122,7 +122,7 @@ struct MeasureLogView: View {
                 }
             }
             .padding(20)
-            .padding(.bottom, 28)
+            .padding(.bottom, 120)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()
