@@ -18,15 +18,4 @@ struct ConfirmObservationIntent: AppIntent {
         return .result()
     }
 }
-
-struct SurveyShortcuts: AppShortcutsProvider {
-    @AppShortcutsBuilder static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: ConfirmObservationIntent(),
-            phrases: ["\(.applicationName)で観測を確定"],
-            shortTitle: "観測を確定",
-            systemImageName: "mappin"
-        )
-    }
-}
 #endif

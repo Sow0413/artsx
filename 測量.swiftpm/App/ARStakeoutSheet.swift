@@ -312,7 +312,7 @@ struct ARStakeoutSheet: View {
                 frame: frame,
                 easting: plane?.eastingMeters,
                 northing: plane?.northingMeters,
-                rtk: position?.solution == .rtkFix,
+                rtk: position?.fixQuality == .rtkFix,
                 gnssMeters: position?.horizontalAccuracyMeters ?? 0
             )
         }

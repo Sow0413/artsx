@@ -152,7 +152,7 @@ struct OperatorView: View {
 
     private var directionHeadline: some View {
         let fallLine = field.crew.fallSpeech
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             Text(fallLine ?? field.crew.threats.headline)
                 .font(SurveyType(40, .black))
                 .minimumScaleFactor(0.4)

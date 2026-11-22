@@ -131,16 +131,16 @@ final class FieldModel: ObservableObject {
     #endif
     @Published var disasterMode = false
     @Published var batterySaver = false
-    @Published private(set) var disasterSites: [DisasterSite] = []
-    @Published private(set) var disasterSegments: [PassageSegment] = []
-    @Published private(set) var disasterPeers: [DisasterPosition] = []
-    @Published private(set) var disasterTexts: [DisasterText] = []
-    @Published private(set) var disasterPending = 0
-    @Published private(set) var disasterMessage: String?
+    @Published var disasterSites: [DisasterSite] = []
+    @Published var disasterSegments: [PassageSegment] = []
+    @Published var disasterPeers: [DisasterPosition] = []
+    @Published var disasterTexts: [DisasterText] = []
+    @Published var disasterPending = 0
+    @Published var disasterMessage: String?
     @Published var showsDisaster = false
-    @Published private(set) var meshBattery: Int?
-    @Published private(set) var meshCharging = false
-    @Published private(set) var meshPresence: MeshDuty.Presence = .active
+    @Published var meshBattery: Int?
+    @Published var meshCharging = false
+    @Published var meshPresence: MeshDuty.Presence = .active
     @Published private(set) var firstEpisode: FirstEpisode?
     @Published private(set) var firstView: FirstView?
     @Published private(set) var aidArrows: [AidArrow] = []
@@ -1027,7 +1027,7 @@ final class FieldModel: ObservableObject {
         return StakeoutPace.guide(
             distanceMeters: inverse.distanceMeters,
             azimuthDegrees: inverse.azimuthDegrees,
-            facingDegrees: facing?.degrees,
+            facingDegrees: facing,
             strideMeters: pace.strideMeters,
             unit: stakeoutUnit.unit,
             precision: StakeoutPrecision.decide(drawing.stakeoutAccuracy)

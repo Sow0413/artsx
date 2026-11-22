@@ -113,7 +113,7 @@ struct OperationBar: View {
             } label: {
                 Text(command.title)
                     .font(SurveyType(18, .heavy))
-                    .frame(maxWidth: .infinity, minWidth: 160, minHeight: OutdoorContrast.primaryPoints)
+                    .frame(minWidth: 160, maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
                     .background(filled(command) ? SurveyColor.blue : SurveyColor.card)
                     .foregroundStyle(filled(command) ? SurveyColor.onAccent : SurveyColor.text)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -159,7 +159,7 @@ private struct CaptureControl: View {
     var body: some View {
             Text(title)
             .font(SurveyType(18, .heavy))
-            .frame(maxWidth: .infinity, minWidth: 160, minHeight: OutdoorContrast.primaryPoints)
+            .frame(minWidth: 160, maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints)
             .background(SurveyColor.blue)
             .foregroundStyle(SurveyColor.onAccent)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))

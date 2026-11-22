@@ -18,6 +18,12 @@ struct HiyariIntent: AppIntent {
 struct SurveyShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
+            intent: ConfirmObservationIntent(),
+            phrases: ["\(.applicationName)で観測を確定"],
+            shortTitle: "観測を確定",
+            systemImageName: "mappin"
+        )
+        AppShortcut(
             intent: HiyariIntent(),
             phrases: [
                 "\(.applicationName)でヒヤリ",
