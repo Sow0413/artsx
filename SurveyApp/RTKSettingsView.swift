@@ -14,6 +14,10 @@ struct RTKSettingsView: View {
     @State private var host = "d-gnss.jp"
     @State private var portText = "2101"
     @State private var mountpoint: RTKMountpoint = .rrsgd2024
+    @State private var customMount = ""
+    @State private var mounts: [String] = []
+    @State private var mountNote = ""
+    @State private var listing = false
     @State private var user = ""
     @State private var password = ""
     @State private var showsNote = false
@@ -25,8 +29,10 @@ struct RTKSettingsView: View {
                     Text(statusLine)
                         .font(SurveyType(20, .heavy))
                         .foregroundStyle(statusColor)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .minimumScaleFactor(0.7)
+                    labeled("ViDoc", session.vidocLine, id: "vidoc-status")
+                    labeled("NTRIP", session.ntripLine, id: "ntrip-status")
                 }
 
                 Section {
@@ -34,18 +40,39 @@ struct RTKSettingsView: View {
                         .font(SurveyType(16, .heavy))
                     field("接続先", text: $host)
                     field("ポート", text: $portText, numbers: true)
-                    Picker("マウント", selection: $mountpoint) {
+                    Picker("マウント", selection: Binding(get: { mountpoint }, set: { mountpoint = $0; customMount = "" })) {
                         ForEach(RTKMountpoint.allCases) { point in
                             Text(point.rawValue).tag(point)
                         }
                     }
                     .font(SurveyType(16, .heavy))
+                    field("マウント名", text: $customMount)
+                    Button(action: fetchMounts) {
+                        Text(listing ? "一覧を取得中" : "マウント一覧を取得")
+                            .font(SurveyType(16, .heavy))
+                    }
+                    .disabled(listing)
+                    if !mountNote.isEmpty {
+                        Text(mountNote)
+                            .font(SurveyType(13, .semibold))
+                            .foregroundStyle(SurveyColor.amber)
+                    }
+                    ForEach(mounts, id: \.self) { name in
+                        Button(name) {
+                            customMount = name
+                            if let known = RTKMountpoint(rawValue: name) { mountpoint = known }
+                        }
+                        .font(SurveyType(16, .heavy))
+                    }
                     field("ID", text: $user)
                     LabeledContent("パスワード") {
                         SecureField("パスワード", text: $password)
                             .multilineTextAlignment(.trailing)
                     }
                     .font(SurveyType(16, .heavy))
+                    Text(password.isEmpty ? "未入力" : "入力済み（欄は伏せます）")
+                        .font(SurveyType(13, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
                     Button {
                         showsNote = true
                     } label: {
@@ -71,11 +98,12 @@ struct RTKSettingsView: View {
                     }
                 }
 
-                if session.message.contains("NG") {
+                if !session.ntripLine.isEmpty, session.ntripLine != "未接続", session.ntripLine != "認証中", !session.ntripLine.hasPrefix("補正受信中"), !session.ntripLine.hasPrefix("NTRIP 接続") {
                     Section {
-                        Text(session.message)
+                        Text(session.ntripLine)
                             .font(SurveyType(14, .heavy))
                             .foregroundStyle(SurveyColor.amber)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -98,6 +126,18 @@ struct RTKSettingsView: View {
         .modifier(SurveyScheme())
     }
 
+    private func labeled(_ title: String, _ value: String, id: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(SurveyType(13, .semibold))
+                .foregroundStyle(SurveyColor.muted)
+            Text(value)
+                .font(SurveyType(16, .heavy))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(id)
+        }
+    }
+
     private func field(_ title: String, text: Binding<String>, numbers: Bool = false) -> some View {
         LabeledContent(title) {
             TextField(title, text: text)
@@ -110,7 +150,7 @@ struct RTKSettingsView: View {
     }
 
     private var statusLine: String {
-        if session.mode == .rtk, !session.deviceConnected { return "探索中" }
+        if session.mode == .rtk, !session.deviceConnected { return session.vidocLine }
         guard let meters = session.horizontalAccuracyMeters, meters.isFinite, meters >= 0 else { return fixLabel }
         let approximate = !(session.mode == .rtk && session.fix == .rtkFix)
         return "\(fixLabel)　\(AccuracyFormat.label(meters: meters, approximate: approximate))"
@@ -152,17 +192,36 @@ struct RTKSettingsView: View {
         host = stored.host
         portText = String(stored.port)
         mountpoint = stored.mountpoint
+        customMount = stored.customMount ?? ""
         user = stored.user
         if password.isEmpty { password = RTKKeychain.load(user: stored.user) }
     }
 
     private func connect() {
         let port = UInt16(portText) ?? 2101
+        let typed = password.isEmpty ? RTKKeychain.load(user: user) : password
+        password = typed
         let settings = RTKSettings(correctionsEnabled: enabled, host: host, port: port,
-                                   mountpoint: mountpoint, user: user)
+                                   mountpoint: mountpoint,
+                                   customMount: customMount.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   user: user)
         RTKSettingsStore.save(settings, to: siteDirectory)
-        RTKKeychain.save(user: user, password: password)
-        session.connectRTK(settings: settings, password: password)
+        if !typed.isEmpty { RTKKeychain.save(user: user, password: typed) }
+        session.connectRTK(settings: settings, password: typed)
+    }
+
+    private func fetchMounts() {
+        listing = true
+        let port = UInt16(portText) ?? 2101
+        let typed = password.isEmpty ? RTKKeychain.load(user: user) : password
+        let config = NTRIPClient.Config(host: host, port: port, mountpoint: "", user: user, password: typed)
+        NTRIPClient.fetchMounts(config: config) { names, failure in
+            DispatchQueue.main.async {
+                listing = false
+                mounts = names
+                mountNote = names.isEmpty ? (failure ?? "") : ""
+            }
+        }
     }
 }
 #endif

@@ -38,13 +38,19 @@ final class MapResponsivenessTests: XCTestCase {
         rtk.tap()
         XCTAssertTrue(app.navigationBars["RTK"].waitForExistence(timeout: 5), "RTK のシートが開かない")
         XCTAssertTrue(app.staticTexts["NTRIP"].waitForExistence(timeout: 5), "RTK の中身が出ない")
+        XCTAssertTrue(app.staticTexts["vidoc-status"].waitForExistence(timeout: 5), "ViDoc の行が無い")
+        XCTAssertTrue(app.staticTexts["ntrip-status"].waitForExistence(timeout: 5), "NTRIP の行が無い")
         shot("03-rtk")
+        shot("03-link")
         app.buttons["閉じる"].tap()
         XCTAssertTrue(app.buttons["tab-map"].waitForExistence(timeout: 5))
 
         openTab("tab-measure", showing: "screen-measure")
         XCTAssertTrue(app.descendants(matching: .any)["rtk-status"].waitForExistence(timeout: 5), "測る画面に RTK の状態が無い")
         let sheet = app.scrollViews["screen-measure"]
+        scrollClear(app.staticTexts["vidoc-status"], in: sheet)
+        XCTAssertTrue(app.staticTexts["ntrip-status"].exists)
+        shot("04-link")
         let intro = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'します。'")).firstMatch
         XCTAssertTrue(intro.waitForExistence(timeout: 5), "測るの説明が無い")
         let badge = app.descendants(matching: .any)["accuracy-badge"]

@@ -236,6 +236,14 @@ struct MeasureLogView: View {
                 Text(rtkLine(session))
                     .font(SurveyType(18, .heavy))
                     .accessibilityIdentifier("rtk-status")
+                Text("ViDoc \(session.vidocLine)")
+                    .font(SurveyType(15, .heavy))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("vidoc-status")
+                Text("NTRIP \(session.ntripLine)")
+                    .font(SurveyType(15, .heavy))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("ntrip-status")
             }
             #endif
             if !SurveyBuild.basicMode {

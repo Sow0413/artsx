@@ -42,6 +42,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public var correctionSource: String?
     // 最新の GGA 文（NTRIP へ概略位置として送るのに使う）
     public private(set) var lastGGA: String?
+    /// 画面向けの接続段階。Bluetooth のキューからメインへ渡す。
+    public var onLink: ((String) -> Void)?
+    private var deviceName = ""
     // 最後に RTCM を流した時刻（文に補正遅れが無いときの算出に使う）
     private var lastRTCMAt: Date?
 
@@ -90,7 +93,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     }
 
     private func startScan() {
-        // ViDoc は実 GATT が FFF0 だが広告 ServiceData は別(FFE1)なので、サービス指定と無指定を併用して名前でも拾う。
+        // 広告の Service Data は FFE1 で、GATT の FFF0 は UUID 一覧に出ないことがある。
+        // サービス指定のスキャンだと FFE1 だけの機体を見落とすので、前面では全件を見てから判定する。
+        report("探索中")
         central?.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
@@ -100,8 +105,16 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         case .poweredOn:
             if running { startScan() }
         case .unauthorized:
+            report("Bluetooth が許可されていません")
             continuation.yield(PositionReading(position: nil, availability: .denied))
+        case .poweredOff:
+            report("Bluetooth がオフです")
+            continuation.yield(PositionReading(position: nil, availability: .unavailable))
+        case .unsupported:
+            report("この端末では Bluetooth を使えません")
+            continuation.yield(PositionReading(position: nil, availability: .unavailable))
         default:
+            report("Bluetooth を準備しています")
             continuation.yield(PositionReading(position: nil, availability: .unavailable))
         }
     }
@@ -109,17 +122,22 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                advertisementData: [String : Any], rssi RSSI: NSNumber) {
         let name = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? ""
-        let advertisesService = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.contains(Self.serviceUUID) ?? false
-        guard advertisesService
-                || name.localizedCaseInsensitiveContains("vidoc")
-                || name.localizedCaseInsensitiveContains("vida") else { return }
+        let services = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.map(\.uuidString) ?? []
+        let overflow = (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID])?.map(\.uuidString) ?? []
+        let serviceData = (advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data])?.keys.map(\.uuidString) ?? []
+        guard ViDocDiscovery.matches(localName: name, serviceUUIDs: services, overflowServiceUUIDs: overflow, serviceDataUUIDs: serviceData) else { return }
         central.stopScan()
+        deviceName = name.isEmpty ? "ViDoc" : name
+        report("ViDoc を見つけました（\(deviceName)）")
         self.peripheral = peripheral
         peripheral.delegate = self
         central.connect(peripheral, options: nil)
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        let name = peripheral.name ?? deviceName
+        deviceName = name.isEmpty ? deviceName : name
+        report("接続しました（\(deviceName)）")
         peripheral.discoverServices([Self.serviceUUID])
     }
 
@@ -168,6 +186,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private func handleNMEA(_ line: String) {
         guard let epoch = nmea.consume(line) else { return }
         lastGGA = epoch.sentence
+        let count = epoch.satelliteCount.map(String.init) ?? "—"
+        report("NMEA 受信中 衛星 \(count) \(Self.qualityLabel(epoch.fixQuality))")
         let age = epoch.correctionAgeSeconds ?? lastRTCMAt.map { Date().timeIntervalSince($0) }
         stage = epoch.stage
         let stationID = epoch.stationID
@@ -193,6 +213,22 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             headingDegrees: nil
         )
         continuation.yield(PositionReading(position: position, availability: .available))
+    }
+
+    private func report(_ line: String) {
+        let callback = onLink
+        DispatchQueue.main.async { callback?(line) }
+    }
+
+    private static func qualityLabel(_ quality: FixQuality) -> String {
+        switch quality {
+        case .rtkFix: return "FIX"
+        case .float: return "FLOAT"
+        case .dgps: return "DGPS"
+        case .clas: return "CLAS"
+        case .standalone: return "単独"
+        case .none: return "未測位"
+        }
     }
 }
 #endif

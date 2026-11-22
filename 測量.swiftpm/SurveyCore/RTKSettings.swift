@@ -30,18 +30,28 @@ public struct RTKSettings: Codable, Sendable, Equatable {
     public var host: String
     public var port: UInt16
     public var mountpoint: RTKMountpoint
+    /// 一覧から選んだ名前。空なら mountpoint の定番名を送る。
+    public var customMount: String?
     public var user: String
 
     public init(correctionsEnabled: Bool = true,
                 host: String = "d-gnss.jp",
                 port: UInt16 = 2101,
                 mountpoint: RTKMountpoint = .rrsgd2024,
+                customMount: String? = nil,
                 user: String = "") {
         self.correctionsEnabled = correctionsEnabled
         self.host = host
         self.port = port
         self.mountpoint = mountpoint
+        self.customMount = customMount
         self.user = user
+    }
+
+    /// 今編集しているマウント。保存値を後から上書きしない。
+    public var activeMount: String {
+        let trimmed = customMount?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? mountpoint.rawValue : trimmed
     }
 }
 
