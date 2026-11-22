@@ -19,7 +19,7 @@ public struct AccuracyBadgeModel: Equatable, Sendable {
     public var guidance: String
     /// 楽観的な機器に係数をかけたときの注記。かけていなければ空。
     public var caution: String
-    /// FIX / FLOAT / 単独 / CLAS。位置が無いときは「—」。
+    /// FIX / FLOAT / DGPS / 単独 / CLAS。位置が無いときは「—」。
     public var solutionLabel: String
 
     public init(

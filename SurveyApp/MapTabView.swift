@@ -73,6 +73,13 @@ struct MapTabView: View {
                     ExtraEntryButton {
                         field.showsExtras = true
                     }
+                    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+                    if field.rtkSession != nil {
+                        RTKEntryButton {
+                            field.openRTK()
+                        }
+                    }
+                    #endif
                     if field.extras.pushToTalk {
                         Button(field.radio.spaceAudio ? "定位オン" : "定位") {
                             field.radio.setSpaceAudio(!field.radio.spaceAudio)

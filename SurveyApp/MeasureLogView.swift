@@ -175,8 +175,18 @@ struct MeasureLogView: View {
 
     private var gnssSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("GNSS")
-                .font(SurveyType(18, .heavy))
+            HStack {
+                Text("GNSS")
+                    .font(SurveyType(18, .heavy))
+                Spacer()
+                #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+                if field.rtkSession != nil {
+                    RTKEntryButton {
+                        field.openRTK()
+                    }
+                }
+                #endif
+            }
             Text(field.gnssState == .idle ? "受信機を選ぶと、切れたときにつなぎ直します。" : field.gnssState.label)
                 .font(SurveyType(15, .semibold))
                 .foregroundStyle(field.gnssState == .reconnecting ? SurveyColor.amber : SurveyColor.muted)

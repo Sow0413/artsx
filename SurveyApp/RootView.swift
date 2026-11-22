@@ -151,6 +151,16 @@ struct RootView: View {
         .sheet(isPresented: $field.showsARStakeout) {
             ARStakeoutSheet(field: field)
         }
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        .sheet(isPresented: $field.showsRTK) {
+            if let session = field.rtkSession {
+                RTKSettingsView(session: session, siteDirectory: field.siteDirectory)
+            }
+        }
+        .onChange(of: field.showsRTK) { _, showing in
+            if !showing { field.resumeGNSS() }
+        }
+        #endif
     }
 
     private func syncVolume() {
@@ -242,11 +252,18 @@ enum StakeoutVoice {
 }
 
 enum AppEnvironment {
-    static func live() -> (source: CoreLocationPositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
+    static func live() -> (source: any PositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
         let directories = directories(inTemporary: false)
         let tiles = TileStore(packDirectory: directories.packs, cacheDirectory: directories.cache)
         let loaded = ControlPointLoader.load(siteDirectory: directories.site)
-        return (CoreLocationPositionSource(), tiles, directories.packs, loaded.points, loaded.notice, directories.site)
+        // 既定はセッション内の iPhone 単独。RTK は設定するまで位置の出どころが変わらない。
+        // Playgrounds では CoreBluetooth の受信機をコンパイルしない。
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        let source: any PositionSource = RTKPositionSession()
+        #else
+        let source: any PositionSource = CoreLocationPositionSource()
+        #endif
+        return (source, tiles, directories.packs, loaded.points, loaded.notice, directories.site)
     }
 
     static func preview(source: any PositionSource) -> (source: any PositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
