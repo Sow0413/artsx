@@ -174,7 +174,7 @@ struct MapTabView: View {
                         .padding(.top, 6)
                         .accessibilityIdentifier("stakeout-guide")
                 }
-                if SurveyBuild.basicMode, let message = field.captureMessage {
+                if SurveyBuild.basicMode, field.tab == .map, let message = field.captureMessage {
                     Text(message)
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.amber)

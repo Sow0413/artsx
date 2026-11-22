@@ -82,7 +82,7 @@ final class MapResponsivenessTests: XCTestCase {
             scrollClear(confirm, in: sheet)
             confirm.tap()
         }
-        let saved = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を残しました'")).firstMatch
+        let saved = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を残しました' AND NOT label CONTAINS '基準点'")).firstMatch
         XCTAssertTrue(saved.waitForExistence(timeout: 5), "点を残した文が無い")
         scrollClear(saved, in: sheet)
         shot("08-save")
