@@ -37,9 +37,17 @@ jobs:
 
   ios-build:
     name: Unsigned iOS build (macOS)
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Use Xcode 26
+        run: |
+          set -euo pipefail
+          xcode_app="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$xcode_app"
+          echo "selected ${xcode_app}"
+          xcodebuild -version
+          echo "iOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
       - name: Test SurveyCore
         run: |
           set -euo pipefail
@@ -65,9 +73,17 @@ jobs:
   testflight:
     name: TestFlight upload
     if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Use Xcode 26
+        run: |
+          set -euo pipefail
+          xcode_app="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$xcode_app"
+          echo "selected ${xcode_app}"
+          xcodebuild -version
+          echo "iOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
       - name: Sign and upload when the API key is present
         env:
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}

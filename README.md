@@ -218,7 +218,7 @@ xcodebuild \
 
 ## クラウド Mac と TestFlight
 
-GitHub Actions（`.github/workflows/ci.yml`）は macOS 15 のランナーで、次の3つ。
+GitHub Actions（`.github/workflows/ci.yml`）は macOS 26 のランナーで、Xcode 26（iOS 26 SDK）を選んでから、次の3つ。
 
 1. Ubuntu で `SurveyCore` の `swift test`
 2. macOS で署名なしの `xcodebuild`。API キーが無くてもここは通る
