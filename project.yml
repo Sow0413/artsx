@@ -36,8 +36,9 @@ targets:
         SUPPORTS_MACCATALYST: NO
         SWIFT_VERSION: "5.9"
         IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-        INFOPLIST_KEY_NSMicrophoneUsageDescription: "押して話す無線で、同じプロジェクトの端末へ声を送ります。"
-        INFOPLIST_KEY_NSNearbyInteractionUsageDescription: "近くの端末との距離を、作業半径の警報に使います。UWB が無い端末では使いません。"
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "押して話す無線と、ヒヤリの音声メモで、声を録音するために使います。"
+        INFOPLIST_KEY_NSNearbyInteractionUsageDescription: "近くの作業員や測点ビーコンとの距離と方向を測るために使います。"
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "同じ現場の近くの端末へ、音声と合図を送るために使います。"
         INFOPLIST_KEY_UIBackgroundModes: push-to-talk
     scheme:
       gatherCoverageData: false
