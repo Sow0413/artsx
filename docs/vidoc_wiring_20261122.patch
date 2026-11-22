@@ -1,0 +1,198 @@
+diff --git a/SurveyApp/ExtraSettings.swift b/SurveyApp/ExtraSettings.swift
+index cad188d..3827ff2 100644
+--- a/SurveyApp/ExtraSettings.swift
++++ b/SurveyApp/ExtraSettings.swift
+@@ -63,6 +63,25 @@ struct ExtraSettingsSheet: View {
+     }
+ }
+ 
++struct RTKEntryButton: View {
++    var action: () -> Void
++
++    var body: some View {
++        Button("RTK", action: action)
++            .font(SurveyType(14, .heavy))
++            .foregroundStyle(SurveyColor.text)
++            .padding(.horizontal, 10)
++            .padding(.vertical, 4)
++            .background(SurveyColor.card)
++            .overlay(
++                RoundedRectangle(cornerRadius: 8, style: .continuous)
++                    .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
++            )
++            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
++            .accessibilityLabel("RTK 設定")
++    }
++}
++
+ struct ExtraEntryButton: View {
+     var action: () -> Void
+ 
+diff --git a/SurveyApp/FieldModel.swift b/SurveyApp/FieldModel.swift
+index 2817f2c..80c39db 100644
+--- a/SurveyApp/FieldModel.swift
++++ b/SurveyApp/FieldModel.swift
+@@ -163,6 +163,9 @@ final class FieldModel: ObservableObject {
+     @Published private(set) var privacyMessage: String?
+     @Published var extras: ExtraSwitches
+     @Published var showsExtras = false
++    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++    @Published var showsRTK = false
++    #endif
+     @Published private(set) var gnssState: GNSSLinkState = .idle
+     @Published private(set) var gnssChoices: [GNSSChoice] = []
+     @Published private(set) var observationCount = 0
+@@ -180,6 +183,9 @@ final class FieldModel: ObservableObject {
+     private var prefixStore: PointPrefixStore
+     private var lastFixSave = Date.distantPast
+     private let source: any PositionSource
++    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++    var rtkSession: RTKPositionSession? { source as? RTKPositionSession }
++    #endif
+     private var camera: MapCameraFollow
+     private var readTask: Task<Void, Never>?
+     private var downloadTask: Task<Void, Never>?
+@@ -2243,19 +2249,35 @@ final class FieldModel: ObservableObject {
+     }
+ 
+     func resumeGNSS() {
++        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++        if showsRTK || rtkSession?.mode == .rtk { return }
++        #endif
+         gnss.resume()
+     }
+ 
++    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++    func openRTK() {
++        pauseGNSS()
++        showsRTK = true
++    }
++    #endif
++
+     func pauseGNSS() {
+         gnss.pause()
+     }
+ 
+     func scanGNSS() {
++        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++        if rtkSession?.mode == .rtk { return }
++        #endif
+         gnssChoices = []
+         gnss.scan()
+     }
+ 
+     func chooseGNSS(_ id: String) {
++        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++        if rtkSession?.mode == .rtk { return }
++        #endif
+         gnss.choose(id)
+     }
+ 
+diff --git a/SurveyApp/MapTabView.swift b/SurveyApp/MapTabView.swift
+index 2e1129f..3e8701a 100644
+--- a/SurveyApp/MapTabView.swift
++++ b/SurveyApp/MapTabView.swift
+@@ -1,4 +1,5 @@
+ import SwiftUI
++import SurveyCore
+ 
+ struct MapTabView: View {
+     @ObservedObject var field: FieldModel
+@@ -73,6 +74,13 @@ struct MapTabView: View {
+                     ExtraEntryButton {
+                         field.showsExtras = true
+                     }
++                    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++                    if field.rtkSession != nil {
++                        RTKEntryButton {
++                            field.openRTK()
++                        }
++                    }
++                    #endif
+                     if field.extras.pushToTalk {
+                         Button(field.radio.spaceAudio ? "定位オン" : "定位") {
+                             field.radio.setSpaceAudio(!field.radio.spaceAudio)
+diff --git a/SurveyApp/MeasureLogView.swift b/SurveyApp/MeasureLogView.swift
+index 402ea77..e486379 100644
+--- a/SurveyApp/MeasureLogView.swift
++++ b/SurveyApp/MeasureLogView.swift
+@@ -175,8 +175,18 @@ struct MeasureLogView: View {
+ 
+     private var gnssSection: some View {
+         VStack(alignment: .leading, spacing: 8) {
+-            Text("GNSS")
+-                .font(SurveyType(18, .heavy))
++            HStack {
++                Text("GNSS")
++                    .font(SurveyType(18, .heavy))
++                Spacer()
++                #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++                if field.rtkSession != nil {
++                    RTKEntryButton {
++                        field.openRTK()
++                    }
++                }
++                #endif
++            }
+             Text(field.gnssState == .idle ? "受信機を選ぶと、切れたときにつなぎ直します。" : field.gnssState.label)
+                 .font(SurveyType(15, .semibold))
+                 .foregroundStyle(field.gnssState == .reconnecting ? SurveyColor.amber : SurveyColor.muted)
+diff --git a/SurveyApp/RootView.swift b/SurveyApp/RootView.swift
+index c42e427..68aae88 100644
+--- a/SurveyApp/RootView.swift
++++ b/SurveyApp/RootView.swift
+@@ -151,6 +151,16 @@ struct RootView: View {
+         .sheet(isPresented: $field.showsARStakeout) {
+             ARStakeoutSheet(field: field)
+         }
++        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++        .sheet(isPresented: $field.showsRTK) {
++            if let session = field.rtkSession {
++                RTKSettingsView(session: session, siteDirectory: field.siteDirectory)
++            }
++        }
++        .onChange(of: field.showsRTK) { _, showing in
++            if !showing { field.resumeGNSS() }
++        }
++        #endif
+     }
+ 
+     private func syncVolume() {
+@@ -242,11 +252,18 @@ enum StakeoutVoice {
+ }
+ 
+ enum AppEnvironment {
+-    static func live() -> (source: CoreLocationPositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
++    static func live() -> (source: any PositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
+         let directories = directories(inTemporary: false)
+         let tiles = TileStore(packDirectory: directories.packs, cacheDirectory: directories.cache)
+         let loaded = ControlPointLoader.load(siteDirectory: directories.site)
+-        return (CoreLocationPositionSource(), tiles, directories.packs, loaded.points, loaded.notice, directories.site)
++        // 既定はセッション内の iPhone 単独。RTK は設定するまで位置の出どころが変わらない。
++        // Playgrounds では CoreBluetooth の受信機をコンパイルしない。
++        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
++        let source: any PositionSource = RTKPositionSession()
++        #else
++        let source: any PositionSource = CoreLocationPositionSource()
++        #endif
++        return (source, tiles, directories.packs, loaded.points, loaded.notice, directories.site)
+     }
+ 
+     static func preview(source: any PositionSource) -> (source: any PositionSource, tiles: TileStore, packs: URL, points: [ControlPoint], notice: String?, site: URL) {
+diff --git a/SurveyCore/Package.swift b/SurveyCore/Package.swift
+index 844082b..ef4fd78 100644
+--- a/SurveyCore/Package.swift
++++ b/SurveyCore/Package.swift
+@@ -3,6 +3,12 @@ import PackageDescription
+ 
+ let package = Package(
+     name: "SurveyCore",
++    platforms: [
++        // Mac の swift test は、未指定だと 10.13 扱いになり AsyncStream と URLSession.data(for:) で落ちる。
++        .macOS(.v12),
++        .iOS(.v17),
++        .watchOS(.v10)
++    ],
+     products: [
+         .library(name: "SurveyCore", targets: ["SurveyCore"])
+     ],
