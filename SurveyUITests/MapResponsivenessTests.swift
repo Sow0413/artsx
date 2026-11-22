@@ -1,6 +1,6 @@
 import XCTest
 
-/// 起動直後の地図が、タップとスクロールに答え続けることを見る。
+/// ベーシックの地図、RTK、測る、書き出しがタップに答えることを見る。
 final class MapResponsivenessTests: XCTestCase {
     private var app = XCUIApplication()
     private var shotDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("survey-ui-shots", isDirectory: true)
@@ -15,37 +15,38 @@ final class MapResponsivenessTests: XCTestCase {
         allowSystemPrompts()
     }
 
-    func testMapStaysResponsiveAndOpensRTK() {
+    func testBasicMapMeasureExportAndRTK() {
         let map = app.buttons["tab-map"]
         XCTAssertTrue(map.waitForExistence(timeout: 8), "地図タブが出ない")
         waitUntilSelected(map, name: "地図")
-        let controls = app.scrollViews["map-controls"]
-        XCTAssertTrue(controls.waitForExistence(timeout: 5), "地図の操作をスクロールできない")
+        XCTAssertFalse(app.buttons["tab-drawing"].exists, "図面タブがベーシックに残っている")
+        XCTAssertFalse(app.buttons["tab-seat"].exists, "オペタブがベーシックに残っている")
+        XCTAssertFalse(app.buttons["水準器"].exists, "水準器がベーシックの地図に出ている")
+        XCTAssertTrue(app.scrollViews["map-controls"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["rtk-entry"].waitForExistence(timeout: 5), "RTK のボタンが画面に無い")
         shot("01-map")
 
-        controls.swipeUp()
-        let pace = app.buttons["歩測"]
-        XCTAssertTrue(pace.waitForExistence(timeout: 5), "歩測ボタンが無い")
-        XCTAssertTrue(pace.isHittable, "歩測ボタンをタップできない")
+        app.scrollViews["map-controls"].swipeUp()
         shot("02-map-scrolled")
 
-        openTab("tab-measure", showing: "screen-measure")
-        shot("03-measure")
-        openTab("tab-drawing", showing: "screen-drawing")
-        shot("04-drawing")
-        openTab("tab-export", showing: "screen-export")
-        shot("05-export")
-        openTab("tab-map", showing: "map-controls")
-        shot("06-map-return")
-
         let rtk = app.buttons["rtk-entry"]
-        XCTAssertTrue(rtk.waitForExistence(timeout: 5), "RTK のボタンが届かない")
         XCTAssertTrue(rtk.isHittable, "RTK のボタンをタップできない")
         rtk.tap()
-        let sheet = app.navigationBars["RTK"]
-        XCTAssertTrue(sheet.waitForExistence(timeout: 5), "RTK のシートが開かない")
+        XCTAssertTrue(app.navigationBars["RTK"].waitForExistence(timeout: 5), "RTK のシートが開かない")
         XCTAssertTrue(app.staticTexts["NTRIP"].waitForExistence(timeout: 5), "RTK の中身が出ない")
-        shot("07-rtk")
+        shot("03-rtk")
+        app.buttons["閉じる"].tap()
+        XCTAssertTrue(app.buttons["tab-map"].waitForExistence(timeout: 5))
+
+        openTab("tab-measure", showing: "screen-measure")
+        XCTAssertTrue(app.descendants(matching: .any)["rtk-status"].waitForExistence(timeout: 5), "測る画面に RTK の状態が無い")
+        shot("04-measure")
+
+        openTab("tab-export", showing: "screen-export")
+        shot("05-export")
+
+        openTab("tab-map", showing: "map-controls")
+        shot("06-map-return")
     }
 
     private func openTab(_ identifier: String, showing needle: String) {
@@ -68,7 +69,7 @@ final class MapResponsivenessTests: XCTestCase {
 
     private func dismissStaturePrompt() {
         let later = app.buttons["あとで"]
-        guard later.waitForExistence(timeout: 3) else { return }
+        guard later.waitForExistence(timeout: 1) else { return }
         later.tap()
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: later)
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed, "身長の確認を閉じられない")

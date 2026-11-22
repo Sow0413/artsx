@@ -68,7 +68,7 @@ struct SurveyTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(FieldTab.allCases) { tab in
+            ForEach(FieldTab.bar) { tab in
                 Button {
                     selection = tab
                 } label: {

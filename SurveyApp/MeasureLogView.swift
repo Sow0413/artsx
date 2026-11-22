@@ -10,6 +10,7 @@ struct MeasureLogView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("測る")
                     .font(SurveyType(28, .heavy))
+                if !SurveyBuild.basicMode {
                 Button {
                     field.showsStature = true
                 } label: {
@@ -67,7 +68,8 @@ struct MeasureLogView: View {
                 if field.stature.style == .sight {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }
-                OperationBar(field: field, showsSkill: true)
+                }
+                OperationBar(field: field, showsSkill: !SurveyBuild.basicMode)
                 if field.operation.showsAdvanced {
                     Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
                         .font(SurveyType(16, .semibold))
@@ -92,7 +94,7 @@ struct MeasureLogView: View {
                         .foregroundStyle(SurveyColor.amber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if field.gnssAvailable, field.operation.showsAdvanced {
+                if SurveyBuild.basicMode || (field.gnssAvailable && field.operation.showsAdvanced) {
                     gnssSection
                 }
                 if field.observations.observations.isEmpty {
@@ -189,6 +191,14 @@ struct MeasureLogView: View {
                 }
                 #endif
             }
+            #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+            if let session = field.rtkSession {
+                Text(rtkLine(session))
+                    .font(SurveyType(18, .heavy))
+                    .accessibilityIdentifier("rtk-status")
+            }
+            #endif
+            if !SurveyBuild.basicMode {
             Text(field.gnssState == .idle ? "受信機を選ぶと、切れたときにつなぎ直します。" : field.gnssState.label)
                 .font(SurveyType(15, .semibold))
                 .foregroundStyle(field.gnssState == .reconnecting ? SurveyColor.amber : SurveyColor.muted)
@@ -212,8 +222,24 @@ struct MeasureLogView: View {
                 }
                 .buttonStyle(.plain)
             }
+            }
         }
     }
+
+    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+    private func rtkLine(_ session: RTKPositionSession) -> String {
+        let quality: String
+        switch session.fix {
+        case .rtkFix: quality = "FIX"
+        case .float: quality = "FLOAT"
+        case .dgps: quality = "DGPS"
+        case .clas: quality = "CLAS"
+        case .standalone, .none: quality = "単独"
+        }
+        let place = session.mode == .rtk ? "ViDoc" : "iPhone"
+        return session.message.isEmpty ? "\(place) \(quality)" : "\(place) \(quality) \(session.message)"
+    }
+    #endif
 
     private var prefixBinding: Binding<String> {
         Binding(get: { field.pointPrefix }, set: { field.setPointPrefix($0) })

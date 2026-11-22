@@ -7,8 +7,10 @@ struct MapTabView: View {
     var body: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
-                WorkBar(field: field)
-                if let guide = field.stakeoutGuide {
+                if !SurveyBuild.basicMode {
+                    WorkBar(field: field)
+                }
+                if !SurveyBuild.basicMode, let guide = field.stakeoutGuide {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(guide.speech)
                             .font(SurveyType(34, .heavy))
@@ -31,7 +33,8 @@ struct MapTabView: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
-                if let station = field.drawing.operatorGuide(at: field.navigationReading.position)?.line,
+                if !SurveyBuild.basicMode,
+                   let station = field.drawing.operatorGuide(at: field.navigationReading.position)?.line,
                    field.drawing.stationLine != nil {
                     Text(station)
                         .font(SurveyType(34, .heavy))
@@ -46,32 +49,34 @@ struct MapTabView: View {
                             Rectangle().fill(SurveyColor.line).frame(height: SurveyColor.stroke)
                         }
                 }
-                if field.extras.proximity {
+                if !SurveyBuild.basicMode, field.extras.proximity {
                     SafetyBanner(crew: field.crew) {
                         field.recordIncident(trigger: .manual)
                     }
                 }
-                if field.extras.fall {
+                if !SurveyBuild.basicMode, field.extras.fall {
                     FallBanner(fall: field.fall, incoming: field.crew.fallSpeech) {
                         field.cancelFall()
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 6)
                 }
-                if field.extras.firstResponse {
+                if !SurveyBuild.basicMode, field.extras.firstResponse {
                     FirstResponseCard(field: field)
                 }
-                if field.extras.sos {
+                if !SurveyBuild.basicMode, field.extras.sos {
                     SOSControl(field: field)
                         .padding(.horizontal, 12)
                         .padding(.top, 6)
                 }
-                if field.extras.recordsIncidents {
+                if !SurveyBuild.basicMode, field.extras.recordsIncidents {
                     IncidentTray(field: field)
                 }
                 HStack {
-                    ExtraEntryButton {
-                        field.showsExtras = true
+                    if !SurveyBuild.basicMode {
+                        ExtraEntryButton {
+                            field.showsExtras = true
+                        }
                     }
                     #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
                     if field.rtkSession != nil {
@@ -80,7 +85,7 @@ struct MapTabView: View {
                         }
                     }
                     #endif
-                    if field.extras.pushToTalk {
+                    if !SurveyBuild.basicMode, field.extras.pushToTalk {
                         Button(field.radio.spaceAudio ? "定位オン" : "定位") {
                             field.radio.setSpaceAudio(!field.radio.spaceAudio)
                         }
@@ -92,7 +97,7 @@ struct MapTabView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityLabel(field.radio.spaceAudio ? "音声の方向定位オン" : "音声の方向定位オフ")
                     }
-                    if field.extras.disaster {
+                    if !SurveyBuild.basicMode, field.extras.disaster {
                         Button("災害") {
                             field.showsDisaster = true
                         }
@@ -103,7 +108,7 @@ struct MapTabView: View {
                         .background(field.disasterMode ? SurveyColor.red : SurveyColor.card)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
-                    if field.extras.stats || field.extras.accidentReport {
+                    if !SurveyBuild.basicMode, field.extras.stats || field.extras.accidentReport {
                         Button(field.extras.stats ? "統計" : "事故報告") {
                             field.showsIncidentStats = true
                         }
@@ -115,6 +120,7 @@ struct MapTabView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     Spacer()
+                    if !SurveyBuild.basicMode {
                     Text(reachCaption)
                         .font(SurveyType(13, .heavy))
                         .foregroundStyle(SurveyColor.text)
@@ -122,10 +128,11 @@ struct MapTabView: View {
                         .padding(.vertical, 4)
                         .background(SurveyColor.card)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
                 }
                 .padding(.trailing, 12)
                 .padding(.top, 6)
-                if field.extras.disaster, field.disasterMode {
+                if !SurveyBuild.basicMode, field.extras.disaster, field.disasterMode {
                     Text("災害派遣。圏外のまま、近くの端末へ中継します。")
                         .font(SurveyType(13, .heavy))
                         .foregroundStyle(SurveyColor.onAccent)
@@ -137,7 +144,7 @@ struct MapTabView: View {
                         .padding(.horizontal, 12)
                         .padding(.top, 6)
                 }
-                if field.enclosingBook {
+                if !SurveyBuild.basicMode, field.enclosingBook {
                     enclosureBanner
                 } else if field.drawing.pick == .mapPoint {
                     mapPickBanner
@@ -163,16 +170,16 @@ struct MapTabView: View {
         .clipped()
         .overlay {
             ZStack {
-                if field.extras.proximity {
+                if !SurveyBuild.basicMode, field.extras.proximity {
                     SafetyWash(level: field.crew.worst)
                 }
-                if field.extras.fall {
+                if !SurveyBuild.basicMode, field.extras.fall {
                     ThreatRim(cues: [], fall: field.crew.fallCue)
                 }
-                if field.extras.pushToTalk {
+                if !SurveyBuild.basicMode, field.extras.pushToTalk {
                     TalkRim(pointer: field.talkPointer)
                 }
-                if field.extras.sos {
+                if !SurveyBuild.basicMode, field.extras.sos {
                     SOSRim(pointer: field.sosPointer)
                 }
             }
@@ -203,32 +210,35 @@ struct MapTabView: View {
                         field.recenter()
                     }
                 }
-                if field.selectedControlPoint != nil || field.benchmark != nil {
+                if !SurveyBuild.basicMode, field.selectedControlPoint != nil || field.benchmark != nil {
                     BenchmarkCard(field: field)
                         .frame(maxHeight: 460)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    BenchmarkHint(
-                        notice: field.controlPointNotice,
-                        loadedCount: field.controlPoints.count,
-                        visibleCount: field.visibleControlPoints.count
-                    )
-                    DownloadBar(
-                        message: field.downloadMessage,
-                        isDownloading: field.isDownloading,
-                        onSave: field.downloadVisibleArea,
-                        onCancel: field.cancelDownload
-                    )
+                    if !SurveyBuild.basicMode {
+                        BenchmarkHint(
+                            notice: field.controlPointNotice,
+                            loadedCount: field.controlPoints.count,
+                            visibleCount: field.visibleControlPoints.count
+                        )
+                        DownloadBar(
+                            message: field.downloadMessage,
+                            isDownloading: field.isDownloading,
+                            onSave: field.downloadVisibleArea,
+                            onCancel: field.cancelDownload
+                        )
+                    }
                     LocationPanel(
                         reading: field.navigationReading,
                         note: field.navigationNote,
-                        statureNotice: field.statureNotice,
-                        onStature: { field.showsStature = true },
-                        showsLevel: field.stature.style == .sight,
+                        statureNotice: SurveyBuild.basicMode ? nil : field.statureNotice,
+                        onStature: SurveyBuild.basicMode ? nil : { field.showsStature = true },
+                        showsLevel: !SurveyBuild.basicMode && field.stature.style == .sight,
                         levelTilt: field.sightTiltRadians
                     )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    if !SurveyBuild.basicMode {
                     Button {
                         field.showsCrosshair = true
                     } label: {
@@ -278,6 +288,7 @@ struct MapTabView: View {
                     }
                     .buttonStyle(.plain)
                     captureButton
+                    }
                 }
             }
             .padding(.horizontal, 12)

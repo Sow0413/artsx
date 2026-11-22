@@ -35,6 +35,11 @@ enum FieldTab: String, CaseIterable, Identifiable {
         case .seat: return "steeringwheel"
         }
     }
+
+    /// ベーシックのタブバー。図面とオペは出さない。
+    static var bar: [FieldTab] {
+        SurveyBuild.basicMode ? [.map, .measure, .export] : Array(allCases)
+    }
 }
 
 /// 画面の状態。位置の更新はメインスレッドで Published に書く。
@@ -308,6 +313,9 @@ final class FieldModel: ObservableObject {
         let saved = journal.session()
         if let tab = FieldTab(rawValue: saved.tab) {
             self.tab = tab
+        }
+        if SurveyBuild.basicMode, !FieldTab.bar.contains(self.tab) {
+            self.tab = .map
         }
         if let workID = saved.workID, workCatalog.works.contains(where: { $0.id == workID }) {
             workCatalog = workCatalog.selecting(workID)
@@ -1399,6 +1407,7 @@ final class FieldModel: ObservableObject {
 
     func setSightForeground(_ active: Bool) {
         sightInForeground = active
+        guard !SurveyBuild.basicMode else { return }
         syncSightSensors()
         if active {
             paceSession.resume()
@@ -1644,10 +1653,26 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
-        if stature.statureMeters == nil, !ProcessInfo.processInfo.arguments.contains("-skipStatureAsk") {
+        if !SurveyBuild.basicMode,
+           stature.statureMeters == nil,
+           !ProcessInfo.processInfo.arguments.contains("-skipStatureAsk") {
             asksStature = true
         }
         consumePendingConfirm()
+        guard !SurveyBuild.basicMode else {
+            source.start()
+            if readTask == nil {
+                let readings = source.readings
+                readTask = Task { [weak self] in
+                    for await reading in readings {
+                        await MainActor.run {
+                            self?.apply(reading)
+                        }
+                    }
+                }
+            }
+            return
+        }
         radio.arm()
         radio.onRelay = { [weak self] packet in
             DispatchQueue.main.async {

@@ -11,6 +11,7 @@ struct ExportTabView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("出す")
                     .font(SurveyType(28, .heavy))
+                if !SurveyBuild.basicMode {
                 ExtraEntryButton {
                     field.showsExtras = true
                 }
@@ -18,6 +19,7 @@ struct ExportTabView: View {
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                }
                 Text("受取手が今受け取れる形だけ出します。点群と3Dは点群フォルダに保存するだけで、ここには出しません。")
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
