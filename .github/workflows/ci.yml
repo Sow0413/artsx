@@ -153,7 +153,7 @@ jobs:
             )"
           fi
           bundle="${BUNDLE_ID:-com.artshome.artsx}"
-          version="${MARKETING_VERSION:-0.1.0}"
+          version="${MARKETING_VERSION:-1.1}"
           echo "bundle ${bundle}, version ${version} (${GITHUB_RUN_NUMBER})"
           echo "archive は署名しない。export で App Store 配布用に署名する。"
           cat > build/ExportOptions.plist <<EOF
