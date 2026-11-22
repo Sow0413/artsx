@@ -65,7 +65,7 @@ struct RootView: View {
                     .padding(.bottom, 6)
             }
             ZStack {
-                MapTabView(field: field)
+                MapTabView(field: field, appearance: appearance)
                     .opacity(field.tab == .map ? 1 : 0)
                     .allowsHitTesting(field.tab == .map)
                     .accessibilityHidden(field.tab != .map)
@@ -80,7 +80,9 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            themeButton
+            if !SurveyBuild.basicMode {
+                themeButton
+            }
             if field.tab != .seat {
                 SurveyTabBar(selection: $field.tab)
             }
@@ -90,7 +92,9 @@ struct RootView: View {
         .environment(\.surveyOutdoor, appearance.outdoor)
         .preferredColorScheme(appearance.outdoor ? .light : .dark)
         .background {
-            OperationKeyCommands(field: field)
+            if !SurveyBuild.basicMode {
+                OperationKeyCommands(field: field)
+            }
             StakeoutSpeaker(field: field)
             if field.operation.level == .skilled, field.operation.eyesFree {
                 VolumeSliderHost()

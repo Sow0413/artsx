@@ -51,14 +51,22 @@ final class MapResponsivenessTests: XCTestCase {
         app.buttons["basic-create"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteA'")).firstMatch.waitForExistence(timeout: 5), "プロジェクトを作れない")
         shot("07-project")
+        project.tap()
+        project.typeText("SiteB")
+        app.buttons["basic-rename"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteB'")).firstMatch.waitForExistence(timeout: 5), "名前を変えられない")
+        shot("07b-rename")
 
-        app.buttons["現在地を残す"].tap()
-        let confirm = app.buttons["この点を確定"]
-        if confirm.waitForExistence(timeout: 3) {
+        let save = app.scrollViews["screen-measure"].buttons["basic-save"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5), "測る画面の中に保存ボタンが無い")
+        XCTAssertEqual(app.scrollViews["screen-measure"].buttons.matching(identifier: "basic-save").count, 1)
+        save.tap()
+        let confirm = app.scrollViews["screen-measure"].buttons["この点を確定"]
+        if confirm.waitForExistence(timeout: 4) {
             confirm.tap()
         }
         shot("08-save")
-        XCTAssertTrue(app.descendants(matching: .any)["basic-book"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'T1'")).firstMatch.waitForExistence(timeout: 5), "残した点が座標簿に無い")
         shot("09-book")
 
         app.buttons["basic-export-csv"].tap()
@@ -80,6 +88,12 @@ final class MapResponsivenessTests: XCTestCase {
         }
         stake.tap()
         openTab("tab-map", showing: "stakeout-guide")
+        let guide = app.descendants(matching: .any)["stakeout-guide"]
+        let numbers = expectation(
+            for: NSPredicate(format: "label CONTAINS '方位' AND label CONTAINS '北' AND label CONTAINS '東'"),
+            evaluatedWith: guide
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [numbers], timeout: 8), .completed, "測設に距離と方位と南北東西が出ない")
         shot("14-stakeout")
         app.buttons["basic-gcp"].tap()
         shot("15-gcp")

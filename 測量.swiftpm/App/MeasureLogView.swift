@@ -69,7 +69,11 @@ struct MeasureLogView: View {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }
                 }
-                OperationBar(field: field, showsSkill: !SurveyBuild.basicMode)
+                OperationBar(
+                    field: field,
+                    showsSkill: !SurveyBuild.basicMode,
+                    saveIdentifier: SurveyBuild.basicMode ? "basic-save" : nil
+                )
                 if field.operation.showsAdvanced {
                     Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
                         .font(SurveyType(16, .semibold))
@@ -118,6 +122,7 @@ struct MeasureLogView: View {
                 }
             }
             .padding(20)
+            .padding(.bottom, 28)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .clipped()

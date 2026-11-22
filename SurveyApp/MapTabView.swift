@@ -3,6 +3,7 @@ import SurveyCore
 
 struct MapTabView: View {
     @ObservedObject var field: FieldModel
+    @ObservedObject var appearance: SurveyAppearance
 
     var body: some View {
         GeometryReader { geo in
@@ -177,8 +178,9 @@ struct MapTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+                pinnedMapChrome
                 ScrollView {
-                    bottomChrome
+                    scrollingChrome
                 }
                 .layoutPriority(1)
                 .frame(minHeight: 220, maxHeight: max(240, geo.size.height * 0.46))
@@ -224,15 +226,33 @@ struct MapTabView: View {
         return "作業半径 \(meters)m"
     }
 
-    private var bottomChrome: some View {
-        VStack(spacing: 10) {
-                HStack(alignment: .top) {
-                    AttributionLabel()
-                    Spacer(minLength: 8)
-                    RecenterButton(following: field.followUser) {
-                        field.recenter()
-                    }
+    private var pinnedMapChrome: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                AttributionLabel()
+                Spacer(minLength: 8)
+                RecenterButton(following: field.followUser) {
+                    field.recenter()
                 }
+            }
+            if SurveyBuild.basicMode {
+                Button(action: appearance.cycle) {
+                    Text(appearance.label)
+                        .font(SurveyType(16, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(appearance.outdoor ? SurveyColor.color(OutdoorContrast.yellow) : SurveyColor.card)
+                        .foregroundStyle(appearance.outdoor ? SurveyColor.color(OutdoorContrast.black) : SurveyColor.text)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("theme-toggle")
+            }
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private var scrollingChrome: some View {
+        VStack(spacing: 10) {
                 if !SurveyBuild.basicMode, field.selectedControlPoint != nil || field.benchmark != nil {
                     BenchmarkCard(field: field)
                         .frame(maxHeight: 460)

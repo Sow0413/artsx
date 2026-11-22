@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import SurveyCore
 import UniformTypeIdentifiers
 
@@ -39,11 +40,14 @@ struct BasicDesk: View {
                 Button("作る") {
                     field.drawing.createProject(named: projectName)
                     projectName = ""
+                    dismissKeyboard()
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("basic-create")
                 Button("名前を変える") {
                     field.drawing.renameProject(to: projectName.isEmpty ? rename : projectName)
+                    projectName = ""
+                    dismissKeyboard()
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("basic-rename")
@@ -183,6 +187,10 @@ struct BasicDesk: View {
                 field.drawing.select(project)
             }
         )
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private func line(_ entry: CoordinateBookEntry) -> String {
