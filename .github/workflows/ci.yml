@@ -138,7 +138,8 @@ jobs:
           fi
           bundle="${BUNDLE_ID:-jp.oshiro.survey}"
           version="${MARKETING_VERSION:-0.1.0}"
-          echo "team ${team}, bundle ${bundle}, version ${version} (${GITHUB_RUN_NUMBER})"
+          echo "bundle ${bundle}, version ${version} (${GITHUB_RUN_NUMBER})"
+          echo "archive は署名しない。export で App Store 配布用に署名する。"
           cat > build/ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -157,22 +158,22 @@ jobs:
           </dict>
           </plist>
           EOF
+          # 開発用プロファイルは端末が要る。archive ではチームも自動署名も渡さない。
           xcodebuild \
             -project Survey.xcodeproj \
             -scheme SurveyApp \
             -destination 'generic/platform=iOS' \
             -configuration Release \
             -archivePath "$PWD/build/Survey.xcarchive" \
-            DEVELOPMENT_TEAM="$team" \
-            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             PRODUCT_BUNDLE_IDENTIFIER="$bundle" \
             MARKETING_VERSION="$version" \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$key_path" \
-            -authenticationKeyID "$ASC_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             archive
+          # export が Apple Distribution の証明書と App Store 用プロファイルを作る。端末は要らない。
           xcodebuild \
             -exportArchive \
             -archivePath "$PWD/build/Survey.xcarchive" \

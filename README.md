@@ -224,7 +224,7 @@ GitHub Actions（`.github/workflows/ci.yml`）は macOS 15 のランナーで、
 2. macOS で署名なしの `xcodebuild`。API キーが無くてもここは通る
 3. 手動実行で `upload_testflight` を選んだときだけ、署名して App Store Connect へ上げる。キーが無いときは何も上げず、成功扱いで終わる
 
-署名は Xcode の自動署名（`-allowProvisioningUpdates` と App Store Connect API キー）だけ。証明書とプロファイルは、その場で作ってアーカイブに使う。キーの中身はログに出さない。
+archive は署名しない。export のときだけ、App Store Connect API キーで配布用（Apple Distribution）の証明書と App Store 用プロファイルを作る。開発用プロファイルは作らないので、登録端末は要らない。キーの中身はログに出さない。
 
 ### captain が一度だけすること
 
