@@ -75,6 +75,19 @@ public enum CoordinateBookStore {
         filter(CoordinateBookQuery(), projectDirectory: projectDirectory)
     }
 
+    public static func delete(name: String, projectDirectory: URL) throws {
+        guard exists(projectDirectory: projectDirectory) else { return }
+        let db = try open(projectDirectory)
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM points WHERE name = ?", -1, &statement, nil) == SQLITE_OK else {
+            throw ProjectStoreError.unreadable
+        }
+        defer { sqlite3_finalize(statement) }
+        bind(statement, Int32(1), name)
+        guard sqlite3_step(statement) == SQLITE_DONE else { throw ProjectStoreError.unreadable }
+    }
+
     public static func filter(_ query: CoordinateBookQuery, projectDirectory: URL, limit: Int? = nil) -> [CoordinateBookEntry] {
         guard exists(projectDirectory: projectDirectory), let db = try? open(projectDirectory) else { return [] }
         defer { sqlite3_close(db) }

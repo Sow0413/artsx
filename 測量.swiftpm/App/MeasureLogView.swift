@@ -5,11 +5,40 @@ import SurveyCore
 struct MeasureLogView: View {
     @ObservedObject var field: FieldModel
 
+    private let listBottomClearance: CGFloat = 68 + 24
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if SurveyBuild.basicMode {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("測る")
+                        .font(SurveyType(28, .heavy))
+                    Text(field.operation.coach)
+                        .font(SurveyType(15, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            measureList
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .background(SurveyColor.background)
+        .foregroundStyle(SurveyColor.text)
+    }
+
+    private var measureList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if !SurveyBuild.basicMode {
                 Text("測る")
                     .font(SurveyType(28, .heavy))
+                }
+                if !SurveyBuild.basicMode {
                 Button {
                     field.showsStature = true
                 } label: {
@@ -67,7 +96,13 @@ struct MeasureLogView: View {
                 if field.stature.style == .sight {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }
-                OperationBar(field: field, showsSkill: true)
+                }
+                OperationBar(
+                    field: field,
+                    showsSkill: !SurveyBuild.basicMode,
+                    showsCoach: !SurveyBuild.basicMode,
+                    saveIdentifier: SurveyBuild.basicMode ? "basic-save" : nil
+                )
                 if field.operation.showsAdvanced {
                     Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
                         .font(SurveyType(16, .semibold))
@@ -86,35 +121,44 @@ struct MeasureLogView: View {
                 if field.operation.level == .skilled || field.operation.controlOpen || field.operation.showsDetail {
                     controlSection
                 }
-                if let message = field.captureMessage {
+                if !SurveyBuild.basicMode, let message = field.captureMessage {
                     Text(message)
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.amber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if field.gnssAvailable, field.operation.showsAdvanced {
+                if SurveyBuild.basicMode || (field.gnssAvailable && field.operation.showsAdvanced) {
                     gnssSection
                 }
-                if field.observations.observations.isEmpty {
+                if SurveyBuild.basicMode {
+                    BasicDesk(field: field)
+                }
+                if !SurveyBuild.basicMode, field.observations.observations.isEmpty {
                     Text(field.observationCount == 0 ? "まだ点がありません。" : "点は端末に残しています。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                 }
-                if field.observationCount > field.observations.observations.count {
+                if !SurveyBuild.basicMode, field.observationCount > field.observations.observations.count {
                     Text("画面には新しい \(field.observations.observations.count) 点だけ出します。ほか \(field.observationCount - field.observations.observations.count) 点は端末に残しています。")
                         .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if !SurveyBuild.basicMode {
                 ForEach(field.observations.observations.reversed()) { observation in
                     observationRow(observation)
                 }
+                }
+                Color.clear
+                    .frame(height: listBottomClearance)
+                    .accessibilityHidden(true)
             }
             .padding(20)
         }
+        .contentMargins(.bottom, listBottomClearance, for: .scrollContent)
+        .safeAreaPadding(.bottom, 24)
+        .accessibilityIdentifier("screen-measure")
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(SurveyColor.background)
-        .foregroundStyle(SurveyColor.text)
     }
 
     private func observationRow(_ observation: FieldObservation) -> some View {
@@ -187,6 +231,14 @@ struct MeasureLogView: View {
                 }
                 #endif
             }
+            #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+            if let session = field.rtkSession {
+                Text(rtkLine(session))
+                    .font(SurveyType(18, .heavy))
+                    .accessibilityIdentifier("rtk-status")
+            }
+            #endif
+            if !SurveyBuild.basicMode {
             Text(field.gnssState == .idle ? "受信機を選ぶと、切れたときにつなぎ直します。" : field.gnssState.label)
                 .font(SurveyType(15, .semibold))
                 .foregroundStyle(field.gnssState == .reconnecting ? SurveyColor.amber : SurveyColor.muted)
@@ -210,8 +262,24 @@ struct MeasureLogView: View {
                 }
                 .buttonStyle(.plain)
             }
+            }
         }
     }
+
+    #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+    private func rtkLine(_ session: RTKPositionSession) -> String {
+        let quality: String
+        switch session.fix {
+        case .rtkFix: quality = "FIX"
+        case .float: quality = "FLOAT"
+        case .dgps: quality = "DGPS"
+        case .clas: quality = "CLAS"
+        case .standalone, .none: quality = "単独"
+        }
+        let place = session.mode == .rtk ? "ViDoc" : "iPhone"
+        return session.message.isEmpty ? "\(place) \(quality)" : "\(place) \(quality) \(session.message)"
+    }
+    #endif
 
     private var prefixBinding: Binding<String> {
         Binding(get: { field.pointPrefix }, set: { field.setPointPrefix($0) })

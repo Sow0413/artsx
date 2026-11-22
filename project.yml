@@ -42,6 +42,21 @@ targets:
         INFOPLIST_KEY_UIBackgroundModes: push-to-talk
     scheme:
       gatherCoverageData: false
+      testTargets:
+        - SurveyUITests
+  SurveyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: SurveyUITests
+    dependencies:
+      - target: SurveyApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.oshiro.survey.uitests
+        SWIFT_VERSION: "5.9"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
   SurveyWatch:
     type: application
     platform: watchOS

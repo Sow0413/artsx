@@ -6,11 +6,14 @@ struct ExportTabView: View {
     @State private var accuracyText = ""
     @State private var importedDay = ""
 
+    private let listBottomClearance: CGFloat = 68 + 24
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("出す")
                     .font(SurveyType(28, .heavy))
+                if !SurveyBuild.basicMode {
                 ExtraEntryButton {
                     field.showsExtras = true
                 }
@@ -18,6 +21,7 @@ struct ExportTabView: View {
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                }
                 Text("受取手が今受け取れる形だけ出します。点群と3Dは点群フォルダに保存するだけで、ここには出しません。")
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
@@ -31,7 +35,9 @@ struct ExportTabView: View {
                 Text("\(preview.count) 点")
                     .font(SurveyType(18, .heavy))
                 names(preview.sample)
-                ForEach(DeliveryFormat.allCases) { format in
+                ForEach(DeliveryFormat.allCases.filter { format in
+                    !SurveyBuild.basicMode || format == .csv || format == .sima
+                }) { format in
                     Button {
                         field.exportDelivery(format)
                     } label: {
@@ -65,10 +71,17 @@ struct ExportTabView: View {
                     .font(SurveyType(13, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                Color.clear
+                    .frame(height: listBottomClearance)
+                    .accessibilityHidden(true)
             }
             .padding(20)
         }
+        .contentMargins(.bottom, listBottomClearance, for: .scrollContent)
+        .safeAreaPadding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+        .accessibilityIdentifier("screen-export")
         .background(SurveyColor.background)
         .foregroundStyle(SurveyColor.text)
     }
@@ -116,6 +129,7 @@ struct ExportTabView: View {
                 TextField("2026-10-20", text: $importedDay)
                     .keyboardType(.numbersAndPunctuation)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier("book-imported-day")
                     .onChange(of: importedDay) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespaces)
                         field.bookQuery.importedDay = trimmed.isEmpty ? nil : trimmed

@@ -51,6 +51,7 @@ struct AccuracyBadgeView: View {
                 .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
         .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("accuracy-badge")
         .accessibilityLabel(badge.accessibilityText)
     }
 
@@ -68,7 +69,7 @@ struct SurveyTabBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(FieldTab.allCases) { tab in
+            ForEach(FieldTab.bar) { tab in
                 Button {
                     selection = tab
                 } label: {
@@ -82,6 +83,8 @@ struct SurveyTabBar: View {
                     .foregroundStyle(selection == tab ? SurveyColor.text : SurveyColor.muted)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityIdentifier("tab-\(tab.rawValue)")
                 .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
         }

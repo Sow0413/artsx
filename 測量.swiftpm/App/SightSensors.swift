@@ -67,6 +67,7 @@ final class FaceSession: NSObject, ARSessionDelegate {
     private var onDistance: ((Double?) -> Void)?
     private var lastDistance: Double?
     private var lastAt = Date.distantPast
+    private var lastDelivered = Date.distantPast
 
     func setEnabled(_ on: Bool, onDistance: @escaping (Double?) -> Void) {
         self.onDistance = onDistance
@@ -100,12 +101,17 @@ final class FaceSession: NSObject, ARSessionDelegate {
             let dz = faceColumn.z - cameraColumn.z
             return Double((dx * dx + dy * dy + dz * dz).squareRoot())
         }
+        let now = Date()
         if let distance {
             lastDistance = distance
-            lastAt = Date()
+            lastAt = now
+            guard now.timeIntervalSince(lastDelivered) >= 0.1 else { return }
+            lastDelivered = now
             onDistance?(distance)
-        } else if Date().timeIntervalSince(lastAt) > 0.5 {
+        } else if now.timeIntervalSince(lastAt) > 0.5 {
             lastDistance = nil
+            guard now.timeIntervalSince(lastDelivered) >= 0.1 else { return }
+            lastDelivered = now
             onDistance?(nil)
         }
     }

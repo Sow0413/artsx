@@ -27,9 +27,9 @@ final class GSITileOverlay: MKTileOverlay {
             }
             do {
                 let data = try await self.store.fetch(tile)
-                result(data, nil)
+                await MainActor.run { result(data, nil) }
             } catch {
-                result(nil, error)
+                await MainActor.run { result(nil, error) }
             }
         }
     }

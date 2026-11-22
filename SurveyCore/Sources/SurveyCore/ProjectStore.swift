@@ -330,6 +330,27 @@ public enum ProjectStore {
         try write(project, to: directory.appendingPathComponent("project.json"))
     }
 
+    /// フォルダごと名前を変える。座標簿の中身はそのまま。
+    public static func rename(_ project: SurveyProject, to rawName: String, at root: URL) throws -> SurveyProject {
+        guard let safe = safeComponent(rawName) else { throw ProjectStoreError.emptyName }
+        if safe == project.name { return project }
+        let from = try projectDirectory(project.name, at: root)
+        let destination = root.appendingPathComponent(safe, isDirectory: true)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            throw ProjectStoreError.alreadyExists
+        }
+        try FileManager.default.moveItem(at: from, to: destination)
+        var renamed = project
+        renamed.name = safe
+        try write(renamed, to: destination.appendingPathComponent("project.json"))
+        return renamed
+    }
+
+    public static func deleteCoordinate(name: String, projectName: String, at root: URL) throws {
+        let directory = try projectDirectory(projectName, at: root)
+        try CoordinateBookStore.delete(name: name, projectDirectory: directory)
+    }
+
     /// 受け取ったバイト列を設計フォルダへそのまま置く。中身は書き換えない。
     public static func importDXF(
         data: Data,

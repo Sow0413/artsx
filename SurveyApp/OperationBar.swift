@@ -5,17 +5,21 @@ struct OperationBar: View {
     @ObservedObject var field: FieldModel
     var showsSkill: Bool
     var compact: Bool = false
+    var showsCoach: Bool = true
+    var saveIdentifier: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if showsSkill {
                 skillSwitch
             }
-            Text(field.operation.coach)
-                .font(SurveyType(15, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .lineLimit(compact ? 2 : nil as Int?)
-                .fixedSize(horizontal: false, vertical: true)
+            if showsCoach {
+                Text(field.operation.coach)
+                    .font(SurveyType(15, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .lineLimit(compact ? 2 : nil as Int?)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if field.operation.phase == .review {
                 Text(reviewLine)
                     .font(SurveyType(20, .heavy))
@@ -104,7 +108,7 @@ struct OperationBar: View {
     @ViewBuilder
     private func commandButton(_ command: SurveyCommand) -> some View {
         if command == .capture {
-            CaptureControl(title: command.title) { input in
+            CaptureControl(title: command.title, identifier: saveIdentifier) { input in
                 field.receiveOperation(input)
             }
         } else {
@@ -153,6 +157,7 @@ struct OperationBar: View {
 /// タップは確認、長押しと横スワイプは慣れたら即確定。
 private struct CaptureControl: View {
     var title: String
+    var identifier: String? = nil
     var onInput: (OperationInput) -> Void
     @State private var suppressTap = false
 
@@ -189,6 +194,7 @@ private struct CaptureControl: View {
             )
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(title)
+            .accessibilityIdentifier(identifier ?? "save-point")
             .accessibilityHint("長押し、または横にスワイプすると、慣れたらすぐ残します。")
     }
 }
