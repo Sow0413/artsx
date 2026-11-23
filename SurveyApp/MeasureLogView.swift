@@ -224,8 +224,8 @@ struct MeasureLogView: View {
                     .font(SurveyType(18, .heavy))
                 Spacer()
                 #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
-                if field.rtkSession != nil {
-                    RTKEntryButton {
+                if let session = field.rtkSession {
+                    RTKEntryButton(connected: session.mode == .rtk && session.deviceConnected, fix: session.fix) {
                         field.openRTK()
                     }
                 }

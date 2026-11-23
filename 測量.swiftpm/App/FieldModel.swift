@@ -1214,6 +1214,58 @@ final class FieldModel: ObservableObject {
         return true
     }
 
+    /// 地図の記録。解の種類と精度を付けて仮置きし、座標簿には入れない。
+    @discardableResult
+    func stageMapObservation() -> Bool {
+        stageCurrentPoint(asGCP: false)
+    }
+
+    /// FIX のときだけ仮置きの GCP。座標簿には入れない。
+    @discardableResult
+    func stageMapGCP() -> Bool {
+        guard canStageGCP else { return false }
+        return stageCurrentPoint(asGCP: true)
+    }
+
+    var canStageGCP: Bool {
+        guard let position = reading.position, position.fixQuality == .rtkFix, position.receiver != .iphoneGPS else { return false }
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        if rtkSession?.holdGCPUntilFix == true { return false }
+        #endif
+        return true
+    }
+
+    private func stageCurrentPoint(asGCP: Bool) -> Bool {
+        guard basicProjectReady() else { return false }
+        guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
+            captureMessage = "位置が無いので残せません。"
+            return false
+        }
+        guard !asGCP || position.fixQuality == .rtkFix else { return false }
+        guard let name = nextPointName else {
+            captureMessage = "点名の頭は半角アルファベットだけにしてください。"
+            return false
+        }
+        let condition = ObservationCondition.snapshot(
+            position: position,
+            stage: stageTransition.stage,
+            durationSeconds: epochWatch.duration(at: position.timestamp),
+            epochCount: epochWatch.count
+        )
+        let observation = FieldObservation(
+            name: name,
+            workID: asGCP ? "boundary" : workCatalog.selected.id,
+            captured: position,
+            condition: condition
+        )
+        store(observation)
+        let accuracy = CoordinateText.accuracyMeters(position.horizontalAccuracyMeters)
+        captureMessage = asGCP
+            ? "\(name)を仮置きしました。GCP \(position.solutionLabel) \(accuracy)。"
+            : "\(name)を仮置きしました。\(position.solutionLabel) \(accuracy)。"
+        return true
+    }
+
     /// ベーシックは、今の位置を GCP として残す。RTK が無いときは、その解のまま書く。
     @discardableResult
     private func recordBasicGCP() -> Bool {

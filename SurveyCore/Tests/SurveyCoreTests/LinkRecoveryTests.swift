@@ -24,7 +24,7 @@ final class LinkRecoveryTests: XCTestCase {
         XCTAssertEqual(plan.start(), 1)
         XCTAssertEqual(plan.lost(reason: "Casterが切断しました", at: 0, dialectHint: true), 1)
         XCTAssertEqual(plan.dialect, .v1)
-        XCTAssertEqual(plan.health.reconnectingText(time: "03:58:01"), "再接続中 (1回目) Casterが切断しました 03:58:01")
+        XCTAssertEqual(plan.health.reconnectingText(time: "03:58:01"), "再接続中 (1回目) NTRIP Casterが切断しました 03:58:01")
         XCTAssertNil(plan.readyToOpen())
         plan.noteClosed(1)
         XCTAssertEqual(plan.readyToOpen(), 2)
@@ -74,7 +74,7 @@ final class LinkRecoveryTests: XCTestCase {
         XCTAssertEqual(recovery.recover(reason: "切断", at: 8, retrieved: false), ["retrieve", "scan"])
         recovery.linkUp(at: 9)
         XCTAssertEqual(recovery.bootRuns, 3)
-        XCTAssertEqual(recovery.health.reconnectingText(time: "03:58:09"), "再接続中 (2回目) 切断 03:58:09")
+        XCTAssertEqual(recovery.health.reconnectingText(time: "03:58:09"), "再接続中 (2回目) ViDoc 切断 03:58:09")
 
         var buffer = RTCMOutboundBuffer()
         let fresh = Data([0xD3, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00])
@@ -84,5 +84,37 @@ final class LinkRecoveryTests: XCTestCase {
         buffer.dropOlder(than: 2, now: 3)
         XCTAssertEqual(buffer.bufferedBytes, fresh.count)
         XCTAssertEqual(buffer.nextChunk(maximumBytes: 180), fresh)
+    }
+
+    func testSlowBackoffHoldsTheCasterSessionAndGCPWaitsForFix() {
+        var slow = LinkBackoff()
+        slow.slow = true
+        XCTAssertEqual((0..<4).map { _ in slow.take() }, [10, 20, 30, 30])
+
+        var plan = NTRIPReconnect()
+        _ = plan.start()
+        XCTAssertEqual(plan.lost(reason: "同じIDが別の機器で接続中", at: 0, dialectHint: true, slow: true), 10)
+        plan.noteClosed(1)
+        XCTAssertEqual(plan.readyToOpen(), 2)
+        XCTAssertEqual(plan.lost(reason: "Casterにつなげません", at: 12, dialectHint: false, slow: true), 20)
+        XCTAssertEqual(plan.rebind(reason: "経路が変わった", at: 13), 0)
+        XCTAssertEqual(plan.health.lastKind, .ntrip)
+        XCTAssertTrue(plan.health.reconnectingText(time: "04:12:00", ggaAge: "3秒").contains("GGA 3秒"))
+
+        var hold = GCPFixHold()
+        XCTAssertTrue(hold.allowsRecording)
+        hold.noteReconnect()
+        XCTAssertFalse(hold.allowsRecording)
+        hold.observe(.float)
+        XCTAssertFalse(hold.allowsRecording)
+        hold.observe(.rtkFix)
+        XCTAssertTrue(hold.allowsRecording)
+
+        var sky = SkyWatch()
+        XCTAssertFalse(sky.observe(12))
+        XCTAssertTrue(sky.observe(3))
+        XCTAssertEqual(sky.note, "上空 衛星3")
+        XCTAssertFalse(sky.observe(10))
+        XCTAssertFalse(sky.lost)
     }
 }

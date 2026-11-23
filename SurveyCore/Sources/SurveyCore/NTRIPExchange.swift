@@ -226,23 +226,39 @@ public struct NTRIPChunkDecoder: Sendable {
 /// FFF2 へ書く開始列と、RTCM の切り方。
 /// 電源投入と再接続のたびに `start` を書き、FFF1 の準備完了を待ってから `nmea` を書く。
 public enum ViDocLink {
-    /// `<STX>start<ETX>`。配信中に再送しても害はない。
-    public static let startCommand = Data([0x02, 0x73, 0x74, 0x61, 0x72, 0x74, 0x03])
-    /// `<STX>nmea<ETX>`。準備完了のあと、または 2 秒待っても来なければ書く。
+    /// 裸の ASCII `start` と CR LF。`<STX>start<ETX>` ではない。
+    public static let startCommand = Data([0x73, 0x74, 0x61, 0x72, 0x74, 0x0D, 0x0A])
+    /// `<STX>nmea<ETX>`。`ready` のあとに書く。
     public static let nmeaCommand = Data([0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
     public static let nmeaStartCommand = nmeaCommand
-    /// FFF1 の電池行または ready を待つ上限。
-    public static let readyTimeoutSeconds: TimeInterval = 2
+    /// `nmea` のあと、待機文が続き $G が来なければ start を送り直すまでの秒。
+    public static let nmeaWaitSeconds: TimeInterval = 3
+    /// start の再送は 3 回まで。
+    public static let maxStartRetries = 3
 
-    /// 待機文は電池残量から始まる。ready / battery / `87%` を準備完了とみなす。NMEA と版数行は違う。
-    public static func isReadyText(_ text: String) -> Bool {
-        let line = text
+    public static func normalized(_ text: String) -> String {
+        text
             .replacingOccurrences(of: "\u{0002}", with: "")
             .replacingOccurrences(of: "\u{0003}", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if line.isEmpty || line.hasPrefix("$") { return false }
+    }
+
+    /// 準備完了は ASCII の `ready` だけ。版数行と電池行は違う。
+    public static func isReadyText(_ text: String) -> Bool {
+        normalized(text) == "ready"
+    }
+
+    public static func isNMEA(_ text: String) -> Bool {
+        normalized(text).hasPrefix("$G")
+    }
+
+    /// 待機のままの文。版数、電池、wait。NMEA と ready は含まない。
+    public static func isWaitLine(_ text: String) -> Bool {
+        let line = normalized(text)
+        if line.isEmpty || line == "ready" || line.hasPrefix("$") { return false }
+        if line.contains("Ver_") { return true }
         let lower = line.lowercased()
-        if lower.contains("ready") || lower.contains("battery") || lower.contains("batt") || line.contains("電池") {
+        if lower.contains("wait") || lower.contains("battery") || lower.contains("batt") || line.contains("電池") {
             return true
         }
         let digits = lower.prefix { $0.isNumber }
@@ -274,37 +290,62 @@ public enum ViDocLink {
     }
 }
 
-/// 接続のたびに start → 準備完了（無ければ 2 秒）→ nmea。
+/// `start\r\n` のあと `ready` だけを待ち、それから `nmea`。BLE は切らない。
 public struct ViDocBoot: Equatable, Sendable {
     public enum Phase: Equatable, Sendable {
         case needStart
-        case waitingForReady(since: TimeInterval)
+        case waitingForReady(since: TimeInterval, attempt: Int)
+        case waitingForNMEA(since: TimeInterval, attempt: Int, sawWait: Bool)
         case streaming
     }
 
     public private(set) var phase: Phase = .needStart
-    public var timeout: TimeInterval
+    public var nmeaWait: TimeInterval
+    public var maxRetries: Int
 
-    public init(timeout: TimeInterval = ViDocLink.readyTimeoutSeconds) {
-        self.timeout = timeout
+    public init(nmeaWait: TimeInterval = ViDocLink.nmeaWaitSeconds, maxRetries: Int = ViDocLink.maxStartRetries) {
+        self.nmeaWait = nmeaWait
+        self.maxRetries = maxRetries
     }
 
     public mutating func onConnect(at now: TimeInterval) -> Data {
-        phase = .waitingForReady(since: now)
+        phase = .waitingForReady(since: now, attempt: 0)
         return ViDocLink.startCommand
     }
 
+    /// 書くコマンドがあれば返す。BLE の切断はしない。
     public mutating func onNotify(_ text: String, at now: TimeInterval) -> Data? {
-        guard case .waitingForReady = phase, ViDocLink.isReadyText(text) else { return nil }
-        phase = .streaming
-        return ViDocLink.nmeaCommand
+        if ViDocLink.isNMEA(text) {
+            phase = .streaming
+            return nil
+        }
+        if ViDocLink.isReadyText(text) {
+            guard case .waitingForReady(_, let attempt) = phase else { return nil }
+            phase = .waitingForNMEA(since: now, attempt: attempt, sawWait: false)
+            return ViDocLink.nmeaCommand
+        }
+        guard ViDocLink.isWaitLine(text) else { return nil }
+        switch phase {
+        case .streaming:
+            phase = .waitingForReady(since: now, attempt: 0)
+            return ViDocLink.startCommand
+        case .waitingForNMEA(let since, let attempt, _):
+            phase = .waitingForNMEA(since: since, attempt: attempt, sawWait: true)
+            return resendIfDue(at: now)
+        case .waitingForReady, .needStart:
+            return nil
+        }
     }
 
-    public mutating func onTimeout(at now: TimeInterval) -> Data? {
-        guard case .waitingForReady(let since) = phase else { return nil }
-        guard now - since + 1e-9 >= timeout else { return nil }
-        phase = .streaming
-        return ViDocLink.nmeaCommand
+    public mutating func onTick(at now: TimeInterval) -> Data? {
+        resendIfDue(at: now)
+    }
+
+    private mutating func resendIfDue(at now: TimeInterval) -> Data? {
+        guard case .waitingForNMEA(let since, let attempt, let sawWait) = phase else { return nil }
+        guard sawWait, now - since + 1e-9 >= nmeaWait, attempt < maxRetries else { return nil }
+        phase = .waitingForReady(since: now, attempt: attempt + 1)
+        return ViDocLink.startCommand
     }
 }
 

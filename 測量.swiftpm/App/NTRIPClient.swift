@@ -49,6 +49,9 @@ public final class NTRIPClient: @unchecked Sendable {
     private var rateTimer: DispatchSourceTimer?
     private var stallTimer: DispatchSourceTimer?
     private var pendingOpen: DispatchWorkItem?
+    private var pathMonitor: NWPathMonitor?
+    private var lastPathKey: String?
+    private var lastGGAAt: TimeInterval?
 
     public var onStatus: ((String) -> Void)?
     public var onHealth: ((LinkHealth) -> Void)?
@@ -69,6 +72,7 @@ public final class NTRIPClient: @unchecked Sendable {
             self.post("認証中")
             if let id = self.plan.start() { self.open(id) }
             self.startStallTimer()
+            self.startPathMonitor()
         }
     }
 
@@ -80,6 +84,7 @@ public final class NTRIPClient: @unchecked Sendable {
             self.ggaTimer?.cancel(); self.ggaTimer = nil
             self.rateTimer?.cancel(); self.rateTimer = nil
             self.stallTimer?.cancel(); self.stallTimer = nil
+            self.pathMonitor?.cancel(); self.pathMonitor = nil
             self.connection?.cancel(); self.connection = nil
         }
     }
@@ -138,7 +143,7 @@ public final class NTRIPClient: @unchecked Sendable {
                 self.receiveLoop()
                 self.startRateTimer()
             case .failed:
-                self.handleLoss("Casterにつなげません", dialectHint: !self.plan.everStreamed)
+                self.handleLoss("Casterにつなげません", dialectHint: !self.plan.everStreamed, slow: true)
             case .cancelled:
                 break
             default:
@@ -148,10 +153,10 @@ public final class NTRIPClient: @unchecked Sendable {
         conn.start(queue: queue)
     }
 
-    private func handleLoss(_ reason: String, dialectHint: Bool) {
+    private func handleLoss(_ reason: String, dialectHint: Bool, kind: LinkDropKind = .ntrip, slow: Bool = false) {
         guard running else { return }
         let now = Date().timeIntervalSinceReferenceDate
-        guard let delay = plan.lost(reason: reason, at: now, dialectHint: dialectHint) else { return }
+        guard let delay = plan.lost(reason: reason, at: now, dialectHint: dialectHint, kind: kind, slow: slow) else { return }
         publish(nil)
         ggaTimer?.cancel(); ggaTimer = nil
         rateTimer?.cancel(); rateTimer = nil
@@ -189,6 +194,55 @@ public final class NTRIPClient: @unchecked Sendable {
         }
         pendingOpen = work
         queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func rebindPath() {
+        guard running else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        let delay = plan.rebind(reason: "経路が変わった", at: now)
+        publish(nil)
+        ggaTimer?.cancel(); ggaTimer = nil
+        rateTimer?.cancel(); rateTimer = nil
+        let closing = plan.socket.closingID
+        let old = connection
+        connection = nil
+        var finished = false
+        let proceed = { [weak self] in
+            guard let self, !finished else { return }
+            finished = true
+            if let closing { self.plan.noteClosed(closing) }
+            self.scheduleOpen(after: delay)
+        }
+        if let old {
+            old.stateUpdateHandler = { state in
+                switch state {
+                case .cancelled, .failed:
+                    self.queue.async { proceed() }
+                default:
+                    break
+                }
+            }
+            old.cancel()
+        } else {
+            proceed()
+        }
+    }
+
+    private func startPathMonitor() {
+        pathMonitor?.cancel()
+        let monitor = NWPathMonitor()
+        pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            self?.queue.async {
+                guard let self, self.running else { return }
+                let key = "\(path.status)-\(path.availableInterfaces.map { "\($0.type)" }.sorted().joined(separator: ","))"
+                let previous = self.lastPathKey
+                self.lastPathKey = key
+                guard let previous, previous != key else { return }
+                self.rebindPath()
+            }
+        }
+        monitor.start(queue: queue)
     }
 
     private func sendRequest() {
@@ -233,7 +287,8 @@ public final class NTRIPClient: @unchecked Sendable {
         }
         guard header.reply == .stream else {
             let line = header.reply.statusLine(mount: config.mountpoint)
-            handleLoss(line, dialectHint: !plan.everStreamed || header.reply == .unavailable)
+            let slow = header.reply == .unavailable
+            handleLoss(line, dialectHint: !plan.everStreamed || slow, slow: slow)
             return
         }
         headerDone = true
@@ -256,6 +311,7 @@ public final class NTRIPClient: @unchecked Sendable {
 
     private func sendCurrentGGA() {
         guard let gga = currentGGA() else { return }
+        lastGGAAt = Date().timeIntervalSinceReferenceDate
         let line = gga.hasSuffix("\r\n") ? gga : gga + "\r\n"
         connection?.send(content: Data(line.utf8), completion: .contentProcessed { _ in })
     }
@@ -294,7 +350,7 @@ public final class NTRIPClient: @unchecked Sendable {
             guard let self, self.running else { return }
             let now = Date().timeIntervalSinceReferenceDate
             if self.plan.stalled(at: now) {
-                self.handleLoss("RTCMが止まった", dialectHint: false)
+                self.handleLoss("RTCMが止まった", dialectHint: false, kind: .correctionLag)
             }
         }
         timer.resume()
@@ -311,11 +367,17 @@ public final class NTRIPClient: @unchecked Sendable {
         )
     }
 
+    private func ggaAgeText() -> String {
+        guard let lastGGAAt else { return "—" }
+        let seconds = max(0, Date().timeIntervalSinceReferenceDate - lastGGAAt)
+        return String(format: "%.0f秒", seconds)
+    }
+
     private func publish(_ live: String?) {
         onHealth?(plan.health)
         let time = plan.health.lastAt.map { LinkClock.text($0) } ?? ""
         if plan.health.reconnecting {
-            post(plan.health.reconnectingText(time: time))
+            post(plan.health.reconnectingText(time: time, ggaAge: ggaAgeText()))
         } else if let live {
             post(live + plan.health.settledSuffix(time: time))
         }

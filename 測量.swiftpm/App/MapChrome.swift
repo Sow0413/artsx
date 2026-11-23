@@ -12,23 +12,10 @@ struct AccuracyBadgeView: View {
                 .fill(badge.tone.mark)
                 .frame(width: compact ? 14 : 16, height: compact ? 14 : 16)
             if compact {
-                Text(badge.solutionLabel)
-                    .font(SurveyType(20, .heavy))
-                    .foregroundStyle(chipInk)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(badge.tone.mark, in: Capsule())
-                if let stage {
-                    Text("段階\(stage.rawValue)")
-                        .font(SurveyType(18, .heavy))
-                        .foregroundStyle(SurveyColor.muted)
-                        .lineLimit(1)
-                }
-                Text(compactMagnitude)
+                Text(compactLine)
                     .font(SurveyType(22, .heavy))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .minimumScaleFactor(0.55)
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
@@ -76,13 +63,19 @@ struct AccuracyBadgeView: View {
         .accessibilityLabel(badge.accessibilityText)
     }
 
-    /// 「FLOAT　約12cm」の精度だけを1行に残す。
-    private var compactMagnitude: String {
-        guard let split = badge.text.split(separator: "　", maxSplits: 1, omittingEmptySubsequences: false).dropFirst().first else {
-            return badge.text
+    /// 解の名前は一度だけ。例: FLOAT 約12cm 段階1
+    private var compactLine: String {
+        let raw = badge.text.split(separator: "　", maxSplits: 1, omittingEmptySubsequences: false)
+        let magnitude = raw.count > 1 ? String(raw[1]) : badge.text
+        let name = badge.solutionLabel == "—" ? "" : badge.solutionLabel
+        let body: String
+        if name.isEmpty || magnitude.hasPrefix(name) {
+            body = magnitude
+        } else {
+            body = "\(name) \(magnitude)"
         }
-        let magnitude = String(split)
-        return magnitude.isEmpty ? badge.text : magnitude
+        guard let stage else { return body }
+        return "\(body) 段階\(stage.rawValue)"
     }
 
     /// 黄地は黒文字。赤と緑の原色地は白文字。
@@ -152,6 +145,9 @@ struct LocationPanel: View {
     var onStature: (() -> Void)? = nil
     var showsLevel = false
     var levelTilt: Double? = nil
+    var onRecord: (() -> Void)? = nil
+    var onGCP: (() -> Void)? = nil
+    var gcpEnabled = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -198,6 +194,7 @@ struct LocationPanel: View {
                         .font(SurveyType(15, .bold))
                         .foregroundStyle(SurveyColor.amber)
                 }
+                recordButtons
             } else {
                 Text(emptyTitle)
                     .font(SurveyType(22, .heavy))
@@ -208,6 +205,7 @@ struct LocationPanel: View {
                 if showsLevel {
                     LevelBubble(tiltRadians: levelTilt)
                 }
+                recordButtons
             }
         }
         .foregroundStyle(SurveyColor.text)
@@ -219,8 +217,38 @@ struct LocationPanel: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("location-panel")
+    }
+
+    @ViewBuilder
+    private var recordButtons: some View {
+        if onRecord != nil || onGCP != nil {
+            HStack(spacing: 8) {
+                Button(action: { onRecord?() }) {
+                    Text("記録")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(SurveyColor.blue)
+                        .foregroundStyle(SurveyColor.onAccent)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("map-record")
+                Button(action: { onGCP?() }) {
+                    Text("GCP")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(gcpEnabled ? SurveyColor.green : Color(white: 0.78))
+                        .foregroundStyle(gcpEnabled ? SurveyColor.onAccent : Color(white: 0.42))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!gcpEnabled)
+                .accessibilityIdentifier("basic-gcp")
+            }
+            .padding(.top, 4)
+        }
     }
 
     private func accuracyText(_ position: GeodeticPosition) -> String {

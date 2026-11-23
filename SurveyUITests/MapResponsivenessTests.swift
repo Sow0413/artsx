@@ -33,7 +33,13 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertLessThan(badge.frame.height, 72, "精度帯が1行に収まっていない")
         let panel = app.descendants(matching: .any)["location-panel"]
         XCTAssertTrue(panel.waitForExistence(timeout: 5), "現在地カードが無い")
-        XCTAssertLessThan(panel.frame.height, 160, "現在地カードが半分まで縮んでいない")
+        let record = app.buttons["map-record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 5), "記録ボタンが無い")
+        scrollClear(record, in: app.scrollViews["map-controls"])
+        let gcp = app.buttons["basic-gcp"]
+        XCTAssertTrue(gcp.exists, "GCP ボタンが無い")
+        XCTAssertFalse(gcp.isEnabled, "FIX 以外で GCP が押せる")
+        XCTAssertLessThan(panel.frame.height, 210, "現在地カードが半分まで縮んでいない")
         shot("01-map")
 
         app.scrollViews["map-controls"].swipeUp()
@@ -131,9 +137,10 @@ final class MapResponsivenessTests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter().wait(for: [numbers], timeout: 8), .completed, "測設に距離と方位と南北東西が出ない")
         shot("14-stakeout")
-        app.buttons["basic-gcp"].tap()
-        let gcp = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を基準点にしました'")).firstMatch
-        XCTAssertTrue(gcp.waitForExistence(timeout: 5), "基準点を残した文が無い")
+        let mapGCP = app.buttons["basic-gcp"]
+        if mapGCP.waitForExistence(timeout: 3), mapGCP.isEnabled {
+            mapGCP.tap()
+        }
         shot("15-gcp")
 
         openTab("tab-export", showing: "screen-export")

@@ -1,14 +1,17 @@
 import Foundation
 
-/// 再接続の待ち。1, 2, 4, 8 秒、以降は 15 秒。
+/// 再接続の待ち。通常は 1, 2, 4, 8 秒、以降は 15 秒。503 と到達不能は 10, 20, 30 秒。
 public struct LinkBackoff: Equatable, Sendable {
     public static let sequence: [TimeInterval] = [1, 2, 4, 8, 15]
+    public static let sessionHold: [TimeInterval] = [10, 20, 30]
     public private(set) var index = 0
+    public var slow = false
 
     public init() {}
 
     public var next: TimeInterval {
-        Self.sequence[min(index, Self.sequence.count - 1)]
+        let steps = slow ? Self.sessionHold : Self.sequence
+        return steps[min(index, steps.count - 1)]
     }
 
     public mutating func take() -> TimeInterval {
@@ -19,6 +22,28 @@ public struct LinkBackoff: Equatable, Sendable {
 
     public mutating func reset() {
         index = 0
+        slow = false
+    }
+
+    public mutating func useSessionHold() {
+        if !slow { index = 0 }
+        slow = true
+    }
+}
+
+public enum LinkDropKind: String, Equatable, Sendable {
+    case ntrip
+    case vidoc
+    case correctionLag
+    case openSky
+
+    public var label: String {
+        switch self {
+        case .ntrip: return "NTRIP"
+        case .vidoc: return "ViDoc"
+        case .correctionLag: return "補正遅れ"
+        case .openSky: return "上空"
+        }
     }
 }
 
@@ -57,14 +82,16 @@ public enum LinkClock {
 
 public struct LinkHealth: Equatable, Sendable {
     public private(set) var drops = 0
+    public private(set) var lastKind: LinkDropKind = .ntrip
     public private(set) var lastReason = ""
     public private(set) var lastAt: TimeInterval?
     public private(set) var reconnecting = false
 
     public init() {}
 
-    public mutating func dropped(reason: String, at now: TimeInterval) {
+    public mutating func dropped(kind: LinkDropKind, reason: String, at now: TimeInterval) {
         drops += 1
+        lastKind = kind
         lastReason = reason
         lastAt = now
         reconnecting = true
@@ -74,17 +101,62 @@ public struct LinkHealth: Equatable, Sendable {
         reconnecting = false
     }
 
-    public func reconnectingText(time: String) -> String {
+    public func reconnectingText(time: String, ggaAge: String? = nil) -> String {
         let reason = lastReason.isEmpty ? "" : " \(lastReason)"
         let when = time.isEmpty ? "" : " \(time)"
-        return "再接続中 (\(drops)回目)\(reason)\(when)"
+        let age = ggaAge.map { " GGA \($0)" } ?? ""
+        return "再接続中 (\(drops)回目) \(lastKind.label)\(reason)\(when)\(age)"
     }
 
     public func settledSuffix(time: String) -> String {
         guard drops > 0, !reconnecting else { return "" }
         let when = time.isEmpty ? "" : " \(time)"
-        return "　切断\(drops)回 \(lastReason)\(when)"
+        return "　切断\(drops)回 \(lastKind.label) \(lastReason)\(when)"
     }
+}
+
+/// 衛星が急に減ったら上空が開けていない、と出す。
+public struct SkyWatch: Equatable, Sendable {
+    public private(set) var previous: Int?
+    public private(set) var count: Int?
+    public private(set) var lost = false
+
+    public init() {}
+
+    @discardableResult
+    public mutating func observe(_ satellites: Int?) -> Bool {
+        count = satellites
+        defer { if let satellites { previous = satellites } }
+        guard let satellites, let previous else { return false }
+        if previous >= 8, satellites < 5 {
+            lost = true
+            return true
+        }
+        if satellites >= 8 { lost = false }
+        return false
+    }
+
+    public var note: String {
+        guard lost else { return "" }
+        return "上空 衛星\(count.map(String.init) ?? "—")"
+    }
+}
+
+/// 再接続のあとは FIX に戻るまで基準点を残さない。
+public struct GCPFixHold: Equatable, Sendable {
+    public private(set) var waitingForFix = false
+
+    public init() {}
+
+    public mutating func noteReconnect() {
+        waitingForFix = true
+    }
+
+    public mutating func observe(_ quality: FixQuality) {
+        if quality == .rtkFix { waitingForFix = false }
+    }
+
+    public var allowsRecording: Bool { !waitingForFix }
 }
 
 /// 古いソケットを閉じ終わるまで、次を開かない。
@@ -168,7 +240,7 @@ public struct NTRIPReconnect: Equatable, Sendable {
     }
 
     /// 失敗を1回数え、古いソケットを閉じる。戻り値は次に開くまでの秒。既にやり直し中なら nil。
-    public mutating func lost(reason: String, at now: TimeInterval, dialectHint: Bool) -> TimeInterval? {
+    public mutating func lost(reason: String, at now: TimeInterval, dialectHint: Bool, kind: LinkDropKind = .ntrip, slow: Bool = false) -> TimeInterval? {
         guard correctionsEnabled else {
             _ = socket.close()
             streaming = false
@@ -181,9 +253,12 @@ public struct NTRIPReconnect: Equatable, Sendable {
             dialect = dialect == .v2 ? .v1 : .v2
             usedFallback = true
         }
+        if slow {
+            backoff.useSessionHold()
+        }
         streaming = false
         stall.reset()
-        health.dropped(reason: reason, at: now)
+        health.dropped(kind: kind, reason: reason, at: now)
         if socket.isOpen {
             _ = socket.close()
             closeFinished = false
@@ -191,6 +266,21 @@ public struct NTRIPReconnect: Equatable, Sendable {
             closeFinished = !socket.isClosing
         }
         return backoff.take()
+    }
+
+    /// 経路が変わったら、待ちを伸ばさず、閉じたあとすぐ1本だけ開き直す。
+    public mutating func rebind(reason: String, at now: TimeInterval) -> TimeInterval {
+        recovering = true
+        streaming = false
+        stall.reset()
+        health.dropped(kind: .ntrip, reason: reason, at: now)
+        if socket.isOpen {
+            _ = socket.close()
+            closeFinished = false
+        } else {
+            closeFinished = !socket.isClosing
+        }
+        return 0
     }
 
     public mutating func noteClosed(_ id: Int) {
@@ -241,7 +331,7 @@ public struct ViDocRecovery: Equatable, Sendable {
     public mutating func recover(reason: String, at now: TimeInterval, retrieved: Bool) -> [String] {
         linked = false
         stall.reset()
-        health.dropped(reason: reason, at: now)
+        health.dropped(kind: .vidoc, reason: reason, at: now)
         var steps: [String] = []
         if identifier != nil { steps.append("retrieve") }
         if identifier == nil || !retrieved { steps.append("scan") }

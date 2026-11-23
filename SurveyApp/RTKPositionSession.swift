@@ -7,6 +7,9 @@ import CoreBluetooth
 #if canImport(Security)
 import Security
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // iPhone GPS と ViDoc RTK を実行時に切り替える位置源。FieldModel にはこれを 1 つ渡す。
 // 設定画面(RTKSettingsView)が、この口を通して「受信機につなぐ」「補正を入れる」を操作する。
@@ -31,6 +34,7 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     @Published public private(set) var message: String = ""
     @Published public private(set) var vidocLine = "未接続"
     @Published public private(set) var ntripLine = "未接続"
+    @Published public private(set) var holdGCPUntilFix = false
 
     // 中身
     private let iphone = CoreLocationPositionSource()
@@ -48,6 +52,7 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     private var rough: NTRIPClient.RoughPosition?
     private var ntripRate = 0
     private var ntripHealth = LinkHealth()
+    private var sky = SkyWatch()
     private var listeners: [Task<Void, Never>] = []
     private var armed = false
 
@@ -60,6 +65,7 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             self?.setMain {
                 self?.vidocLine = line
                 self?.deviceConnected = line.hasPrefix("接続しました") || line.hasPrefix("NMEA")
+                if line.hasPrefix("再接続中") { self?.holdGCPUntilFix = true }
             }
         }
     }
@@ -96,7 +102,9 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             self.message = ""
             self.vidocLine = "未接続"
             self.ntripLine = "未接続"
+            self.holdGCPUntilFix = false
         }
+        setScreenAwake(false)
         activate(iphone)
     }
 
@@ -112,6 +120,7 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             self.vidocLine = "探索中"
             self.ntripLine = settings.correctionsEnabled ? "認証中" : "未接続"
         }
+        setScreenAwake(true)
         activate(vidoc)
         if settings.correctionsEnabled, !settings.user.isEmpty, !password.isEmpty {
             let cfg = NTRIPClient.Config(host: settings.host, port: settings.port,
@@ -126,7 +135,10 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
                 }
             }
             client.onHealth = { [weak self] health in
-                self?.setMain { self?.ntripHealth = health }
+                self?.setMain {
+                    self?.ntripHealth = health
+                    if health.reconnecting { self?.holdGCPUntilFix = true }
+                }
             }
             client.onStatus = { [weak self] status in
                 self?.setMain {
@@ -194,7 +206,14 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
                 self.deviceConnected = true
                 self.satelliteCount = position.satelliteCount
                 self.correctionAgeSeconds = position.correctionAgeSeconds
-                if position.fixQuality == .rtkFix { self.message = "RTK Fix" }
+                if position.fixQuality == .rtkFix {
+                    self.holdGCPUntilFix = false
+                    self.message = "RTK Fix"
+                }
+                _ = self.sky.observe(position.satelliteCount)
+                if self.sky.lost, !self.vidocLine.hasPrefix("再接続中"), !self.vidocLine.contains("上空") {
+                    self.vidocLine += "　\(self.sky.note)"
+                }
                 else if position.fixQuality == .float { self.message = "RTK Float" }
                 else if self.ntripConnected { self.message = "補正受信中（収束待ち）" }
             }
@@ -206,6 +225,14 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         let age = correctionAgeSeconds.map { String(format: " 補正 %.0f秒", $0) } ?? ""
         let time = ntripHealth.lastAt.map { LinkClock.text($0) } ?? ""
         ntripLine = "補正受信中 \(ntripRate) B/s\(age)" + ntripHealth.settledSuffix(time: time)
+    }
+
+    private func setScreenAwake(_ awake: Bool) {
+        #if canImport(UIKit)
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
+        #endif
     }
 
     private func setMain(_ work: @escaping () -> Void) {

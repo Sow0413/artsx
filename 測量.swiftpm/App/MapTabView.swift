@@ -88,24 +88,12 @@ struct MapTabView: View {
                         }
                     }
                     #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
-                    if field.rtkSession != nil {
-                        RTKEntryButton {
+                    if let session = field.rtkSession {
+                        RTKEntryButton(connected: session.mode == .rtk && session.deviceConnected, fix: session.fix) {
                             field.openRTK()
                         }
                     }
                     #endif
-                    if SurveyBuild.basicMode {
-                        Button("GCPを残す") {
-                            field.recordControlPoint()
-                        }
-                        .font(SurveyType(14, .heavy))
-                        .foregroundStyle(SurveyColor.text)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(SurveyColor.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .accessibilityIdentifier("basic-gcp")
-                    }
                     if !SurveyBuild.basicMode, field.extras.pushToTalk {
                         Button(field.radio.spaceAudio ? "定位オン" : "定位") {
                             field.radio.setSpaceAudio(!field.radio.spaceAudio)
@@ -318,7 +306,10 @@ struct MapTabView: View {
                         statureNotice: SurveyBuild.basicMode ? nil : field.statureNotice,
                         onStature: SurveyBuild.basicMode ? nil : { field.showsStature = true },
                         showsLevel: !SurveyBuild.basicMode && field.stature.style == .sight,
-                        levelTilt: field.sightTiltRadians
+                        levelTilt: field.sightTiltRadians,
+                        onRecord: { field.stageMapObservation() },
+                        onGCP: { field.stageMapGCP() },
+                        gcpEnabled: field.canStageGCP
                     )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)

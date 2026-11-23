@@ -37,6 +37,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private var recovery = ViDocRecovery()
     private var peripheralID: UUID?
     private var notifyWatch: DispatchSourceTimer?
+    private var bootTimer: DispatchSourceTimer?
     private var pendingDrop: String?
 
     private let queue = DispatchQueue(label: "arts.vidoc.ble")
@@ -242,7 +243,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         beginBoot()
     }
 
-    /// 再接続のたびに start を1回書き、準備完了か 2 秒で nmea を書く。どちらも RTCM の間の1書き込み。
+    /// 再接続のたびに `start\r\n` を書き、`ready` のあと `nmea`。待機文が続くときは start を送り直す。BLE は切らない。
     private func beginBoot() {
         guard case .needStart = boot.phase else { return }
         guard let notify = notifyChar, notify.isNotifying, writeChar != nil else { return }
@@ -251,16 +252,24 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         reportState("接続しました（\(deviceName)）")
         outbound.enqueueCommand(boot.onConnect(at: now))
         bootGeneration += 1
+        armBootTick()
+        drainRTCM()
+    }
+
+    private func armBootTick() {
+        bootTimer?.cancel()
         let generation = bootGeneration
-        queue.asyncAfter(deadline: .now() + ViDocLink.readyTimeoutSeconds) { [weak self] in
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
+        timer.setEventHandler { [weak self] in
             guard let self, self.bootGeneration == generation else { return }
-            let now = Date().timeIntervalSinceReferenceDate
-            if let command = self.boot.onTimeout(at: now) {
+            if let command = self.boot.onTick(at: Date().timeIntervalSinceReferenceDate) {
                 self.outbound.enqueueCommand(command)
                 self.drainRTCM()
             }
         }
-        drainRTCM()
+        timer.resume()
+        bootTimer = timer
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
