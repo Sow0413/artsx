@@ -231,6 +231,8 @@ public enum ViDocLink {
     /// `<STX>nmea<ETX>`。`ready` のあとに書く。
     public static let nmeaCommand = Data([0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
     public static let nmeaStartCommand = nmeaCommand
+    /// `ready` が来なければ、この秒数で `nmea` に進む。
+    public static let readyWaitSeconds: TimeInterval = 1
     /// `nmea` のあと、待機文が続き $G が来なければ start を送り直すまでの秒。
     public static let nmeaWaitSeconds: TimeInterval = 3
     /// start の再送は 3 回まで。
@@ -243,9 +245,9 @@ public enum ViDocLink {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// 準備完了は ASCII の `ready` だけ。版数行と電池行は違う。
+    /// 行のどこかに ASCII の `ready` があれば準備完了。大文字の READY や版数・電池だけでは違う。
     public static func isReadyText(_ text: String) -> Bool {
-        normalized(text) == "ready"
+        normalized(text).contains("ready")
     }
 
     public static func isNMEA(_ text: String) -> Bool {
@@ -255,7 +257,7 @@ public enum ViDocLink {
     /// 待機のままの文。版数、電池、wait。NMEA と ready は含まない。
     public static func isWaitLine(_ text: String) -> Bool {
         let line = normalized(text)
-        if line.isEmpty || line == "ready" || line.hasPrefix("$") { return false }
+        if line.isEmpty || line.contains("ready") || line.hasPrefix("$") { return false }
         if line.contains("Ver_") { return true }
         let lower = line.lowercased()
         if lower.contains("wait") || lower.contains("battery") || lower.contains("batt") || line.contains("電池") {
@@ -300,10 +302,16 @@ public struct ViDocBoot: Equatable, Sendable {
     }
 
     public private(set) var phase: Phase = .needStart
+    public var readyWait: TimeInterval
     public var nmeaWait: TimeInterval
     public var maxRetries: Int
 
-    public init(nmeaWait: TimeInterval = ViDocLink.nmeaWaitSeconds, maxRetries: Int = ViDocLink.maxStartRetries) {
+    public init(
+        readyWait: TimeInterval = ViDocLink.readyWaitSeconds,
+        nmeaWait: TimeInterval = ViDocLink.nmeaWaitSeconds,
+        maxRetries: Int = ViDocLink.maxStartRetries
+    ) {
+        self.readyWait = readyWait
         self.nmeaWait = nmeaWait
         self.maxRetries = maxRetries
     }
@@ -338,7 +346,11 @@ public struct ViDocBoot: Equatable, Sendable {
     }
 
     public mutating func onTick(at now: TimeInterval) -> Data? {
-        resendIfDue(at: now)
+        if case .waitingForReady(let since, let attempt) = phase, now - since + 1e-9 >= readyWait {
+            phase = .waitingForNMEA(since: now, attempt: attempt, sawWait: false)
+            return ViDocLink.nmeaCommand
+        }
+        return resendIfDue(at: now)
     }
 
     private mutating func resendIfDue(at now: TimeInterval) -> Data? {
