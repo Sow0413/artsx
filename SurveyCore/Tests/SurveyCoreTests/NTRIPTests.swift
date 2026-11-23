@@ -121,10 +121,54 @@ final class NTRIPTests: XCTestCase {
         XCTAssertTrue(ViDocDiscovery.matches(localName: "", manufacturerData: Data([0x39, 0x06, 0x01])))
         XCTAssertFalse(ViDocDiscovery.matches(localName: "", manufacturerData: Data([0x4C, 0x00])))
         XCTAssertEqual(Array(ViDocLink.nmeaStartCommand), [0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
-        let rtcm = Data(repeating: 0xD3, count: 50)
+        let rtcm = Data(repeating: 0xAB, count: 50)
         let chunks = ViDocLink.rtcmChunks(rtcm, maximumWriteLength: 20)
-        XCTAssertEqual(chunks.count, 3)
         XCTAssertEqual(chunks.map(\.count), [20, 20, 10])
         XCTAssertEqual(chunks.flatMap { Array($0) }, Array(rtcm))
+    }
+
+    func testRTCMChunksStayWithin180AndKeepOrder() {
+        XCTAssertEqual(ViDocLink.chunkSize(maximumWriteLength: 244), 180)
+        XCTAssertEqual(ViDocLink.chunkSize(maximumWriteLength: 23), 23)
+        XCTAssertEqual(ViDocLink.chunkSize(maximumWriteLength: 8), 20)
+        XCTAssertEqual(ViDocLink.rtcmChunkIntervalMs, 12)
+        XCTAssertTrue((10...15).contains(ViDocLink.rtcmChunkIntervalMs))
+        let payload = Data((0..<400).map { UInt8($0 & 0xFF) })
+        let chunks = ViDocLink.rtcmChunks(payload, maximumWriteLength: 244)
+        XCTAssertTrue(chunks.allSatisfy { $0.count <= 180 })
+        XCTAssertEqual(chunks.dropLast().map(\.count), [180, 180])
+        XCTAssertEqual(chunks.flatMap { Array($0) }, Array(payload))
+    }
+
+    func testRTCMPacingHonoursIntervalAndDropsWholeFrames() {
+        var schedule = RTCMWriteSchedule(intervalMs: 12)
+        XCTAssertTrue(schedule.allows(at: 0, transportReady: true))
+        XCTAssertFalse(schedule.allows(at: 0, transportReady: false))
+        schedule = schedule.advanced(afterSendingAt: 0)
+        XCTAssertFalse(schedule.allows(at: 0.011, transportReady: true))
+        XCTAssertTrue(schedule.allows(at: 0.012, transportReady: true))
+        XCTAssertEqual(schedule.nextAllowed, 0.012, accuracy: 1e-9)
+
+        var buffer = RTCMOutboundBuffer()
+        let frame = Data([0xD3, 0x00, 0x01, 0x11, 0x00, 0x00, 0x00])
+        var stream = Data()
+        for index in 0..<3_000 {
+            var copy = frame
+            copy[3] = UInt8(index & 0xFF)
+            stream.append(copy)
+        }
+        buffer.append(stream)
+        XCTAssertLessThanOrEqual(buffer.bufferedBytes, RTCMOutboundBuffer.capBytes)
+        XCTAssertEqual(buffer.bufferedBytes % frame.count, 0)
+        let kept = buffer.bufferedBytes / frame.count
+        let dropped = 3_000 - kept
+        XCTAssertGreaterThan(dropped, 0)
+        var rebuilt = Data()
+        while let chunk = buffer.nextChunk(maximumBytes: 180) {
+            XCTAssertLessThanOrEqual(chunk.count, 180)
+            rebuilt.append(chunk)
+        }
+        XCTAssertEqual(rebuilt.count, kept * frame.count)
+        XCTAssertEqual(rebuilt[3], UInt8(dropped & 0xFF))
     }
 }

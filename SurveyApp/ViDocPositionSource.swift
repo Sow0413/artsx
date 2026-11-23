@@ -30,6 +30,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private static let writeUUID   = CBUUID(string: "FFF2")
     private var notifyChar: CBCharacteristic?
     private var nmeaStartSent = false
+    private var rtcmBuffer = RTCMOutboundBuffer()
+    private var rtcmSchedule = RTCMWriteSchedule()
+    private var rtcmDrainScheduled = false
 
     private let queue = DispatchQueue(label: "arts.vidoc.ble")
     private var central: CBCentralManager?
@@ -78,15 +81,41 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         }
     }
 
-    /// NTRIPClient から RTCM3 を注入する。FFF2 へ MTU 刻みで書く（BLE の 1 パケット上限に合わせる）。
+    /// NTRIPClient から RTCM3 を注入する。180 バイト以下に切り、12 ms 以上あけて FFF2 へ書く。
     public func injectRTCM(_ data: Data) {
         queue.async {
-            guard let p = self.peripheral, let ch = self.writeChar, !data.isEmpty else { return }
-            let chunks = ViDocLink.rtcmChunks(data, maximumWriteLength: p.maximumWriteValueLength(for: .withoutResponse))
-            for chunk in chunks {
-                p.writeValue(chunk, for: ch, type: .withoutResponse)
-            }
-            self.lastRTCMAt = Date()
+            self.rtcmBuffer.append(data)
+            self.drainRTCM()
+        }
+    }
+
+    public func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        queue.async { self.drainRTCM() }
+    }
+
+    private func drainRTCM() {
+        guard let peripheral, let writeChar else { return }
+        let size = ViDocLink.chunkSize(maximumWriteLength: peripheral.maximumWriteValueLength(for: .withoutResponse))
+        let now = Date().timeIntervalSinceReferenceDate
+        guard rtcmSchedule.allows(at: now, transportReady: peripheral.canSendWriteWithoutResponse) else {
+            if !peripheral.canSendWriteWithoutResponse { return }
+            scheduleRTCMDrain(after: max(0, rtcmSchedule.nextAllowed - now))
+            return
+        }
+        guard let chunk = rtcmBuffer.nextChunk(maximumBytes: size) else { return }
+        peripheral.writeValue(chunk, for: writeChar, type: .withoutResponse)
+        rtcmSchedule = rtcmSchedule.advanced(afterSendingAt: now)
+        lastRTCMAt = Date()
+        scheduleRTCMDrain(after: Double(ViDocLink.rtcmChunkIntervalMs) / 1_000)
+    }
+
+    private func scheduleRTCMDrain(after seconds: TimeInterval) {
+        guard !rtcmDrainScheduled else { return }
+        rtcmDrainScheduled = true
+        queue.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self else { return }
+            self.rtcmDrainScheduled = false
+            self.drainRTCM()
         }
     }
 

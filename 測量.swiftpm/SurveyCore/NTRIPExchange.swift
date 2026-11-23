@@ -219,9 +219,18 @@ public struct NTRIPChunkDecoder: Sendable {
 /// `<STX>nmea<ETX>` と、FFF2 へ書く RTCM の切り方。
 public enum ViDocLink {
     public static let nmeaStartCommand = Data([0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+    /// 244 バイト連続書きは RTCM の 6 割以上を落とす。180 を上限にする。
+    public static let maxChunkBytes = 180
+    public static let minimumChunkBytes = 20
+    /// チャンク間隔。10〜15 ms。既定は 12 ms。
+    public static let rtcmChunkIntervalMs = 12
+
+    public static func chunkSize(maximumWriteLength: Int) -> Int {
+        min(maxChunkBytes, max(minimumChunkBytes, maximumWriteLength))
+    }
 
     public static func rtcmChunks(_ data: Data, maximumWriteLength: Int) -> [Data] {
-        let size = max(20, maximumWriteLength)
+        let size = chunkSize(maximumWriteLength: maximumWriteLength)
         guard !data.isEmpty else { return [] }
         var chunks: [Data] = []
         var offset = 0
@@ -231,6 +240,97 @@ public enum ViDocLink {
             offset = end
         }
         return chunks
+    }
+}
+
+/// 連続書きを避け、次のチャンクを出してよいかを時刻と送信口の空きで決める。
+public struct RTCMWriteSchedule: Equatable, Sendable {
+    public var intervalMs: Int
+    public private(set) var nextAllowed: TimeInterval
+
+    public init(intervalMs: Int = ViDocLink.rtcmChunkIntervalMs, nextAllowed: TimeInterval = -.infinity) {
+        self.intervalMs = intervalMs
+        self.nextAllowed = nextAllowed
+    }
+
+    public func allows(at now: TimeInterval, transportReady: Bool) -> Bool {
+        transportReady && now + 1e-9 >= nextAllowed
+    }
+
+    public func advanced(afterSendingAt now: TimeInterval) -> RTCMWriteSchedule {
+        var copy = self
+        copy.nextAllowed = now + Double(intervalMs) / 1_000
+        return copy
+    }
+}
+
+/// 届いた RTCM を順に貯める。上限を超えたら、フレームの途中ではなく古い文ごと捨てる。
+public struct RTCMOutboundBuffer: Sendable {
+    public static let capBytes = 16 * 1024
+    private var frames: [Data] = []
+    private var partial = Data()
+    private var frontIsPartial = false
+
+    public init() {}
+
+    public var bufferedBytes: Int { frames.reduce(0) { $0 + $1.count } }
+
+    public mutating func append(_ data: Data) {
+        guard !data.isEmpty else { return }
+        partial.append(data)
+        while let frame = nextFrame() {
+            frames.append(frame)
+        }
+        trimToCap()
+    }
+
+    public mutating func nextChunk(maximumBytes: Int) -> Data? {
+        guard maximumBytes > 0, !frames.isEmpty else { return nil }
+        var first = frames[0]
+        let count = min(maximumBytes, first.count)
+        let chunk = Data(first.prefix(count))
+        first.removeFirst(count)
+        if first.isEmpty {
+            frames.removeFirst()
+            frontIsPartial = false
+        } else {
+            frames[0] = first
+            frontIsPartial = true
+        }
+        return chunk
+    }
+
+    private mutating func nextFrame() -> Data? {
+        while partial.count >= 3 {
+            if partial[partial.startIndex] != 0xD3 {
+                partial.removeFirst()
+                continue
+            }
+            let high = Int(partial[partial.index(partial.startIndex, offsetBy: 1)] & 0x03)
+            let low = Int(partial[partial.index(partial.startIndex, offsetBy: 2)])
+            let length = (high << 8) | low
+            let total = length + 6
+            guard partial.count >= total else { return nil }
+            let frame = Data(partial.prefix(total))
+            partial.removeFirst(total)
+            return frame
+        }
+        return nil
+    }
+
+    private mutating func trimToCap() {
+        while bufferedBytes > Self.capBytes, !frames.isEmpty {
+            if frames.count == 1, frontIsPartial { break }
+            if frontIsPartial, frames.count > 1 {
+                frames.remove(at: 1)
+            } else {
+                frames.removeFirst()
+                frontIsPartial = false
+            }
+        }
+        if partial.count > Self.capBytes {
+            partial.removeAll(keepingCapacity: false)
+        }
     }
 }
 
