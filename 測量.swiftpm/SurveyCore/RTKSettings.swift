@@ -30,18 +30,50 @@ public struct RTKSettings: Codable, Sendable, Equatable {
     public var host: String
     public var port: UInt16
     public var mountpoint: RTKMountpoint
+    /// 一覧から選んだ名前。空なら mountpoint の定番名を送る。
+    public var customMount: String?
     public var user: String
 
     public init(correctionsEnabled: Bool = true,
                 host: String = "d-gnss.jp",
                 port: UInt16 = 2101,
                 mountpoint: RTKMountpoint = .rrsgd2024,
+                customMount: String? = nil,
                 user: String = "") {
         self.correctionsEnabled = correctionsEnabled
         self.host = host
         self.port = port
         self.mountpoint = mountpoint
+        self.customMount = customMount
         self.user = user
+    }
+
+    /// ピッカーに見えている名前。空の手入力は定番名。見えていない古い文字は使わない。
+    public var activeMount: String {
+        let trimmed = customMount?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? mountpoint.rawValue : trimmed
+    }
+
+    /// 画面のピッカーをこの名前にする。定番名なら手入力を消す。
+    public mutating func select(shown: String) {
+        let trimmed = shown.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let known = RTKMountpoint(rawValue: trimmed) {
+            mountpoint = known
+            customMount = nil
+        } else if !trimmed.isEmpty {
+            customMount = trimmed
+        }
+    }
+}
+
+/// 送るマウントは、ピッカーに出ている名前だけ。欄の古い文字がピッカーと違えば送らない。
+public enum RTKMountSelection {
+    public static func send(pickerShown: String, typed: String) -> String {
+        let picker = pickerShown.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if picker.isEmpty { return text }
+        if text.isEmpty || text == picker { return picker }
+        return picker
     }
 }
 

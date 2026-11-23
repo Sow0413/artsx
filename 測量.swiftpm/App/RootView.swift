@@ -48,7 +48,7 @@ struct RootView: View {
                     .padding(.top, 6)
             }
             if field.tab != .seat {
-                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage)
+                AccuracyBadgeView(badge: field.badge, stage: field.stageTransition.stage, compact: field.tab == .map)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
                     .padding(.bottom, 8)

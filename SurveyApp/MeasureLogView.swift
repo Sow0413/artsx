@@ -224,8 +224,8 @@ struct MeasureLogView: View {
                     .font(SurveyType(18, .heavy))
                 Spacer()
                 #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
-                if field.rtkSession != nil {
-                    RTKEntryButton {
+                if let session = field.rtkSession {
+                    RTKEntryButton(connected: session.mode == .rtk && session.deviceConnected, fix: session.fix) {
                         field.openRTK()
                     }
                 }
@@ -234,8 +234,20 @@ struct MeasureLogView: View {
             #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
             if let session = field.rtkSession {
                 Text(rtkLine(session))
-                    .font(SurveyType(18, .heavy))
+                    .font(SurveyType(16, .heavy))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .accessibilityIdentifier("rtk-status")
+                Text("ViDoc \(session.vidocLine)")
+                    .font(SurveyType(15, .heavy))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                    .accessibilityIdentifier("vidoc-status")
+                Text("NTRIP \(session.ntripLine)")
+                    .font(SurveyType(15, .heavy))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
+                    .accessibilityIdentifier("ntrip-status")
             }
             #endif
             if !SurveyBuild.basicMode {
@@ -322,7 +334,8 @@ struct MeasureLogView: View {
     }
 
     private var controlStatus: String {
-        if !StageGate.allowsRecording(workID: "boundary", stage: field.stageTransition.stage),
+        let quality = field.reading.position?.fixQuality ?? field.controlFix.latest?.fixQuality ?? .none
+        if StageDropNotice.downgradeIsCurrent(stage: field.stageTransition.stage, quality: quality),
            field.controlFix.restarted || field.stageTransition.steppedDown {
             return FieldModel.stageDroppedRecording
         }

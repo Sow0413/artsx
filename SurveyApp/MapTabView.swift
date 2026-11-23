@@ -1,9 +1,17 @@
 import SwiftUI
 import SurveyCore
 
+private struct MapChromeHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct MapTabView: View {
     @ObservedObject var field: FieldModel
     @ObservedObject var appearance: SurveyAppearance
+    @State private var chromeHeight: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -80,24 +88,12 @@ struct MapTabView: View {
                         }
                     }
                     #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
-                    if field.rtkSession != nil {
-                        RTKEntryButton {
+                    if let session = field.rtkSession {
+                        RTKEntryButton(connected: session.mode == .rtk && session.deviceConnected, fix: session.fix) {
                             field.openRTK()
                         }
                     }
                     #endif
-                    if SurveyBuild.basicMode {
-                        Button("GCPを残す") {
-                            field.recordControlPoint()
-                        }
-                        .font(SurveyType(14, .heavy))
-                        .foregroundStyle(SurveyColor.text)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(SurveyColor.card)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .accessibilityIdentifier("basic-gcp")
-                    }
                     if !SurveyBuild.basicMode, field.extras.pushToTalk {
                         Button(field.radio.spaceAudio ? "定位オン" : "定位") {
                             field.radio.setSpaceAudio(!field.radio.spaceAudio)
@@ -174,7 +170,7 @@ struct MapTabView: View {
                         .padding(.top, 6)
                         .accessibilityIdentifier("stakeout-guide")
                 }
-                if SurveyBuild.basicMode, field.tab == .map, let message = field.captureMessage {
+                if SurveyBuild.basicMode, field.tab == .map, let message = mapCaptureMessage {
                     Text(message)
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.amber)
@@ -191,9 +187,15 @@ struct MapTabView: View {
                 pinnedMapChrome
                 ScrollView {
                     scrollingChrome
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(key: MapChromeHeight.self, value: proxy.size.height)
+                            }
+                        }
                 }
+                .onPreferenceChange(MapChromeHeight.self) { chromeHeight = $0 }
                 .layoutPriority(1)
-                .frame(minHeight: 220, maxHeight: max(240, geo.size.height * 0.46))
+                .frame(height: mapChromeBand(in: geo.size.height))
                 .accessibilityIdentifier("map-controls")
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
@@ -226,6 +228,23 @@ struct MapTabView: View {
         .sheet(isPresented: $field.showsDisaster) {
             DisasterSheet(field: field)
         }
+    }
+
+    /// FIX に戻ったあとの「記録を止めました」は出さない。
+    private var mapCaptureMessage: String? {
+        let quality = field.reading.position?.fixQuality ?? .none
+        return StageDropNotice.resolve(
+            current: field.captureMessage,
+            stage: field.stageTransition.stage,
+            quality: quality
+        )
+    }
+
+    /// カードの高さだけ下に残し、空いた分は地図にする。長い列は画面の 46% でスクロールする。
+    private func mapChromeBand(in total: CGFloat) -> CGFloat {
+        let cap = max(160, total * 0.46)
+        let content = chromeHeight > 1 ? chromeHeight : 120
+        return min(content, cap)
     }
 
     private var reachCaption: String {
@@ -287,7 +306,10 @@ struct MapTabView: View {
                         statureNotice: SurveyBuild.basicMode ? nil : field.statureNotice,
                         onStature: SurveyBuild.basicMode ? nil : { field.showsStature = true },
                         showsLevel: !SurveyBuild.basicMode && field.stature.style == .sight,
-                        levelTilt: field.sightTiltRadians
+                        levelTilt: field.sightTiltRadians,
+                        onRecord: { field.stageMapObservation() },
+                        onGCP: { field.stageMapGCP() },
+                        gcpEnabled: field.canStageGCP
                     )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)

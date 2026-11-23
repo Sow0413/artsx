@@ -74,6 +74,21 @@ public enum StageLadder {
     }
 }
 
+/// 基準点の記録を止めた帯。下がっているあいだだけ出し、FIX に戻ったら消す。
+public enum StageDropNotice {
+    public static let recordingStopped = "段階が下がったので、基準点の記録を止めました。測位は続けます。"
+
+    public static func downgradeIsCurrent(stage: PositionStage, quality: FixQuality) -> Bool {
+        quality != .rtkFix || !StageGate.allowsRecording(workID: "boundary", stage: stage)
+    }
+
+    /// 今の帯がこの文で、解が FIX かつ段階2以上なら空にする。ほかの文はそのまま。
+    public static func resolve(current: String?, stage: PositionStage, quality: FixQuality) -> String? {
+        guard current == recordingStopped else { return current }
+        return downgradeIsCurrent(stage: stage, quality: quality) ? current : nil
+    }
+}
+
 public enum StageGate {
     /// 基準点モードは段階2（RTK）が要る。ほかの作業は段階を必須にしない。
     public static func minimumStage(workID: String) -> PositionStage? {

@@ -64,15 +64,17 @@ struct ExtraSettingsSheet: View {
 }
 
 struct RTKEntryButton: View {
+    var connected: Bool
+    var fix: FixQuality
     var action: () -> Void
 
     var body: some View {
         Button("RTK", action: action)
             .font(SurveyType(14, .heavy))
-            .foregroundStyle(SurveyColor.text)
+            .foregroundStyle(ink)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background(SurveyColor.card)
+            .background(fill)
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
@@ -80,6 +82,24 @@ struct RTKEntryButton: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .accessibilityLabel("RTK 設定")
             .accessibilityIdentifier("rtk-entry")
+    }
+
+    private var fill: Color {
+        guard connected else { return Color(white: 0.78) }
+        switch fix {
+        case .rtkFix: return SurveyColor.green
+        case .float: return SurveyColor.amber
+        case .dgps, .standalone, .clas, .none: return SurveyColor.card
+        }
+    }
+
+    private var ink: Color {
+        guard connected else { return Color(white: 0.42) }
+        switch fix {
+        case .rtkFix: return SurveyColor.onAccent
+        case .float: return SurveyColor.color(OutdoorContrast.black)
+        case .dgps, .standalone, .clas, .none: return SurveyColor.text
+        }
     }
 }
 

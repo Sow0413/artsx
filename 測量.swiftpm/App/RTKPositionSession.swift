@@ -7,6 +7,9 @@ import CoreBluetooth
 #if canImport(Security)
 import Security
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // iPhone GPS と ViDoc RTK を実行時に切り替える位置源。FieldModel にはこれを 1 つ渡す。
 // 設定画面(RTKSettingsView)が、この口を通して「受信機につなぐ」「補正を入れる」を操作する。
@@ -29,6 +32,9 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     @Published public private(set) var correctionAgeSeconds: Double?
     @Published public private(set) var ntripConnected = false
     @Published public private(set) var message: String = ""
+    @Published public private(set) var vidocLine = "未接続"
+    @Published public private(set) var ntripLine = "未接続"
+    @Published public private(set) var holdGCPUntilFix = false
 
     // 中身
     private let iphone = CoreLocationPositionSource()
@@ -43,6 +49,10 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
 
     private let gate = DispatchQueue(label: "arts.rtk.session")
     private var activeID: ObjectIdentifier?
+    private var rough: NTRIPClient.RoughPosition?
+    private var ntripRate = 0
+    private var ntripHealth = LinkHealth()
+    private var sky = SkyWatch()
     private var listeners: [Task<Void, Never>] = []
     private var armed = false
 
@@ -51,6 +61,13 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         self.readings = pair.stream
         self.continuation = pair.continuation
         super.init()
+        vidoc.onLink = { [weak self] line in
+            self?.setMain {
+                self?.vidocLine = line
+                self?.deviceConnected = line.hasPrefix("接続しました") || line.hasPrefix("NMEA")
+                if line.hasPrefix("再接続中") { self?.holdGCPUntilFix = true }
+            }
+        }
     }
 
     // MARK: PositionSource
@@ -83,7 +100,11 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             self.satelliteCount = nil
             self.correctionAgeSeconds = nil
             self.message = ""
+            self.vidocLine = "未接続"
+            self.ntripLine = "未接続"
+            self.holdGCPUntilFix = false
         }
+        setScreenAwake(false)
         activate(iphone)
     }
 
@@ -96,17 +117,35 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             self.fix = .none
             self.horizontalAccuracyMeters = nil
             self.message = "ViDoc を探しています"
+            self.vidocLine = "探索中"
+            self.ntripLine = settings.correctionsEnabled ? "認証中" : "未接続"
         }
+        setScreenAwake(true)
         activate(vidoc)
         if settings.correctionsEnabled, !settings.user.isEmpty, !password.isEmpty {
             let cfg = NTRIPClient.Config(host: settings.host, port: settings.port,
-                                         mountpoint: settings.mountpoint.rawValue,
+                                         mountpoint: settings.activeMount,
                                          user: settings.user, password: password)
             let client = NTRIPClient(config: cfg, sink: vidoc)
+            client.roughPosition = { [weak self] in self?.rough }
+            client.onBytesPerSecond = { [weak self] rate in
+                self?.setMain {
+                    self?.ntripRate = rate
+                    self?.refreshNTRIPRate()
+                }
+            }
+            client.onHealth = { [weak self] health in
+                self?.setMain {
+                    self?.ntripHealth = health
+                    if health.reconnecting { self?.holdGCPUntilFix = true }
+                }
+            }
             client.onStatus = { [weak self] status in
                 self?.setMain {
                     self?.message = status
-                    self?.ntripConnected = status.hasPrefix("NTRIP 接続")
+                    self?.ntripLine = status
+                    self?.ntripConnected = status.hasPrefix("NTRIP 接続") || status.hasPrefix("補正受信中")
+                    if self?.ntripConnected == true { self?.refreshNTRIPRate() }
                 }
             }
             ntrip = client
@@ -154,17 +193,46 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             return
         }
         setMain {
+            if position.isPlottable {
+                self.rough = NTRIPClient.RoughPosition(
+                    latitudeDegrees: position.latitudeDegrees,
+                    longitudeDegrees: position.longitudeDegrees,
+                    ellipsoidalHeightMeters: position.ellipsoidalHeightMeters
+                )
+            }
             self.horizontalAccuracyMeters = position.hasValidHorizontalAccuracy ? position.horizontalAccuracyMeters : nil
             self.fix = position.fixQuality
             if self.mode == .rtk {
                 self.deviceConnected = true
                 self.satelliteCount = position.satelliteCount
                 self.correctionAgeSeconds = position.correctionAgeSeconds
-                if position.fixQuality == .rtkFix { self.message = "RTK Fix" }
+                if position.fixQuality == .rtkFix {
+                    self.holdGCPUntilFix = false
+                    self.message = "RTK Fix"
+                }
+                _ = self.sky.observe(position.satelliteCount)
+                if self.sky.lost, !self.vidocLine.hasPrefix("再接続中"), !self.vidocLine.contains("上空") {
+                    self.vidocLine += "　\(self.sky.note)"
+                }
                 else if position.fixQuality == .float { self.message = "RTK Float" }
                 else if self.ntripConnected { self.message = "補正受信中（収束待ち）" }
             }
         }
+    }
+
+    private func refreshNTRIPRate() {
+        guard ntripConnected, !ntripHealth.reconnecting else { return }
+        let age = correctionAgeSeconds.map { String(format: " 補正 %.0f秒", $0) } ?? ""
+        let time = ntripHealth.lastAt.map { LinkClock.text($0) } ?? ""
+        ntripLine = "補正受信中 \(ntripRate) B/s\(age)" + ntripHealth.settledSuffix(time: time)
+    }
+
+    private func setScreenAwake(_ awake: Bool) {
+        #if canImport(UIKit)
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = awake
+        }
+        #endif
     }
 
     private func setMain(_ work: @escaping () -> Void) {
@@ -177,19 +245,37 @@ public enum RTKKeychain {
     private static let service = "arts.survey.ntrip"
     public static func save(user: String, password: String) {
         #if canImport(Security)
-        let account = user.isEmpty ? "default" : user
+        write(account: account(user), password: password)
+        write(account: "ntrip", password: password)
+        #endif
+    }
+    public static func load(user: String) -> String {
+        #if canImport(Security)
+        let named = read(account: account(user))
+        return named.isEmpty ? read(account: "ntrip") : named
+        #else
+        return ""
+        #endif
+    }
+
+    private static func account(_ user: String) -> String {
+        user.isEmpty ? "default" : user
+    }
+
+    #if canImport(Security)
+    private static func write(account: String, password: String) {
         let data = Data(password.utf8)
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service,
                                    kSecAttrAccount as String: account]
         SecItemDelete(base as CFDictionary)
-        var add = base; add[kSecValueData as String] = data
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(add as CFDictionary, nil)
-        #endif
     }
-    public static func load(user: String) -> String {
-        #if canImport(Security)
-        let account = user.isEmpty ? "default" : user
+
+    private static func read(account: String) -> String {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: service,
                                     kSecAttrAccount as String: account,
@@ -199,9 +285,7 @@ public enum RTKKeychain {
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data, let text = String(data: data, encoding: .utf8) else { return "" }
         return text
-        #else
-        return ""
-        #endif
     }
+    #endif
 }
 #endif
