@@ -1,5 +1,17 @@
 import Foundation
 
+public struct ProjectSheet: Codable, Equatable, Sendable {
+    public var fileName: String
+    public var kind: String
+    public var byteCount: Int
+
+    public init(fileName: String, kind: String, byteCount: Int) {
+        self.fileName = fileName
+        self.kind = kind
+        self.byteCount = byteCount
+    }
+}
+
 public struct ProjectDrawing: Codable, Equatable, Sendable {
     public var fileName: String
     public var importedAt: Date
@@ -374,6 +386,37 @@ public enum ProjectStore {
         try save(project, at: root)
         try writeZoneTag(for: stored, zone: project.zone, axis: project.axis, projectName: project.name, at: root)
         return stored
+    }
+
+    /// 出すの1段目。図面の原本を現場の下敷きへ置き、最新の1枚を sheet.json に覚える。
+    public static func saveSheet(
+        data: Data,
+        fileName: String,
+        kind: String,
+        projectName: String,
+        at root: URL
+    ) throws -> ProjectSheet {
+        let directory = try projectDirectory(projectName, at: root)
+        let folder = directory.appendingPathComponent("下敷き", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stored = uniqueFileName(preferred: fileName, in: folder)
+        try data.write(to: folder.appendingPathComponent(stored))
+        let record = ProjectSheet(fileName: stored, kind: kind, byteCount: data.count)
+        try write(record, to: folder.appendingPathComponent("sheet.json"))
+        return record
+    }
+
+    public static func loadSheet(projectName: String, at root: URL) -> ProjectSheet? {
+        guard let directory = try? projectDirectory(projectName, at: root) else { return nil }
+        let url = directory.appendingPathComponent("下敷き", isDirectory: true).appendingPathComponent("sheet.json")
+        return try? read(ProjectSheet.self, from: url)
+    }
+
+    public static func sheetData(projectName: String, at root: URL) -> Data? {
+        guard let record = loadSheet(projectName: projectName, at: root),
+              let directory = try? projectDirectory(projectName, at: root) else { return nil }
+        let url = directory.appendingPathComponent("下敷き", isDirectory: true).appendingPathComponent(record.fileName)
+        return try? Data(contentsOf: url)
     }
 
     public static func originalDXF(fileName: String, projectName: String, at root: URL) throws -> Data {

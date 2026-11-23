@@ -45,18 +45,18 @@ struct ExportTabView: View {
                         .font(SurveyType(18, .heavy))
                         .lineLimit(1)
                         .accessibilityIdentifier("purpose-deliver")
-                    stepTile(order: 1, title: "図面を読み込む", systemImage: "doc", page: .drawing, locked: false)
-                    stepTile(order: 2, title: "図面の縮尺設定／2点割り付け", systemImage: "ruler", page: .scale, locked: true)
-                    stepTile(order: 3, title: "GNSSローカライズ", systemImage: "location.north.line", page: .localize, locked: true)
-                    stepTile(order: 4, title: "CAD測設", systemImage: "square.and.pencil", page: .cad, locked: true)
+                    stepTile(order: 1, title: "図面を読み込む", systemImage: "doc", page: .drawing, status: field.projectSheet == nil ? "未着手" : "済", locked: false, later: false)
+                    stepTile(order: 2, title: "図面の縮尺設定／2点割り付け", systemImage: "ruler", page: .scale, status: "未着手", locked: field.projectSheet == nil, later: true)
+                    stepTile(order: 3, title: "GNSSローカライズ", systemImage: "location.north.line", page: .localize, status: "未着手", locked: true, later: true)
+                    stepTile(order: 4, title: "CAD測設", systemImage: "square.and.pencil", page: .cad, status: "未着手", locked: true, later: true)
                     Text("別の入口")
                         .font(SurveyType(18, .heavy))
                         .padding(.top, 8)
-                    stepTile(order: nil, title: "データから点の復元", systemImage: "arrow.uturn.backward", page: .restore, locked: true)
+                    stepTile(order: nil, title: "データから点の復元", systemImage: "arrow.uturn.backward", page: .restore, status: "未着手", locked: true, later: true)
                     Text("測設")
                         .font(SurveyType(18, .heavy))
                         .padding(.top, 8)
-                    stepTile(order: nil, title: "座標を打って測設", systemImage: "scope", page: .coordinate, locked: false)
+                    stepTile(order: nil, title: "座標を打って測設", systemImage: "scope", page: .coordinate, status: "未着手", locked: false, later: false)
                 }
                 .padding(20)
                 .padding(.bottom, listBottomClearance)
@@ -66,6 +66,7 @@ struct ExportTabView: View {
             .navigationTitle("出す")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(deliverPath.isEmpty ? .hidden : .visible, for: .navigationBar)
+            .onAppear { field.refreshProjectSheet() }
             .navigationDestination(for: DeliverPage.self) { page in
                 deliverPage(page)
             }
@@ -73,7 +74,7 @@ struct ExportTabView: View {
         .foregroundStyle(SurveyColor.text)
     }
 
-    private func stepTile(order: Int?, title: String, systemImage: String, page: DeliverPage, locked: Bool) -> some View {
+    private func stepTile(order: Int?, title: String, systemImage: String, page: DeliverPage, status: String, locked: Bool, later: Bool) -> some View {
         Button {
             deliverPath.append(page)
         } label: {
@@ -86,7 +87,7 @@ struct ExportTabView: View {
                     Text(order.map { "\($0) \(title)" } ?? title)
                         .font(SurveyType(18, .heavy))
                         .lineLimit(2)
-                    Text(locked ? "未着手・次の版" : "未着手")
+                    Text(later ? "\(status)・次の版" : status)
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(locked ? SurveyColor.muted : SurveyColor.amber)
                         .lineLimit(1)
@@ -106,7 +107,7 @@ struct ExportTabView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(page.identifier)
-        .accessibilityLabel("\(title)。\(locked ? "未着手。次の版" : "未着手")")
+        .accessibilityLabel("\(title)。\(status)\(later ? "。次の版" : "")")
     }
 
     @ViewBuilder
@@ -118,7 +119,12 @@ struct ExportTabView: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .deliverBack { deliverPath.removeLast() }
         case .drawing:
-            laterPage(title: "図面を読み込む", purpose: "図面のファイルを読み込む。", identifier: "screen-draw")
+            SheetImportPage(field: field) {
+                deliverPath.append(.scale)
+            }
+            .navigationTitle("図面を読み込む")
+            .navigationBarTitleDisplayMode(.inline)
+            .deliverBack { deliverPath.removeLast() }
         case .scale:
             laterPage(title: "図面の縮尺設定／2点割り付け", purpose: "2点の距離差で合否を見る。2cmと1/10000。", identifier: "screen-scale")
         case .localize:

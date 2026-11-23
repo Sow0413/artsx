@@ -79,6 +79,9 @@ final class FieldModel: ObservableObject {
     @Published var enclosingBook = false
     @Published private(set) var exportMessage: String?
     @Published private(set) var exportURL: URL?
+    /// 出すの1段目。現場の下敷きに置いた図面。
+    @Published private(set) var projectSheet: ProjectSheet?
+    @Published private(set) var sheetMessage: String?
     @Published var operation = OperationDesk.load()
     @Published var showsToolOrder = false
     @Published var stature = StatureProfile.load()
@@ -2476,6 +2479,59 @@ final class FieldModel: ObservableObject {
         stakeResult = result
         captureMessage = result
         return true
+    }
+
+    func refreshProjectSheet() {
+        guard let name = drawing.project?.name else {
+            projectSheet = nil
+            return
+        }
+        projectSheet = ProjectStore.loadSheet(projectName: name, at: drawing.projectsRoot)
+    }
+
+    func importProjectSheet(data: Data, fileName: String) {
+        guard let name = drawing.project?.name else {
+            sheetMessage = "先に現場を作ってください。"
+            projectSheet = nil
+            return
+        }
+        let kind = Self.sheetKind(fileName: fileName, data: data)
+        guard kind != "unknown" else {
+            sheetMessage = "PDF、画像、DXF を選んでください。"
+            return
+        }
+        let root = drawing.projectsRoot
+        let dxfCount = kind == "dxf" ? (try? DrawingImport.load(data, fileName: fileName).entities.count) : nil
+        do {
+            let record = try ProjectStore.saveSheet(
+                data: data,
+                fileName: fileName,
+                kind: kind,
+                projectName: name,
+                at: root
+            )
+            projectSheet = record
+            if let dxfCount {
+                sheetMessage = "済。\(record.fileName)。DXF \(dxfCount) 要素。"
+            } else {
+                sheetMessage = "済。\(record.fileName)。\(record.byteCount) バイト。"
+            }
+        } catch {
+            sheetMessage = "図面を置けませんでした。"
+        }
+    }
+
+    func projectSheetData() -> Data? {
+        guard let name = drawing.project?.name else { return nil }
+        return ProjectStore.sheetData(projectName: name, at: drawing.projectsRoot)
+    }
+
+    private static func sheetKind(fileName: String, data: Data) -> String {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        if ext == "pdf" || data.starts(with: Data("%PDF".utf8)) { return "pdf" }
+        if ext == "dxf" { return "dxf" }
+        if ["png", "jpg", "jpeg", "heic", "gif", "webp", "tif", "tiff"].contains(ext) { return "image" }
+        return "unknown"
     }
 
     func exportBasic(_ format: DeliveryFormat) {
