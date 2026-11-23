@@ -39,23 +39,18 @@ struct BasicDesk: View {
             TextField("プロジェクト名", text: $projectName)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("basic-project-name")
-            HStack {
-                Button("作る") {
+            HStack(alignment: .top, spacing: 10) {
+                DeskTile(title: "作る", systemImage: "folder.badge.plus", identifier: "basic-create") {
                     field.drawing.createProject(named: projectName)
                     projectName = ""
                     dismissKeyboard()
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("basic-create")
-                Button("名前を変える") {
+                DeskTile(title: "名前を変える", systemImage: "pencil", identifier: "basic-rename") {
                     field.drawing.renameProject(to: projectName.isEmpty ? rename : projectName)
                     projectName = ""
                     dismissKeyboard()
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("basic-rename")
             }
-            .font(SurveyType(16, .heavy))
             if let message = field.drawing.message {
                 Text(message)
                     .font(SurveyType(14, .semibold))
@@ -81,9 +76,12 @@ struct BasicDesk: View {
                     Text(CoordinateText.accuracyMeters(observation.captured.horizontalAccuracyMeters))
                         .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
-                    Button("台帳へ") { field.acceptStaged(observation) }
-                        .font(SurveyType(16, .heavy))
-                        .accessibilityIdentifier("accept-\(observation.name)")
+                    HStack(alignment: .top, spacing: 10) {
+                        DeskTile(title: "台帳へ入れる", systemImage: "book.closed", identifier: "accept-\(observation.name)") {
+                            field.acceptStaged(observation)
+                        }
+                        Color.clear.frame(maxWidth: .infinity)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -103,15 +101,15 @@ struct BasicDesk: View {
                     Text(line(entry))
                         .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
-                    HStack {
-                        Button("ここへ") { field.aimBasic(entry) }
-                            .accessibilityIdentifier("aim-\(entry.name)")
-                        Button("名前") {
+                    HStack(alignment: .top, spacing: 10) {
+                        DeskTile(title: "ここへ", systemImage: "location.fill", identifier: "aim-\(entry.name)") {
+                            field.aimBasic(entry)
+                        }
+                        DeskTile(title: "名前", systemImage: "textformat") {
                             editing = entry.name
                             pointName = entry.name
                         }
                     }
-                    .font(SurveyType(15, .heavy))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -119,11 +117,13 @@ struct BasicDesk: View {
                 TextField("新しい点名", text: $pointName)
                     .textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("basic-point-name")
-                Button("点名を変える") {
-                    field.renameBasicPoint(from: editing, to: pointName)
-                    editing = ""
+                HStack(alignment: .top, spacing: 10) {
+                    DeskTile(title: "点名を変える", systemImage: "pencil", identifier: "basic-point-rename") {
+                        field.renameBasicPoint(from: editing, to: pointName)
+                        editing = ""
+                    }
+                    Color.clear.frame(maxWidth: .infinity)
                 }
-                .accessibilityIdentifier("basic-point-rename")
             }
 
             Text("データ書き出し")
@@ -132,15 +132,16 @@ struct BasicDesk: View {
             Text("座標一覧と SIMA、読み込み、バックアップ。")
                 .font(SurveyType(14, .semibold))
                 .foregroundStyle(SurveyColor.muted)
-            HStack {
-                Button("座標一覧") { field.exportBasic(.csv) }
-                    .accessibilityIdentifier("basic-export-csv")
-                Button("SIMA") { field.exportBasic(.sima) }
-                    .accessibilityIdentifier("basic-export-sima")
+            HStack(alignment: .top, spacing: 10) {
+                DeskTile(title: "座標一覧", systemImage: "list.bullet.rectangle", identifier: "basic-export-csv") {
+                    field.exportBasic(.csv)
+                }
+                DeskTile(title: "SIMA", systemImage: "doc.text", identifier: "basic-export-sima") {
+                    field.exportBasic(.sima)
+                }
             }
-            .font(SurveyType(16, .heavy))
-            HStack {
-                Button("読み込む") {
+            HStack(alignment: .top, spacing: 10) {
+                DeskTile(title: "読み込む", systemImage: "square.and.arrow.down", identifier: "basic-import") {
                     if Self.uiTest, let url = field.exportURL, let data = try? Data(contentsOf: url) {
                         field.importBasic(data: data, filename: url.lastPathComponent)
                     } else {
@@ -148,10 +149,12 @@ struct BasicDesk: View {
                         presentingFile = true
                     }
                 }
-                    .accessibilityIdentifier("basic-import")
-                Button("バックアップ") { field.makeBasicBackup() }
-                    .accessibilityIdentifier("basic-backup")
-                Button("復元") {
+                DeskTile(title: "バックアップ", systemImage: "archivebox", identifier: "basic-backup") {
+                    field.makeBasicBackup()
+                }
+            }
+            HStack(alignment: .top, spacing: 10) {
+                DeskTile(title: "復元", systemImage: "arrow.counterclockwise", identifier: "basic-restore") {
                     if Self.uiTest, let url = field.exportURL, let data = try? Data(contentsOf: url) {
                         field.restoreBasicBackup(data: data)
                     } else {
@@ -159,19 +162,20 @@ struct BasicDesk: View {
                         presentingFile = true
                     }
                 }
-                    .accessibilityIdentifier("basic-restore")
+                if let url = field.exportURL {
+                    ShareLink(item: url) {
+                        DeskTileLabel(title: "ファイルを保存", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                } else {
+                    Color.clear.frame(maxWidth: .infinity)
+                }
             }
-            .font(SurveyType(16, .heavy))
             if let message = field.exportMessage {
                 Text(message)
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
-            }
-            if let url = field.exportURL {
-                ShareLink(item: url) {
-                    Text("ファイルを保存")
-                        .font(SurveyType(16, .heavy))
-                }
             }
             if let message = field.captureMessage {
                 Text(message)
@@ -179,8 +183,6 @@ struct BasicDesk: View {
                     .foregroundStyle(SurveyColor.amber)
             }
         }
-        .padding(12)
-        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .fileImporter(isPresented: $presentingFile, allowedContentTypes: [.commaSeparatedText, .plainText, .json, .data]) { result in
             let mode = file
             guard case let .success(url) = result else { return }
@@ -253,28 +255,91 @@ struct BasicStakeoutCard: View {
             TextField("楕円体高", text: $height)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("stakeout-height")
-            Button("この座標へ") {
-                field.aimBasic(name: name, latitude: latitude, longitude: longitude, height: height)
+            HStack(alignment: .top, spacing: 10) {
+                DeskTile(title: "この座標へ", systemImage: "scope", identifier: "basic-stakeout") {
+                    field.aimBasic(name: name, latitude: latitude, longitude: longitude, height: height)
+                }
+                DeskTile(title: "測設を残す", systemImage: "mappin.and.ellipse", identifier: "basic-record-stake") {
+                    field.recordStake()
+                }
             }
-            .font(SurveyType(16, .heavy))
-            .accessibilityIdentifier("basic-stakeout")
             if let line = field.basicStakeoutLine {
                 Text(line)
                     .font(SurveyType(16, .heavy))
                     .accessibilityIdentifier("stakeout-guide")
             }
-            Button("測設を残す") { field.recordStake() }
-                .font(SurveyType(16, .heavy))
-                .accessibilityIdentifier("basic-record-stake")
             if let message = field.captureMessage {
                 Text(message)
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.amber)
             }
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// アイコンとラベルの、指で押すタイル。
+struct DeskTileLabel: View {
+    var title: String
+    var systemImage: String
+    var caption: String? = nil
+    var dimmed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(dimmed ? SurveyColor.muted : SurveyColor.blue)
+            Text(title)
+                .font(SurveyType(16, .heavy))
+                .foregroundStyle(dimmed ? SurveyColor.muted : SurveyColor.text)
+                .lineLimit(3)
+                .minimumScaleFactor(0.75)
+                .multilineTextAlignment(.leading)
+            if let caption {
+                Text(caption)
+                    .font(SurveyType(13, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
+        .background(
+            SurveyColor.card.opacity(dimmed ? 0.55 : 1),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(SurveyColor.line.opacity(dimmed ? 0.4 : 1), lineWidth: SurveyColor.stroke)
+        )
+    }
+}
+
+struct DeskTile: View {
+    var title: String
+    var systemImage: String
+    var caption: String? = nil
+    var dimmed = false
+    var identifier: String? = nil
+    var action: () -> Void
+
+    var body: some View {
+        labeled
+            .accessibilityLabel(title)
+    }
+
+    @ViewBuilder
+    private var labeled: some View {
+        let button = Button(action: action) {
+            DeskTileLabel(title: title, systemImage: systemImage, caption: caption, dimmed: dimmed)
+        }
+        .buttonStyle(.plain)
+        .disabled(dimmed)
+        if let identifier {
+            button.accessibilityIdentifier(identifier)
+        } else {
+            button
+        }
     }
 }
 

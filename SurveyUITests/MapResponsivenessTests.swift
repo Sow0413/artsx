@@ -75,6 +75,7 @@ final class MapResponsivenessTests: XCTestCase {
         shot("04-link")
         scrollClear(app.buttons["basic-restore"], in: sheet)
         XCTAssertLessThan(app.buttons["basic-restore"].frame.maxY, app.buttons["tab-measure"].frame.minY, "データタブの下まで届いていない")
+        XCTAssertGreaterThanOrEqual(app.buttons["basic-restore"].frame.height, 88, "復元がタイルの高さでない")
         shot("16-data-bottom")
 
         let project = app.textFields["basic-project-name"]
@@ -82,6 +83,7 @@ final class MapResponsivenessTests: XCTestCase {
         replace(project, with: "SiteA")
         let create = app.buttons["basic-create"]
         scrollClear(create, in: sheet)
+        XCTAssertGreaterThanOrEqual(create.frame.height, 88, "作るがタイルの高さでない")
         create.tap()
         let made = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteA'")).firstMatch
         XCTAssertTrue(made.waitForExistence(timeout: 5), "プロジェクトを作れない")
@@ -138,6 +140,7 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["図面の縮尺設定／2点割り付け"].exists)
         XCTAssertTrue(app.staticTexts["GNSSローカライズ"].exists)
         XCTAssertTrue(app.staticTexts["CAD測設"].exists)
+        XCTAssertTrue(app.staticTexts["次の版"].exists, "未実装の入口に次の版が無い")
         XCTAssertTrue(app.staticTexts["測設"].exists)
         let exportBadge = app.descendants(matching: .any)["accuracy-badge"]
         XCTAssertTrue(exportBadge.waitForExistence(timeout: 5))
@@ -145,8 +148,11 @@ final class MapResponsivenessTests: XCTestCase {
         shot("05-export")
         let exportSheet = app.scrollViews["screen-export"]
         let stake = app.buttons["basic-stakeout"]
-        scrollClear(stake, in: exportSheet)
+        let kept = app.buttons["basic-record-stake"]
+        scrollClear(kept, in: exportSheet)
+        XCTAssertGreaterThanOrEqual(stake.frame.height, 88, "測設がタイルの高さでない")
         shot("17-deliver")
+        shot("17-deliver-bottom")
         stake.tap()
         openTab("tab-map", showing: "stakeout-guide")
         let guide = app.descendants(matching: .any)["stakeout-guide"]

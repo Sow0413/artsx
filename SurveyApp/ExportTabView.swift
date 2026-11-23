@@ -25,22 +25,14 @@ struct ExportTabView: View {
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                guideCard(
-                    title: "データから点の復元",
-                    body: "まだ使えません。次の版で、書き出したデータから点を戻します。"
-                )
-                guideCard(
-                    title: "図面の縮尺設定／2点割り付け",
-                    body: "まだ使えません。次の版で、図面の縮尺と2点の割り付けを置きます。"
-                )
-                guideCard(
-                    title: "GNSSローカライズ",
-                    body: "まだ使えません。次の版で、測った点から現場座標へ合わせます。"
-                )
-                guideCard(
-                    title: "CAD測設",
-                    body: "まだ使えません。次の版で、図面の点へ測設します。"
-                )
+                HStack(alignment: .top, spacing: 10) {
+                    futureTile(title: "データから点の復元", systemImage: "arrow.uturn.backward")
+                    futureTile(title: "図面の縮尺設定／2点割り付け", systemImage: "ruler")
+                }
+                HStack(alignment: .top, spacing: 10) {
+                    futureTile(title: "GNSSローカライズ", systemImage: "location.north.line")
+                    futureTile(title: "CAD測設", systemImage: "square.and.pencil")
+                }
                 BasicStakeoutCard(field: field)
             }
             .padding(20)
@@ -51,18 +43,10 @@ struct ExportTabView: View {
         .foregroundStyle(SurveyColor.text)
     }
 
-    private func guideCard(title: String, body: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(SurveyType(20, .heavy))
-            Text(body)
-                .font(SurveyType(15, .semibold))
-                .foregroundStyle(SurveyColor.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    /// まだ中身の無い入口。押せず、薄く「次の版」と出す。
+    private func futureTile(title: String, systemImage: String) -> some View {
+        DeskTileLabel(title: title, systemImage: systemImage, caption: "次の版", dimmed: true)
+            .accessibilityElement(children: .contain)
     }
 
     private var legacyExport: some View {
