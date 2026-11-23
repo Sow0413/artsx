@@ -130,7 +130,7 @@ public final class NTRIPClient: @unchecked Sendable {
             case .ready:
                 self.sendRequest()
                 self.receiveLoop()
-                self.startGGATimer()
+                self.startRateTimer()
             case .failed:
                 self.failOverOrStop("Casterにつなげません")
             case .cancelled:
@@ -187,6 +187,8 @@ public final class NTRIPClient: @unchecked Sendable {
         chunked = header.chunked
         headerBuffer.removeAll(keepingCapacity: false)
         post("NTRIP 接続 \(config.mountpoint)")
+        sendCurrentGGA()
+        startGGATimer()
         if !header.body.isEmpty { deliver(header.body) }
     }
 
@@ -197,18 +199,25 @@ public final class NTRIPClient: @unchecked Sendable {
         sink?.injectRTCM(payload)
     }
 
+    private func sendCurrentGGA() {
+        guard let gga = currentGGA() else { return }
+        let line = gga.hasSuffix("\r\n") ? gga : gga + "\r\n"
+        connection?.send(content: Data(line.utf8), completion: .contentProcessed { _ in })
+    }
+
     private func startGGATimer() {
         ggaTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + NTRIPExchange.ggaIntervalSeconds, repeating: NTRIPExchange.ggaIntervalSeconds)
         timer.setEventHandler { [weak self] in
-            guard let self, let gga = self.currentGGA() else { return }
-            let line = gga.hasSuffix("\r\n") ? gga : gga + "\r\n"
-            self.connection?.send(content: Data(line.utf8), completion: .contentProcessed { _ in })
+            guard let self, self.headerDone else { return }
+            self.sendCurrentGGA()
         }
         timer.resume()
         ggaTimer = timer
+    }
 
+    private func startRateTimer() {
         rateTimer?.cancel()
         let rate = DispatchSource.makeTimerSource(queue: queue)
         rate.schedule(deadline: .now() + 1, repeating: 1)
@@ -234,7 +243,7 @@ public final class NTRIPClient: @unchecked Sendable {
 
     private func failOverOrStop(_ message: String) {
         guard running else { return }
-        let retry = !triedBoth && (message.contains("503") || message.contains("切断"))
+        let retry = !triedBoth && (message.contains("別の機器で接続中") || message.contains("切断"))
         connection?.cancel()
         connection = nil
         ggaTimer?.cancel(); ggaTimer = nil

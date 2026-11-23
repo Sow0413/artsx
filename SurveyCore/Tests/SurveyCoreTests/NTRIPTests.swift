@@ -71,7 +71,12 @@ final class NTRIPTests: XCTestCase {
 
         let noGGA = NTRIPExchange.request(host: "d-gnss.jp", mount: "RRSGD2024", user: "docomo-id", password: "secret-pass", dialect: .v1, gga: nil)
         XCTAssertEqual(NTRIPExchange.parseHeader(caster.respond(to: noGGA.bytes))?.reply, .unavailable)
-        XCTAssertEqual(NTRIPExchange.parseHeader(caster.respond(to: noGGA.bytes))?.reply.message, "Casterが応答できません（503）。混雑、位置情報（GGA）が届いていない、または同じIDが既に接続中です")
+        XCTAssertEqual(
+            NTRIPExchange.parseHeader(caster.respond(to: noGGA.bytes))?.reply.message,
+            "同じIDが別の機器で接続中か、一時的に混雑しています。少し待って再接続してください"
+        )
+        XCTAssertLessThanOrEqual(NTRIPExchange.ggaIntervalSeconds, 5)
+        XCTAssertEqual(NTRIPExchange.ggaIntervalSeconds, 2)
 
         let badAuth = NTRIPExchange.request(host: "d-gnss.jp", mount: "RRSGD2024", user: "docomo-id", password: "wrong", dialect: .v2, gga: gga)
         XCTAssertEqual(NTRIPExchange.parseHeader(caster.respond(to: badAuth.bytes))?.reply, .unauthorized)
@@ -110,9 +115,16 @@ final class NTRIPTests: XCTestCase {
 
         XCTAssertFalse(ViDocDiscovery.matches(localName: "AirPods"))
         XCTAssertTrue(ViDocDiscovery.matches(localName: "viGram-1842"))
+        XCTAssertTrue(ViDocDiscovery.matches(localName: "viDoc VIDAFGH"))
         XCTAssertTrue(ViDocDiscovery.matches(localName: "", serviceDataUUIDs: ["FFE1"]))
-        XCTAssertTrue(ViDocDiscovery.matches(localName: "", serviceUUIDs: ["0000FFF0-0000-1000-8000-00805F9B34FB"]))
-        XCTAssertFalse(ViDocDiscovery.matches(localName: "ViDoc", serviceUUIDs: [], serviceDataUUIDs: []) == false)
-        XCTAssertTrue(ViDocDiscovery.matches(localName: "ViDoc"))
+        XCTAssertTrue(ViDocDiscovery.matches(localName: "", serviceUUIDs: ["FFE1"]))
+        XCTAssertTrue(ViDocDiscovery.matches(localName: "", manufacturerData: Data([0x39, 0x06, 0x01])))
+        XCTAssertFalse(ViDocDiscovery.matches(localName: "", manufacturerData: Data([0x4C, 0x00])))
+        XCTAssertEqual(Array(ViDocLink.nmeaStartCommand), [0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+        let rtcm = Data(repeating: 0xD3, count: 50)
+        let chunks = ViDocLink.rtcmChunks(rtcm, maximumWriteLength: 20)
+        XCTAssertEqual(chunks.count, 3)
+        XCTAssertEqual(chunks.map(\.count), [20, 20, 10])
+        XCTAssertEqual(chunks.flatMap { Array($0) }, Array(rtcm))
     }
 }

@@ -20,7 +20,7 @@ public enum NTRIPReply: Equatable, Sendable {
         case .sourcetable: return "マウント一覧"
         case .unauthorized: return "IDまたはパスワードが違います（401）"
         case .missingMount: return "マウントポイントがありません（404）"
-        case .unavailable: return "Casterが応答できません（503）。混雑、位置情報（GGA）が届いていない、または同じIDが既に接続中です"
+        case .unavailable: return "同じIDが別の機器で接続中か、一時的に混雑しています。少し待って再接続してください"
         case .other(let code): return "NTRIP が拒否しました（\(code)）"
         }
     }
@@ -53,7 +53,8 @@ public struct NTRIPHeader: Equatable, Sendable {
 
 public enum NTRIPExchange {
     public static let userAgent = "NTRIP artsx/1.1"
-    public static let ggaIntervalSeconds: TimeInterval = 10
+    /// 応答のあとに送る間隔。5秒以下。既定は2秒。
+    public static let ggaIntervalSeconds: TimeInterval = 2
 
     public static func request(
         host: String,
@@ -215,22 +216,47 @@ public struct NTRIPChunkDecoder: Sendable {
     }
 }
 
-/// ViDoc の広告を拾うか。GATT は FFF0 でも、広告の Service Data は FFE1 のことがある。
+/// `<STX>nmea<ETX>` と、FFF2 へ書く RTCM の切り方。
+public enum ViDocLink {
+    public static let nmeaStartCommand = Data([0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+
+    public static func rtcmChunks(_ data: Data, maximumWriteLength: Int) -> [Data] {
+        let size = max(20, maximumWriteLength)
+        guard !data.isEmpty else { return [] }
+        var chunks: [Data] = []
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + size, data.count)
+            chunks.append(data.subdata(in: offset..<end))
+            offset = end
+        }
+        return chunks
+    }
+}
+
+/// ViDoc の広告を拾うか。iOS は localName を落とすことが多い。GATT は FFF0、広告の Service Data は FFE1、製造者は Minew 0x0639。
 public enum ViDocDiscovery {
     public static let serviceUUID = "FFF0"
     public static let advertisementServiceDataUUID = "FFE1"
+    public static let minewCompanyID: UInt16 = 0x0639
 
     public static func matches(
         localName: String,
         serviceUUIDs: [String] = [],
         overflowServiceUUIDs: [String] = [],
-        serviceDataUUIDs: [String] = []
+        serviceDataUUIDs: [String] = [],
+        manufacturerData: Data? = nil
     ) -> Bool {
-        let known = Set([serviceUUID, advertisementServiceDataUUID])
+        if companyID(manufacturerData) == minewCompanyID { return true }
         let advertised = (serviceUUIDs + overflowServiceUUIDs + serviceDataUUIDs).map(normalize)
-        if advertised.contains(where: known.contains) { return true }
+        if advertised.contains(advertisementServiceDataUUID) || advertised.contains(serviceUUID) { return true }
         let name = localName.lowercased()
-        return ["vidoc", "vida", "vigram", "vi-gram"].contains { name.contains($0) }
+        return ["vigram", "vidoc", "vida"].contains { name.contains($0) }
+    }
+
+    public static func companyID(_ data: Data?) -> UInt16? {
+        guard let data, data.count >= 2 else { return nil }
+        return UInt16(data[data.startIndex]) | (UInt16(data[data.startIndex + 1]) << 8)
     }
 
     private static func normalize(_ uuid: String) -> String {

@@ -28,7 +28,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private static let serviceUUID = CBUUID(string: "FFF0")
     private static let notifyUUID  = CBUUID(string: "FFF1")
     private static let writeUUID   = CBUUID(string: "FFF2")
-    private static let startCmd: [UInt8] = [0x02, 0x6e, 0x6d, 0x65, 0x61, 0x03]   // <STX>nmea<ETX>
+    private var notifyChar: CBCharacteristic?
+    private var nmeaStartSent = false
 
     private let queue = DispatchQueue(label: "arts.vidoc.ble")
     private var central: CBCentralManager?
@@ -81,12 +82,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public func injectRTCM(_ data: Data) {
         queue.async {
             guard let p = self.peripheral, let ch = self.writeChar, !data.isEmpty else { return }
-            let mtu = max(20, p.maximumWriteValueLength(for: .withoutResponse))
-            var offset = 0
-            while offset < data.count {
-                let end = min(offset + mtu, data.count)
-                p.writeValue(data.subdata(in: offset..<end), for: ch, type: .withoutResponse)
-                offset = end
+            let chunks = ViDocLink.rtcmChunks(data, maximumWriteLength: p.maximumWriteValueLength(for: .withoutResponse))
+            for chunk in chunks {
+                p.writeValue(chunk, for: ch, type: .withoutResponse)
             }
             self.lastRTCMAt = Date()
         }
@@ -125,7 +123,14 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         let services = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.map(\.uuidString) ?? []
         let overflow = (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID])?.map(\.uuidString) ?? []
         let serviceData = (advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data])?.keys.map(\.uuidString) ?? []
-        guard ViDocDiscovery.matches(localName: name, serviceUUIDs: services, overflowServiceUUIDs: overflow, serviceDataUUIDs: serviceData) else { return }
+        let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+        guard ViDocDiscovery.matches(
+            localName: name,
+            serviceUUIDs: services,
+            overflowServiceUUIDs: overflow,
+            serviceDataUUIDs: serviceData,
+            manufacturerData: manufacturer
+        ) else { return }
         central.stopScan()
         deviceName = name.isEmpty ? "ViDoc" : name
         report("ViDoc を見つけました（\(deviceName)）")
@@ -147,6 +152,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         writeChar = nil
+        notifyChar = nil
+        nmeaStartSent = false
         stage = .iphone
         continuation.yield(PositionReading(position: nil, availability: .waiting))
         if running { startScan() }   // 前面にいるあいだはつなぎ直す（README のとおり）
@@ -160,13 +167,29 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        var notify: CBCharacteristic?
         for c in service.characteristics ?? [] {
-            if c.uuid == Self.notifyUUID { peripheral.setNotifyValue(true, for: c) }
-            if c.uuid == Self.writeUUID  { writeChar = c }
+            if c.uuid == Self.notifyUUID { notify = c }
+            if c.uuid == Self.writeUUID { writeChar = c }
         }
-        if let ch = writeChar {   // 開始コマンドで NMEA を出させる
-            peripheral.writeValue(Data(Self.startCmd), for: ch, type: .withoutResponse)
+        notifyChar = notify
+        if let notify {
+            peripheral.setNotifyValue(true, for: notify)
         }
+        sendNMEAStart(peripheral)
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard characteristic.uuid == Self.notifyUUID, error == nil else { return }
+        notifyChar = characteristic
+        sendNMEAStart(peripheral)
+    }
+
+    /// FFF1 の notify が乗ってから、FFF2 へ開始コマンドを書く。
+    private func sendNMEAStart(_ peripheral: CBPeripheral) {
+        guard !nmeaStartSent, let notify = notifyChar, notify.isNotifying, let write = writeChar else { return }
+        nmeaStartSent = true
+        peripheral.writeValue(ViDocLink.nmeaStartCommand, for: write, type: .withoutResponse)
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
