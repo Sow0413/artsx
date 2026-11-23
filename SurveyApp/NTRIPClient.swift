@@ -180,7 +180,7 @@ public final class NTRIPClient: @unchecked Sendable {
             return
         }
         guard header.reply == .stream else {
-            failOverOrStop(header.reply.message)
+            failOverOrStop(header.reply.statusLine(mount: config.mountpoint))
             return
         }
         headerDone = true

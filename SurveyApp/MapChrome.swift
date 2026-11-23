@@ -4,46 +4,67 @@ import SurveyCore
 struct AccuracyBadgeView: View {
     let badge: AccuracyBadgeModel
     var stage: PositionStage?
+    var compact = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Circle()
                 .fill(badge.tone.mark)
-                .frame(width: 16, height: 16)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(badge.solutionLabel)
-                        .font(SurveyType(15, .heavy))
-                        .foregroundStyle(chipInk)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(badge.tone.mark, in: Capsule())
-                    if let stage {
-                        Text("段階\(stage.rawValue)")
-                            .font(SurveyType(13, .heavy))
-                            .foregroundStyle(SurveyColor.muted)
-                    }
-                }
-                Text(badge.text)
+                .frame(width: compact ? 14 : 16, height: compact ? 14 : 16)
+            if compact {
+                Text(badge.solutionLabel)
                     .font(SurveyType(20, .heavy))
-                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(chipInk)
                     .lineLimit(1)
-                if !badge.caution.isEmpty {
-                    Text(badge.caution)
-                        .font(SurveyType(13, .semibold))
-                        .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(badge.tone.mark, in: Capsule())
+                if let stage {
+                    Text("段階\(stage.rawValue)")
+                        .font(SurveyType(18, .heavy))
+                        .foregroundStyle(SurveyColor.muted)
+                        .lineLimit(1)
                 }
-                if !badge.guidance.isEmpty {
-                    Text(badge.guidance)
-                        .font(SurveyType(14, .heavy))
-                        .fixedSize(horizontal: false, vertical: true)
+                Text(compactMagnitude)
+                    .font(SurveyType(22, .heavy))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(badge.solutionLabel)
+                            .font(SurveyType(15, .heavy))
+                            .foregroundStyle(chipInk)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(badge.tone.mark, in: Capsule())
+                        if let stage {
+                            Text("段階\(stage.rawValue)")
+                                .font(SurveyType(13, .heavy))
+                                .foregroundStyle(SurveyColor.muted)
+                        }
+                    }
+                    Text(badge.text)
+                        .font(SurveyType(20, .heavy))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                    if !badge.caution.isEmpty {
+                        Text(badge.caution)
+                            .font(SurveyType(13, .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if !badge.guidance.isEmpty {
+                        Text(badge.guidance)
+                            .font(SurveyType(14, .heavy))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: OutdoorContrast.primaryPoints, alignment: .leading)
+        .padding(.horizontal, compact ? 12 : 14)
+        .padding(.vertical, compact ? 6 : 12)
+        .frame(maxWidth: .infinity, minHeight: compact ? 0 : OutdoorContrast.primaryPoints, alignment: .leading)
         .foregroundStyle(badge.tone.tint)
         .background(badge.tone.badgeBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -53,6 +74,15 @@ struct AccuracyBadgeView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("accuracy-badge")
         .accessibilityLabel(badge.accessibilityText)
+    }
+
+    /// 「FLOAT　約12cm」の精度だけを1行に残す。
+    private var compactMagnitude: String {
+        guard let split = badge.text.split(separator: "　", maxSplits: 1, omittingEmptySubsequences: false).dropFirst().first else {
+            return badge.text
+        }
+        let magnitude = String(split)
+        return magnitude.isEmpty ? badge.text : magnitude
     }
 
     /// 黄地は黒文字。赤と緑の原色地は白文字。
@@ -124,24 +154,21 @@ struct LocationPanel: View {
     var levelTilt: Double? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text("現在地")
-                .font(SurveyType(15, .heavy))
+                .font(SurveyType(13, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             if let position = reading.position, position.isPlottable {
-                Text(CoordinateText.latitude(position.latitudeDegrees))
-                    .font(SurveyType(32, .heavy, mono: true))
-                    .minimumScaleFactor(0.6)
+                Text("\(CoordinateText.latitude(position.latitudeDegrees))  \(CoordinateText.longitude(position.longitudeDegrees))")
+                    .font(SurveyType(20, .heavy, mono: true))
+                    .minimumScaleFactor(0.5)
                     .lineLimit(1)
-                Text(CoordinateText.longitude(position.longitudeDegrees))
-                    .font(SurveyType(32, .heavy, mono: true))
-                    .minimumScaleFactor(0.6)
-                    .lineLimit(1)
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
                     Text(accuracyText(position))
                 }
-                .font(SurveyType(18, .bold))
+                .font(SurveyType(16, .bold))
+                .lineLimit(1)
                 if let statureNotice {
                     Button(action: { onStature?() }) {
                         Text(statureNotice)
@@ -156,15 +183,16 @@ struct LocationPanel: View {
                 }
                 if let note {
                     Text(note)
-                        .font(SurveyType(15, .heavy))
+                        .font(SurveyType(13, .heavy))
                         .foregroundStyle(SurveyColor.blue)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                 }
-                Text(CoordinateText.previewNote)
-                    .font(SurveyType(14, .bold))
+                Text("\(CoordinateText.previewNote)　\(CoordinateText.storageNote)")
+                    .font(SurveyType(12, .medium))
                     .foregroundStyle(SurveyColor.muted)
-                Text(CoordinateText.storageNote)
-                    .font(SurveyType(13, .medium))
-                    .foregroundStyle(SurveyColor.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 if let warning = warningText {
                     Text(warning)
                         .font(SurveyType(15, .bold))
@@ -183,7 +211,8 @@ struct LocationPanel: View {
             }
         }
         .foregroundStyle(SurveyColor.text)
-        .padding(16)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
@@ -191,6 +220,7 @@ struct LocationPanel: View {
                 .stroke(SurveyColor.line, lineWidth: SurveyColor.stroke)
         )
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("location-panel")
     }
 
     private func accuracyText(_ position: GeodeticPosition) -> String {

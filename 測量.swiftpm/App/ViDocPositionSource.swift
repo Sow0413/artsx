@@ -10,7 +10,7 @@ import CoreBluetooth
 //   Service 0xFFF0
 //     0xFFF1  Notify  … ViDoc の出力。待機中は <STX>df Ver_0.0.4、開始後は NMEA。
 //     0xFFF2  Write   … 入力。開始コマンドと、RTK 補正(RTCM3)を流す口。
-//   接続後に FFF2 へ <STX>nmea<ETX>（0x02 6e 6d 65 61 0x03）を書くと NMEA 配信が始まる。
+//   接続のたび FFF2 へ <STX>start<ETX>、FFF1 の電池行（または 2 秒）のあと <STX>nmea<ETX>。
 //   NTRIP(ドコモ d-gnss.jp)の RTCM3 を FFF2 に流すと quality が 2(DGPS)→4(RTK Fix) に上がる。
 //
 // PositionSource に準拠するので、iPhone / CLAS と同じ読み方で画面に入る（README の設計どおり）。
@@ -29,8 +29,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private static let notifyUUID  = CBUUID(string: "FFF1")
     private static let writeUUID   = CBUUID(string: "FFF2")
     private var notifyChar: CBCharacteristic?
-    private var nmeaStartSent = false
-    private var rtcmBuffer = RTCMOutboundBuffer()
+    private var boot = ViDocBoot()
+    private var bootGeneration = 0
+    private var outbound = ViDocOutbound()
     private var rtcmSchedule = RTCMWriteSchedule()
     private var rtcmDrainScheduled = false
 
@@ -84,7 +85,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     /// NTRIPClient から RTCM3 を注入する。180 バイト以下に切り、12 ms 以上あけて FFF2 へ書く。
     public func injectRTCM(_ data: Data) {
         queue.async {
-            self.rtcmBuffer.append(data)
+            self.outbound.corrections.append(data)
             self.drainRTCM()
         }
     }
@@ -102,10 +103,11 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             scheduleRTCMDrain(after: max(0, rtcmSchedule.nextAllowed - now))
             return
         }
-        guard let chunk = rtcmBuffer.nextChunk(maximumBytes: size) else { return }
+        let writingCommand = !outbound.commands.isEmpty
+        guard let chunk = outbound.nextWrite(maximumChunkBytes: size) else { return }
         peripheral.writeValue(chunk, for: writeChar, type: .withoutResponse)
         rtcmSchedule = rtcmSchedule.advanced(afterSendingAt: now)
-        lastRTCMAt = Date()
+        if !writingCommand { lastRTCMAt = Date() }
         scheduleRTCMDrain(after: Double(ViDocLink.rtcmChunkIntervalMs) / 1_000)
     }
 
@@ -182,7 +184,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         writeChar = nil
         notifyChar = nil
-        nmeaStartSent = false
+        boot = ViDocBoot()
+        bootGeneration += 1
+        outbound = ViDocOutbound()
         stage = .iphone
         continuation.yield(PositionReading(position: nil, availability: .waiting))
         if running { startScan() }   // 前面にいるあいだはつなぎ直す（README のとおり）
@@ -205,34 +209,50 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         if let notify {
             peripheral.setNotifyValue(true, for: notify)
         }
-        sendNMEAStart(peripheral)
+        beginBoot()
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.notifyUUID, error == nil else { return }
         notifyChar = characteristic
-        sendNMEAStart(peripheral)
+        beginBoot()
     }
 
-    /// FFF1 の notify が乗ってから、FFF2 へ開始コマンドを書く。
-    private func sendNMEAStart(_ peripheral: CBPeripheral) {
-        guard !nmeaStartSent, let notify = notifyChar, notify.isNotifying, let write = writeChar else { return }
-        nmeaStartSent = true
-        peripheral.writeValue(ViDocLink.nmeaStartCommand, for: write, type: .withoutResponse)
+    /// 再接続のたびに start を1回書き、準備完了か 2 秒で nmea を書く。どちらも RTCM の間の1書き込み。
+    private func beginBoot() {
+        guard case .needStart = boot.phase else { return }
+        guard let notify = notifyChar, notify.isNotifying, writeChar != nil else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        outbound.enqueueCommand(boot.onConnect(at: now))
+        bootGeneration += 1
+        let generation = bootGeneration
+        queue.asyncAfter(deadline: .now() + ViDocLink.readyTimeoutSeconds) { [weak self] in
+            guard let self, self.bootGeneration == generation else { return }
+            let now = Date().timeIntervalSinceReferenceDate
+            if let command = self.boot.onTimeout(at: now) {
+                self.outbound.enqueueCommand(command)
+                self.drainRTCM()
+            }
+        }
+        drainRTCM()
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.notifyUUID, let data = characteristic.value else { return }
         nmeaBuffer.append(data)
-        while let nl = nmeaBuffer.firstIndex(of: 0x0a) {   // 改行で 1 文に切る
+        while let nl = nmeaBuffer.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
             let lineData = nmeaBuffer.subdata(in: nmeaBuffer.startIndex..<nl)
             nmeaBuffer.removeSubrange(nmeaBuffer.startIndex...nl)
-            if let line = String(data: lineData, encoding: .ascii)?
-                .trimmingCharacters(in: .whitespacesAndNewlines), line.hasPrefix("$") {
-                handleNMEA(line)
+            guard let line = String(data: lineData, encoding: .ascii)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else { continue }
+            let now = Date().timeIntervalSinceReferenceDate
+            if let command = boot.onNotify(line, at: now) {
+                outbound.enqueueCommand(command)
+                drainRTCM()
             }
+            if line.hasPrefix("$") { handleNMEA(line) }
         }
-        if nmeaBuffer.count > 4096 { nmeaBuffer.removeAll(keepingCapacity: true) }  // 暴走防止
+        if nmeaBuffer.count > 4096 { nmeaBuffer.removeAll(keepingCapacity: true) }
     }
 
     private func handleNMEA(_ line: String) {

@@ -1,9 +1,17 @@
 import SwiftUI
 import SurveyCore
 
+private struct MapChromeHeight: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct MapTabView: View {
     @ObservedObject var field: FieldModel
     @ObservedObject var appearance: SurveyAppearance
+    @State private var chromeHeight: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -174,7 +182,7 @@ struct MapTabView: View {
                         .padding(.top, 6)
                         .accessibilityIdentifier("stakeout-guide")
                 }
-                if SurveyBuild.basicMode, field.tab == .map, let message = field.captureMessage {
+                if SurveyBuild.basicMode, field.tab == .map, let message = mapCaptureMessage {
                     Text(message)
                         .font(SurveyType(15, .heavy))
                         .foregroundStyle(SurveyColor.amber)
@@ -191,9 +199,15 @@ struct MapTabView: View {
                 pinnedMapChrome
                 ScrollView {
                     scrollingChrome
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(key: MapChromeHeight.self, value: proxy.size.height)
+                            }
+                        }
                 }
+                .onPreferenceChange(MapChromeHeight.self) { chromeHeight = $0 }
                 .layoutPriority(1)
-                .frame(minHeight: 220, maxHeight: max(240, geo.size.height * 0.46))
+                .frame(height: mapChromeBand(in: geo.size.height))
                 .accessibilityIdentifier("map-controls")
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
@@ -226,6 +240,23 @@ struct MapTabView: View {
         .sheet(isPresented: $field.showsDisaster) {
             DisasterSheet(field: field)
         }
+    }
+
+    /// FIX に戻ったあとの「記録を止めました」は出さない。
+    private var mapCaptureMessage: String? {
+        let quality = field.reading.position?.fixQuality ?? .none
+        return StageDropNotice.resolve(
+            current: field.captureMessage,
+            stage: field.stageTransition.stage,
+            quality: quality
+        )
+    }
+
+    /// カードの高さだけ下に残し、空いた分は地図にする。長い列は画面の 46% でスクロールする。
+    private func mapChromeBand(in total: CGFloat) -> CGFloat {
+        let cap = max(160, total * 0.46)
+        let content = chromeHeight > 1 ? chromeHeight : 120
+        return min(content, cap)
     }
 
     private var reachCaption: String {

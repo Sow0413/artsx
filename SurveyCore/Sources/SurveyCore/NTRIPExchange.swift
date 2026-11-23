@@ -24,6 +24,13 @@ public enum NTRIPReply: Equatable, Sendable {
         case .other(let code): return "NTRIP が拒否しました（\(code)）"
         }
     }
+
+    /// 404 の状態行には、実際に送ったマウント名を付ける。
+    public func statusLine(mount: String) -> String {
+        let name = mount.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .missingMount = self, !name.isEmpty else { return message }
+        return "\(message) \(name)"
+    }
 }
 
 public struct NTRIPWire: Equatable, Sendable {
@@ -216,9 +223,33 @@ public struct NTRIPChunkDecoder: Sendable {
     }
 }
 
-/// `<STX>nmea<ETX>` と、FFF2 へ書く RTCM の切り方。
+/// FFF2 へ書く開始列と、RTCM の切り方。
+/// 電源投入と再接続のたびに `start` を書き、FFF1 の準備完了を待ってから `nmea` を書く。
 public enum ViDocLink {
-    public static let nmeaStartCommand = Data([0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+    /// `<STX>start<ETX>`。配信中に再送しても害はない。
+    public static let startCommand = Data([0x02, 0x73, 0x74, 0x61, 0x72, 0x74, 0x03])
+    /// `<STX>nmea<ETX>`。準備完了のあと、または 2 秒待っても来なければ書く。
+    public static let nmeaCommand = Data([0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+    public static let nmeaStartCommand = nmeaCommand
+    /// FFF1 の電池行または ready を待つ上限。
+    public static let readyTimeoutSeconds: TimeInterval = 2
+
+    /// 待機文は電池残量から始まる。ready / battery / `87%` を準備完了とみなす。NMEA と版数行は違う。
+    public static func isReadyText(_ text: String) -> Bool {
+        let line = text
+            .replacingOccurrences(of: "\u{0002}", with: "")
+            .replacingOccurrences(of: "\u{0003}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if line.isEmpty || line.hasPrefix("$") { return false }
+        let lower = line.lowercased()
+        if lower.contains("ready") || lower.contains("battery") || lower.contains("batt") || line.contains("電池") {
+            return true
+        }
+        let digits = lower.prefix { $0.isNumber }
+        guard !digits.isEmpty else { return false }
+        let rest = lower.dropFirst(digits.count).drop { $0 == " " }
+        return rest.first == "%"
+    }
     /// 244 バイト連続書きは RTCM の 6 割以上を落とす。180 を上限にする。
     public static let maxChunkBytes = 180
     public static let minimumChunkBytes = 20
@@ -240,6 +271,58 @@ public enum ViDocLink {
             offset = end
         }
         return chunks
+    }
+}
+
+/// 接続のたびに start → 準備完了（無ければ 2 秒）→ nmea。
+public struct ViDocBoot: Equatable, Sendable {
+    public enum Phase: Equatable, Sendable {
+        case needStart
+        case waitingForReady(since: TimeInterval)
+        case streaming
+    }
+
+    public private(set) var phase: Phase = .needStart
+    public var timeout: TimeInterval
+
+    public init(timeout: TimeInterval = ViDocLink.readyTimeoutSeconds) {
+        self.timeout = timeout
+    }
+
+    public mutating func onConnect(at now: TimeInterval) -> Data {
+        phase = .waitingForReady(since: now)
+        return ViDocLink.startCommand
+    }
+
+    public mutating func onNotify(_ text: String, at now: TimeInterval) -> Data? {
+        guard case .waitingForReady = phase, ViDocLink.isReadyText(text) else { return nil }
+        phase = .streaming
+        return ViDocLink.nmeaCommand
+    }
+
+    public mutating func onTimeout(at now: TimeInterval) -> Data? {
+        guard case .waitingForReady(let since) = phase else { return nil }
+        guard now - since + 1e-9 >= timeout else { return nil }
+        phase = .streaming
+        return ViDocLink.nmeaCommand
+    }
+}
+
+/// 機器コマンドは1回の書き込みのまま、RTCM チャンクのあいだに出す。
+public struct ViDocOutbound: Sendable {
+    public private(set) var commands: [Data] = []
+    public var corrections = RTCMOutboundBuffer()
+
+    public init() {}
+
+    public mutating func enqueueCommand(_ command: Data) {
+        guard !command.isEmpty else { return }
+        commands.append(command)
+    }
+
+    public mutating func nextWrite(maximumChunkBytes: Int) -> Data? {
+        if !commands.isEmpty { return commands.removeFirst() }
+        return corrections.nextChunk(maximumBytes: maximumChunkBytes)
     }
 }
 

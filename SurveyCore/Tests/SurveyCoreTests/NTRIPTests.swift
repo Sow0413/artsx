@@ -121,6 +121,8 @@ final class NTRIPTests: XCTestCase {
         XCTAssertTrue(ViDocDiscovery.matches(localName: "", manufacturerData: Data([0x39, 0x06, 0x01])))
         XCTAssertFalse(ViDocDiscovery.matches(localName: "", manufacturerData: Data([0x4C, 0x00])))
         XCTAssertEqual(Array(ViDocLink.nmeaStartCommand), [0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+        XCTAssertEqual(NTRIPReply.missingMount.statusLine(mount: "docomo"), "マウントポイントがありません（404） docomo")
+        XCTAssertEqual(NTRIPReply.missingMount.message, "マウントポイントがありません（404）")
         let rtcm = Data(repeating: 0xAB, count: 50)
         let chunks = ViDocLink.rtcmChunks(rtcm, maximumWriteLength: 20)
         XCTAssertEqual(chunks.map(\.count), [20, 20, 10])
@@ -170,5 +172,46 @@ final class NTRIPTests: XCTestCase {
         }
         XCTAssertEqual(rebuilt.count, kept * frame.count)
         XCTAssertEqual(rebuilt[3], UInt8(dropped & 0xFF))
+    }
+
+    func testViDocBootSendsStartThenNMEAOrTimesOut() {
+        XCTAssertEqual(Array(ViDocLink.startCommand), [0x02, 0x73, 0x74, 0x61, 0x72, 0x74, 0x03])
+        XCTAssertEqual(Array(ViDocLink.nmeaCommand), [0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+        XCTAssertEqual(ViDocLink.readyTimeoutSeconds, 2, accuracy: 1e-9)
+        XCTAssertFalse(ViDocLink.isReadyText("\u{02}df Ver_0.0.4\u{03}"))
+        XCTAssertFalse(ViDocLink.isReadyText("$GNGGA,092750.000,3541.0000,N"))
+        XCTAssertTrue(ViDocLink.isReadyText("87%"))
+        XCTAssertTrue(ViDocLink.isReadyText("87 % standby"))
+        XCTAssertTrue(ViDocLink.isReadyText("Battery 80"))
+        XCTAssertTrue(ViDocLink.isReadyText("ready"))
+
+        var boot = ViDocBoot(timeout: 2)
+        XCTAssertEqual(boot.onConnect(at: 10), ViDocLink.startCommand)
+        XCTAssertNil(boot.onNotify("\u{02}df Ver_0.0.4\u{03}", at: 10.4))
+        XCTAssertNil(boot.onTimeout(at: 11.9))
+        XCTAssertEqual(boot.onNotify("87% standby", at: 11.2), ViDocLink.nmeaCommand)
+        XCTAssertEqual(boot.phase, .streaming)
+        XCTAssertNil(boot.onTimeout(at: 20))
+
+        var fallback = ViDocBoot(timeout: 2)
+        XCTAssertEqual(fallback.onConnect(at: 0), ViDocLink.startCommand)
+        XCTAssertNil(fallback.onNotify("$GNGGA,1", at: 1))
+        XCTAssertNil(fallback.onTimeout(at: 1.9))
+        XCTAssertEqual(fallback.onTimeout(at: 2), ViDocLink.nmeaCommand)
+        XCTAssertNil(fallback.onNotify("90%", at: 2.1))
+
+        var outbound = ViDocOutbound()
+        outbound.enqueueCommand(ViDocLink.startCommand)
+        outbound.enqueueCommand(ViDocLink.nmeaCommand)
+        let frame = Data([0xD3, 0x00, 0x04, 1, 2, 3, 4, 9, 9, 9])
+        outbound.corrections.append(frame)
+        let start = outbound.nextWrite(maximumChunkBytes: 180)
+        XCTAssertEqual(start, ViDocLink.startCommand)
+        XCTAssertEqual(start?.count, ViDocLink.startCommand.count)
+        let nmea = outbound.nextWrite(maximumChunkBytes: 180)
+        XCTAssertEqual(nmea, ViDocLink.nmeaCommand)
+        XCTAssertEqual(nmea?.count, ViDocLink.nmeaCommand.count)
+        XCTAssertNotEqual(start, nmea)
+        XCTAssertEqual(outbound.nextWrite(maximumChunkBytes: 180), frame)
     }
 }

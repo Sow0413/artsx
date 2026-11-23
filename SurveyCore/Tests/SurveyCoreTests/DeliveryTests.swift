@@ -39,6 +39,18 @@ final class DeliveryTests: XCTestCase {
         XCTAssertTrue(StageGate.allowsRecording(workID: "boundary", stage: .rtk))
         XCTAssertTrue(StageGate.allowsRecording(workID: "preview", stage: .iphone))
 
+        let banner = StageDropNotice.recordingStopped
+        XCTAssertEqual(StageDropNotice.resolve(current: nil, stage: .clas, quality: .float), nil)
+        XCTAssertTrue(StageDropNotice.downgradeIsCurrent(stage: .clas, quality: .float))
+        XCTAssertEqual(StageDropNotice.resolve(current: banner, stage: .clas, quality: .float), banner)
+        XCTAssertEqual(StageDropNotice.resolve(current: banner, stage: .rtk, quality: .float), banner)
+        XCTAssertFalse(StageDropNotice.downgradeIsCurrent(stage: .rtk, quality: .rtkFix))
+        XCTAssertNil(StageDropNotice.resolve(current: banner, stage: .rtk, quality: .rtkFix))
+        XCTAssertEqual(
+            StageDropNotice.resolve(current: "T1を残しました", stage: .rtk, quality: .rtkFix),
+            "T1を残しました"
+        )
+
         let demoted = AccuracyPolicy.badge(
             for: PositionReading(position: fix(quality: .float), availability: .available),
             stageNotice: floated.notice,

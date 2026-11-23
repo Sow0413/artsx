@@ -1142,7 +1142,7 @@ final class FieldModel: ObservableObject {
         controlFix.canRecord && StageGate.allowsRecording(workID: "boundary", stage: stageTransition.stage)
     }
 
-    static let stageDroppedRecording = "段階が下がったので、基準点の記録を止めました。測位は続けます。"
+    static let stageDroppedRecording = StageDropNotice.recordingStopped
 
     func setPointPrefix(_ raw: String) {
         pointPrefix = raw
@@ -2574,6 +2574,11 @@ final class FieldModel: ObservableObject {
                 }
                 captureMessage = Self.stageDroppedRecording
             }
+            captureMessage = StageDropNotice.resolve(
+                current: captureMessage,
+                stage: transition.stage,
+                quality: position.fixQuality
+            )
             persistFix(force: controlFix.fixBeganAt != began || controlFix.restarted != wasRestarted)
         }
         updateWalk()

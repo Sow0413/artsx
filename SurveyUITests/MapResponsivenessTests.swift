@@ -28,6 +28,12 @@ final class MapResponsivenessTests: XCTestCase {
         let tiles = expectation(description: "地理院タイル")
         DispatchQueue.main.asyncAfter(deadline: .now() + 10) { tiles.fulfill() }
         wait(for: [tiles], timeout: 12)
+        let badge = app.descendants(matching: .any)["accuracy-badge"]
+        XCTAssertTrue(badge.waitForExistence(timeout: 5), "精度帯が無い")
+        XCTAssertLessThan(badge.frame.height, 72, "精度帯が1行に収まっていない")
+        let panel = app.descendants(matching: .any)["location-panel"]
+        XCTAssertTrue(panel.waitForExistence(timeout: 5), "現在地カードが無い")
+        XCTAssertLessThan(panel.frame.height, 160, "現在地カードが半分まで縮んでいない")
         shot("01-map")
 
         app.scrollViews["map-controls"].swipeUp()

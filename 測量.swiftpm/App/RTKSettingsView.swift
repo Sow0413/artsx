@@ -14,6 +14,7 @@ struct RTKSettingsView: View {
     @State private var host = "d-gnss.jp"
     @State private var portText = "2101"
     @State private var mountpoint: RTKMountpoint = .rrsgd2024
+    @State private var visibleMount = RTKMountpoint.rrsgd2024.rawValue
     @State private var customMount = ""
     @State private var mounts: [String] = []
     @State private var mountNote = ""
@@ -40,13 +41,25 @@ struct RTKSettingsView: View {
                         .font(SurveyType(16, .heavy))
                     field("接続先", text: $host)
                     field("ポート", text: $portText, numbers: true)
-                    Picker("マウント", selection: Binding(get: { mountpoint }, set: { mountpoint = $0; customMount = "" })) {
-                        ForEach(RTKMountpoint.allCases) { point in
-                            Text(point.rawValue).tag(point)
+                    Picker("マウント", selection: $visibleMount) {
+                        ForEach(mountChoices, id: \.self) { name in
+                            Text(name).tag(name)
                         }
                     }
                     .font(SurveyType(16, .heavy))
+                    .onChange(of: visibleMount) { _, name in
+                        if RTKMountpoint(rawValue: name) != nil {
+                            if customMount != "" { customMount = "" }
+                        } else if customMount != name {
+                            customMount = name
+                        }
+                    }
                     field("マウント名", text: $customMount)
+                        .onChange(of: customMount) { _, typed in
+                            let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty, visibleMount != trimmed else { return }
+                            visibleMount = trimmed
+                        }
                     Button(action: fetchMounts) {
                         Text(listing ? "一覧を取得中" : "マウント一覧を取得")
                             .font(SurveyType(16, .heavy))
@@ -59,8 +72,8 @@ struct RTKSettingsView: View {
                     }
                     ForEach(mounts, id: \.self) { name in
                         Button(name) {
-                            customMount = name
-                            if let known = RTKMountpoint(rawValue: name) { mountpoint = known }
+                            visibleMount = name
+                            customMount = RTKMountpoint(rawValue: name) == nil ? name : ""
                         }
                         .font(SurveyType(16, .heavy))
                     }
@@ -179,7 +192,7 @@ struct RTKSettingsView: View {
 
     private var note: String {
         var lines = [
-            mountpoint.datum2024 ? "測地成果2024。2011とは混ぜない。" : "測地成果2011。新規は2024。"
+            shownMount.datum2024 ? "測地成果2024。2011とは混ぜない。" : "測地成果2011。新規は2024。"
         ]
         if let count = session.satelliteCount { lines.append("衛星 \(count)") }
         if let age = session.correctionAgeSeconds { lines.append(String(format: "補正 %.0f秒", age)) }
@@ -194,7 +207,14 @@ struct RTKSettingsView: View {
         host = stored.host
         portText = String(stored.port)
         mountpoint = stored.mountpoint
-        customMount = stored.customMount ?? ""
+        let storedCustom = stored.customMount?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if storedCustom.isEmpty || storedCustom == stored.mountpoint.rawValue {
+            visibleMount = stored.mountpoint.rawValue
+            customMount = ""
+        } else {
+            visibleMount = storedCustom
+            customMount = storedCustom
+        }
         user = stored.user
         if password.isEmpty { password = RTKKeychain.load(user: stored.user) }
     }
@@ -203,13 +223,27 @@ struct RTKSettingsView: View {
         let port = UInt16(portText) ?? 2101
         let typed = password.isEmpty ? RTKKeychain.load(user: user) : password
         password = typed
-        let settings = RTKSettings(correctionsEnabled: enabled, host: host, port: port,
+        let sent = RTKMountSelection.send(pickerShown: visibleMount, typed: customMount)
+        var settings = RTKSettings(correctionsEnabled: enabled, host: host, port: port,
                                    mountpoint: mountpoint,
-                                   customMount: customMount.trimmingCharacters(in: .whitespacesAndNewlines),
                                    user: user)
+        settings.select(shown: sent)
+        visibleMount = settings.activeMount
+        customMount = settings.customMount ?? ""
+        mountpoint = settings.mountpoint
         RTKSettingsStore.save(settings, to: siteDirectory)
         if !typed.isEmpty { RTKKeychain.save(user: user, password: typed) }
         session.connectRTK(settings: settings, password: typed)
+    }
+
+    private var mountChoices: [String] {
+        var names = RTKMountpoint.allCases.map(\.rawValue)
+        if !names.contains(visibleMount) { names.append(visibleMount) }
+        return names
+    }
+
+    private var shownMount: RTKMountpoint {
+        RTKMountpoint(rawValue: visibleMount) ?? mountpoint
     }
 
     private func fetchMounts() {

@@ -48,10 +48,32 @@ public struct RTKSettings: Codable, Sendable, Equatable {
         self.user = user
     }
 
-    /// 今編集しているマウント。保存値を後から上書きしない。
+    /// ピッカーに見えている名前。空の手入力は定番名。見えていない古い文字は使わない。
     public var activeMount: String {
         let trimmed = customMount?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? mountpoint.rawValue : trimmed
+    }
+
+    /// 画面のピッカーをこの名前にする。定番名なら手入力を消す。
+    public mutating func select(shown: String) {
+        let trimmed = shown.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let known = RTKMountpoint(rawValue: trimmed) {
+            mountpoint = known
+            customMount = nil
+        } else if !trimmed.isEmpty {
+            customMount = trimmed
+        }
+    }
+}
+
+/// 送るマウントは、ピッカーに出ている名前だけ。欄の古い文字がピッカーと違えば送らない。
+public enum RTKMountSelection {
+    public static func send(pickerShown: String, typed: String) -> String {
+        let picker = pickerShown.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        if picker.isEmpty { return text }
+        if text.isEmpty || text == picker { return picker }
+        return picker
     }
 }
 

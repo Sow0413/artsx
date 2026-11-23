@@ -83,4 +83,25 @@ final class RTKTests: XCTestCase {
         XCTAssertFalse(RTKMountpoint.rrsgd.datum2024)
         XCTAssertEqual(RTKSettingsStore.load(from: directory.appendingPathComponent("missing", isDirectory: true)).user, "")
     }
+
+    func testStaleMountTextDoesNotOverrideThePicker() {
+        XCTAssertEqual(RTKMountSelection.send(pickerShown: "RRSGD2024", typed: "docomo"), "RRSGD2024")
+        XCTAssertEqual(RTKMountSelection.send(pickerShown: "docomo", typed: "docomo"), "docomo")
+        XCTAssertEqual(RTKMountSelection.send(pickerShown: "RRSGD2024", typed: ""), "RRSGD2024")
+        XCTAssertEqual(RTKMountSelection.send(pickerShown: "RRSGD2024", typed: "  RRSGD2024  "), "RRSGD2024")
+
+        var settings = RTKSettings(mountpoint: .rrsgd2024, customMount: "docomo")
+        let shown = RTKMountSelection.send(pickerShown: settings.mountpoint.rawValue, typed: "docomo")
+        settings.select(shown: shown)
+        XCTAssertEqual(settings.activeMount, "RRSGD2024")
+        XCTAssertNil(settings.customMount)
+
+        settings.select(shown: "docomo")
+        XCTAssertEqual(settings.activeMount, "docomo")
+        XCTAssertEqual(settings.customMount, "docomo")
+        settings.select(shown: "RRSGD2024")
+        XCTAssertEqual(settings.mountpoint, .rrsgd2024)
+        XCTAssertNil(settings.customMount)
+        XCTAssertEqual(settings.activeMount, "RRSGD2024")
+    }
 }

@@ -334,7 +334,8 @@ struct MeasureLogView: View {
     }
 
     private var controlStatus: String {
-        if !StageGate.allowsRecording(workID: "boundary", stage: field.stageTransition.stage),
+        let quality = field.reading.position?.fixQuality ?? field.controlFix.latest?.fixQuality ?? .none
+        if StageDropNotice.downgradeIsCurrent(stage: field.stageTransition.stage, quality: quality),
            field.controlFix.restarted || field.stageTransition.steppedDown {
             return FieldModel.stageDroppedRecording
         }
