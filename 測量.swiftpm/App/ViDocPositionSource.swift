@@ -34,6 +34,10 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private var outbound = ViDocOutbound()
     private var rtcmSchedule = RTCMWriteSchedule()
     private var rtcmDrainScheduled = false
+    private var recovery = ViDocRecovery()
+    private var peripheralID: UUID?
+    private var notifyWatch: DispatchSourceTimer?
+    private var pendingDrop: String?
 
     private let queue = DispatchQueue(label: "arts.vidoc.ble")
     private var central: CBCentralManager?
@@ -76,6 +80,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         queue.async {
             self.running = false
             self.central?.stopScan()
+            self.notifyWatch?.cancel(); self.notifyWatch = nil
             if let p = self.peripheral { self.central?.cancelPeripheralConnection(p) }
             self.stage = .iphone
             self.continuation.yield(PositionReading(position: nil, availability: .waiting))
@@ -85,7 +90,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     /// NTRIPClient から RTCM3 を注入する。180 バイト以下に切り、12 ms 以上あけて FFF2 へ書く。
     public func injectRTCM(_ data: Data) {
         queue.async {
-            self.outbound.corrections.append(data)
+            self.outbound.corrections.append(data, at: Date().timeIntervalSinceReferenceDate)
             self.drainRTCM()
         }
     }
@@ -124,7 +129,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private func startScan() {
         // 広告の Service Data は FFE1 で、GATT の FFF0 は UUID 一覧に出ないことがある。
         // サービス指定のスキャンだと FFE1 だけの機体を見落とすので、前面では全件を見てから判定する。
-        report("探索中")
+        reportState("探索中")
         central?.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
@@ -134,16 +139,16 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         case .poweredOn:
             if running { startScan() }
         case .unauthorized:
-            report("Bluetooth が許可されていません")
+            reportState("Bluetooth が許可されていません")
             continuation.yield(PositionReading(position: nil, availability: .denied))
         case .poweredOff:
-            report("Bluetooth がオフです")
+            reportState("Bluetooth がオフです")
             continuation.yield(PositionReading(position: nil, availability: .unavailable))
         case .unsupported:
-            report("この端末では Bluetooth を使えません")
+            reportState("この端末では Bluetooth を使えません")
             continuation.yield(PositionReading(position: nil, availability: .unavailable))
         default:
-            report("Bluetooth を準備しています")
+            reportState("Bluetooth を準備しています")
             continuation.yield(PositionReading(position: nil, availability: .unavailable))
         }
     }
@@ -162,9 +167,10 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             serviceDataUUIDs: serviceData,
             manufacturerData: manufacturer
         ) else { return }
+        if let wanted = peripheralID, peripheral.identifier != wanted { return }
         central.stopScan()
         deviceName = name.isEmpty ? "ViDoc" : name
-        report("ViDoc を見つけました（\(deviceName)）")
+        reportState("ViDoc を見つけました（\(deviceName)）")
         self.peripheral = peripheral
         peripheral.delegate = self
         central.connect(peripheral, options: nil)
@@ -173,23 +179,41 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         let name = peripheral.name ?? deviceName
         deviceName = name.isEmpty ? deviceName : name
-        report("接続しました（\(deviceName)）")
+        peripheralID = peripheral.identifier
+        recovery.remember(peripheral.identifier.uuidString)
+        recovery.watch(at: Date().timeIntervalSinceReferenceDate)
+        armNotifyWatch()
+        reportState("接続しました（\(deviceName)）")
         peripheral.discoverServices([Self.serviceUUID])
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        if running { startScan() }
+        guard running else { return }
+        self.peripheral = nil
+        if recovery.health.reconnecting {
+            startScan()
+        } else {
+            finishRecovery("接続できません")
+        }
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         writeChar = nil
         notifyChar = nil
-        boot = ViDocBoot()
-        bootGeneration += 1
-        outbound = ViDocOutbound()
         stage = .iphone
         continuation.yield(PositionReading(position: nil, availability: .waiting))
-        if running { startScan() }   // 前面にいるあいだはつなぎ直す（README のとおり）
+        guard running else { return }
+        if let reason = pendingDrop {
+            pendingDrop = nil
+            finishRecovery(reason)
+            return
+        }
+        if recovery.health.reconnecting {
+            self.peripheral = nil
+            startScan()
+            return
+        }
+        finishRecovery("切断")
     }
 
     // MARK: CBPeripheralDelegate
@@ -223,6 +247,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         guard case .needStart = boot.phase else { return }
         guard let notify = notifyChar, notify.isNotifying, writeChar != nil else { return }
         let now = Date().timeIntervalSinceReferenceDate
+        recovery.linkUp(at: now)
+        reportState("接続しました（\(deviceName)）")
         outbound.enqueueCommand(boot.onConnect(at: now))
         bootGeneration += 1
         let generation = bootGeneration
@@ -239,6 +265,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.notifyUUID, let data = characteristic.value else { return }
+        recovery.notify(at: Date().timeIntervalSinceReferenceDate)
         nmeaBuffer.append(data)
         while let nl = nmeaBuffer.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
             let lineData = nmeaBuffer.subdata(in: nmeaBuffer.startIndex..<nl)
@@ -259,7 +286,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         guard let epoch = nmea.consume(line) else { return }
         lastGGA = epoch.sentence
         let count = epoch.satelliteCount.map(String.init) ?? "—"
-        report("NMEA 受信中 衛星 \(count) \(Self.qualityLabel(epoch.fixQuality))")
+        reportState("NMEA 受信中 衛星 \(count) \(Self.qualityLabel(epoch.fixQuality))")
         let age = epoch.correctionAgeSeconds ?? lastRTCMAt.map { Date().timeIntervalSince($0) }
         stage = epoch.stage
         let stationID = epoch.stationID
@@ -285,6 +312,64 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             headingDegrees: nil
         )
         continuation.yield(PositionReading(position: position, availability: .available))
+    }
+
+    private func beginRecovery(_ reason: String) {
+        guard running, pendingDrop == nil, !recovery.health.reconnecting else { return }
+        if peripheral != nil {
+            pendingDrop = reason
+            if let peripheral { central?.cancelPeripheralConnection(peripheral) }
+            return
+        }
+        finishRecovery(reason)
+    }
+
+    private func finishRecovery(_ reason: String) {
+        guard running else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        outbound.clearCommands()
+        outbound.corrections.dropOlder(than: 2, now: now)
+        boot = ViDocBoot()
+        bootGeneration += 1
+        writeChar = nil
+        notifyChar = nil
+        let found = peripheralID.flatMap { central?.retrievePeripherals(withIdentifiers: [$0]).first }
+        _ = recovery.recover(reason: reason, at: now, retrieved: found != nil)
+        reportState("")
+        if let found {
+            peripheral = found
+            found.delegate = self
+            central?.connect(found, options: nil)
+        } else {
+            peripheral = nil
+            startScan()
+        }
+    }
+
+    private func armNotifyWatch() {
+        notifyWatch?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in
+            guard let self, self.running else { return }
+            let now = Date().timeIntervalSinceReferenceDate
+            if self.recovery.stall.isStalled(at: now, connected: self.recovery.linked) {
+                self.beginRecovery("通知が止まった")
+            }
+        }
+        timer.resume()
+        notifyWatch = timer
+    }
+
+    private func reportState(_ line: String) {
+        let time = recovery.health.lastAt.map { LinkClock.text($0) } ?? ""
+        if recovery.health.reconnecting {
+            report(recovery.health.reconnectingText(time: time))
+        } else if line.isEmpty {
+            report(recovery.health.settledSuffix(time: time))
+        } else {
+            report(line + recovery.health.settledSuffix(time: time))
+        }
     }
 
     private func report(_ line: String) {

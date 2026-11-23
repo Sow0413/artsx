@@ -320,6 +320,10 @@ public struct ViDocOutbound: Sendable {
         commands.append(command)
     }
 
+    public mutating func clearCommands() {
+        commands.removeAll(keepingCapacity: false)
+    }
+
     public mutating func nextWrite(maximumChunkBytes: Int) -> Data? {
         if !commands.isEmpty { return commands.removeFirst() }
         return corrections.nextChunk(maximumBytes: maximumChunkBytes)
@@ -350,26 +354,45 @@ public struct RTCMWriteSchedule: Equatable, Sendable {
 /// 届いた RTCM を順に貯める。上限を超えたら、フレームの途中ではなく古い文ごと捨てる。
 public struct RTCMOutboundBuffer: Sendable {
     public static let capBytes = 16 * 1024
-    private var frames: [Data] = []
+    private struct Stamped {
+        var at: TimeInterval
+        var data: Data
+    }
+
+    private var frames: [Stamped] = []
     private var partial = Data()
+    private var partialAt: TimeInterval = 0
     private var frontIsPartial = false
 
     public init() {}
 
-    public var bufferedBytes: Int { frames.reduce(0) { $0 + $1.count } }
+    public var bufferedBytes: Int { frames.reduce(0) { $0 + $1.data.count } }
 
-    public mutating func append(_ data: Data) {
+    public mutating func append(_ data: Data, at now: TimeInterval = 0) {
         guard !data.isEmpty else { return }
+        if partial.isEmpty { partialAt = now }
         partial.append(data)
         while let frame = nextFrame() {
-            frames.append(frame)
+            frames.append(Stamped(at: now, data: frame))
         }
         trimToCap()
     }
 
+    /// 再接続のとき、指定より古い文を捨てる。今送っている途中の文は残す。
+    public mutating func dropOlder(than age: TimeInterval, now: TimeInterval) {
+        if frontIsPartial, let head = frames.first {
+            frames = [head] + frames.dropFirst().filter { now - $0.at <= age }
+        } else {
+            frames.removeAll { now - $0.at > age }
+        }
+        if !partial.isEmpty, now - partialAt > age {
+            partial.removeAll(keepingCapacity: false)
+        }
+    }
+
     public mutating func nextChunk(maximumBytes: Int) -> Data? {
         guard maximumBytes > 0, !frames.isEmpty else { return nil }
-        var first = frames[0]
+        var first = frames[0].data
         let count = min(maximumBytes, first.count)
         let chunk = Data(first.prefix(count))
         first.removeFirst(count)
@@ -377,7 +400,7 @@ public struct RTCMOutboundBuffer: Sendable {
             frames.removeFirst()
             frontIsPartial = false
         } else {
-            frames[0] = first
+            frames[0].data = first
             frontIsPartial = true
         }
         return chunk

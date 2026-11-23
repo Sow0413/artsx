@@ -47,6 +47,7 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     private var activeID: ObjectIdentifier?
     private var rough: NTRIPClient.RoughPosition?
     private var ntripRate = 0
+    private var ntripHealth = LinkHealth()
     private var listeners: [Task<Void, Never>] = []
     private var armed = false
 
@@ -124,6 +125,9 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
                     self?.refreshNTRIPRate()
                 }
             }
+            client.onHealth = { [weak self] health in
+                self?.setMain { self?.ntripHealth = health }
+            }
             client.onStatus = { [weak self] status in
                 self?.setMain {
                     self?.message = status
@@ -198,9 +202,10 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     }
 
     private func refreshNTRIPRate() {
-        guard ntripConnected else { return }
+        guard ntripConnected, !ntripHealth.reconnecting else { return }
         let age = correctionAgeSeconds.map { String(format: " 補正 %.0f秒", $0) } ?? ""
-        ntripLine = "補正受信中 \(ntripRate) B/s\(age)"
+        let time = ntripHealth.lastAt.map { LinkClock.text($0) } ?? ""
+        ntripLine = "補正受信中 \(ntripRate) B/s\(age)" + ntripHealth.settledSuffix(time: time)
     }
 
     private func setMain(_ work: @escaping () -> Void) {

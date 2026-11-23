@@ -44,12 +44,14 @@ public final class NTRIPClient: @unchecked Sendable {
     private var chunks = NTRIPChunkDecoder()
     private var ggaTimer: DispatchSourceTimer?
     private var running = false
-    private var dialect: NTRIPDialect = .v2
-    private var triedBoth = false
+    private var plan = NTRIPReconnect()
     private var byteWindow = 0
     private var rateTimer: DispatchSourceTimer?
+    private var stallTimer: DispatchSourceTimer?
+    private var pendingOpen: DispatchWorkItem?
 
     public var onStatus: ((String) -> Void)?
+    public var onHealth: ((LinkHealth) -> Void)?
     public var onBytesPerSecond: ((Int) -> Void)?
     /// 今の概略位置。ViDoc の GGA が無いときは iPhone の位置でもよい。
     public var roughPosition: (() -> RoughPosition?)?
@@ -62,19 +64,22 @@ public final class NTRIPClient: @unchecked Sendable {
     public func start() {
         queue.async {
             self.running = true
-            self.triedBoth = false
-            self.dialect = .v2
+            self.plan.correctionsEnabled = true
             self.sink?.correctionSource = "docomo \(self.config.mountpoint)"
             self.post("認証中")
-            self.connect()
+            if let id = self.plan.start() { self.open(id) }
+            self.startStallTimer()
         }
     }
 
     public func stop() {
         queue.async {
             self.running = false
+            self.plan.correctionsEnabled = false
+            self.pendingOpen?.cancel(); self.pendingOpen = nil
             self.ggaTimer?.cancel(); self.ggaTimer = nil
             self.rateTimer?.cancel(); self.rateTimer = nil
+            self.stallTimer?.cancel(); self.stallTimer = nil
             self.connection?.cancel(); self.connection = nil
         }
     }
@@ -116,7 +121,8 @@ public final class NTRIPClient: @unchecked Sendable {
         conn.start(queue: queue)
     }
 
-    private func connect() {
+    private func open(_ id: Int) {
+        guard running, plan.socket.openID == id, connection == nil else { return }
         headerDone = false
         chunked = false
         chunks = NTRIPChunkDecoder()
@@ -125,14 +131,14 @@ public final class NTRIPClient: @unchecked Sendable {
         let conn = NWConnection(host: NWEndpoint.Host(config.host), port: port, using: .tcp)
         connection = conn
         conn.stateUpdateHandler = { [weak self] state in
-            guard let self else { return }
+            guard let self, self.plan.socket.openID == id else { return }
             switch state {
             case .ready:
                 self.sendRequest()
                 self.receiveLoop()
                 self.startRateTimer()
             case .failed:
-                self.failOverOrStop("Casterにつなげません")
+                self.handleLoss("Casterにつなげません", dialectHint: !self.plan.everStreamed)
             case .cancelled:
                 break
             default:
@@ -142,6 +148,49 @@ public final class NTRIPClient: @unchecked Sendable {
         conn.start(queue: queue)
     }
 
+    private func handleLoss(_ reason: String, dialectHint: Bool) {
+        guard running else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        guard let delay = plan.lost(reason: reason, at: now, dialectHint: dialectHint) else { return }
+        publish(nil)
+        ggaTimer?.cancel(); ggaTimer = nil
+        rateTimer?.cancel(); rateTimer = nil
+        let closing = plan.socket.closingID
+        let old = connection
+        connection = nil
+        var finished = false
+        let proceed = { [weak self] in
+            guard let self, !finished else { return }
+            finished = true
+            if let closing { self.plan.noteClosed(closing) }
+            self.scheduleOpen(after: delay)
+        }
+        if let old {
+            old.stateUpdateHandler = { state in
+                switch state {
+                case .cancelled, .failed:
+                    self.queue.async { proceed() }
+                default:
+                    break
+                }
+            }
+            old.cancel()
+        } else {
+            proceed()
+        }
+    }
+
+    private func scheduleOpen(after delay: TimeInterval) {
+        pendingOpen?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.running else { return }
+            guard let id = self.plan.readyToOpen() else { return }
+            self.open(id)
+        }
+        pendingOpen = work
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
     private func sendRequest() {
         let gga = currentGGA()
         let wire = NTRIPExchange.request(
@@ -149,7 +198,7 @@ public final class NTRIPClient: @unchecked Sendable {
             mount: config.mountpoint,
             user: config.user,
             password: config.password,
-            dialect: dialect,
+            dialect: plan.dialect,
             gga: gga
         )
         connection?.send(content: wire.bytes, completion: .contentProcessed { _ in })
@@ -166,7 +215,8 @@ public final class NTRIPClient: @unchecked Sendable {
                 }
             }
             if isComplete || error != nil {
-                if !self.headerDone { self.failOverOrStop("Casterが切断しました") }
+                let reason = self.headerDone ? "Casterが閉じました" : "Casterが切断しました"
+                self.handleLoss(reason, dialectHint: !self.plan.everStreamed)
             } else if self.running {
                 self.receiveLoop()
             }
@@ -176,17 +226,21 @@ public final class NTRIPClient: @unchecked Sendable {
     private func consumeHeader(_ data: Data) {
         headerBuffer.append(data)
         guard let header = NTRIPExchange.parseHeader(headerBuffer) else {
-            if headerBuffer.count > 16384 { connection?.cancel() }
+            if headerBuffer.count > 16384 {
+                handleLoss("Casterが切断しました", dialectHint: !plan.everStreamed)
+            }
             return
         }
         guard header.reply == .stream else {
-            failOverOrStop(header.reply.statusLine(mount: config.mountpoint))
+            let line = header.reply.statusLine(mount: config.mountpoint)
+            handleLoss(line, dialectHint: !plan.everStreamed || header.reply == .unavailable)
             return
         }
         headerDone = true
         chunked = header.chunked
         headerBuffer.removeAll(keepingCapacity: false)
-        post("NTRIP 接続 \(config.mountpoint)")
+        plan.streamBegan(at: Date().timeIntervalSinceReferenceDate)
+        publish("NTRIP 接続 \(config.mountpoint)")
         sendCurrentGGA()
         startGGATimer()
         if !header.body.isEmpty { deliver(header.body) }
@@ -196,6 +250,7 @@ public final class NTRIPClient: @unchecked Sendable {
         let payload = chunked ? chunks.feed(data) : data
         guard !payload.isEmpty else { return }
         byteWindow += payload.count
+        plan.bytes(at: Date().timeIntervalSinceReferenceDate)
         sink?.injectRTCM(payload)
     }
 
@@ -231,6 +286,21 @@ public final class NTRIPClient: @unchecked Sendable {
         rateTimer = rate
     }
 
+    private func startStallTimer() {
+        stallTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in
+            guard let self, self.running else { return }
+            let now = Date().timeIntervalSinceReferenceDate
+            if self.plan.stalled(at: now) {
+                self.handleLoss("RTCMが止まった", dialectHint: false)
+            }
+        }
+        timer.resume()
+        stallTimer = timer
+    }
+
     private func currentGGA() -> String? {
         if let sentence = sink?.lastGGA, sentence.contains("GGA") { return sentence }
         guard let place = roughPosition?() else { return nil }
@@ -241,23 +311,14 @@ public final class NTRIPClient: @unchecked Sendable {
         )
     }
 
-    private func failOverOrStop(_ message: String) {
-        guard running else { return }
-        let retry = !triedBoth && (message.contains("別の機器で接続中") || message.contains("切断"))
-        connection?.cancel()
-        connection = nil
-        ggaTimer?.cancel(); ggaTimer = nil
-        if retry {
-            triedBoth = true
-            dialect = dialect == .v2 ? .v1 : .v2
-            queue.asyncAfter(deadline: .now() + 1) { [weak self] in
-                guard let self, self.running else { return }
-                self.connect()
-            }
-            return
+    private func publish(_ live: String?) {
+        onHealth?(plan.health)
+        let time = plan.health.lastAt.map { LinkClock.text($0) } ?? ""
+        if plan.health.reconnecting {
+            post(plan.health.reconnectingText(time: time))
+        } else if let live {
+            post(live + plan.health.settledSuffix(time: time))
         }
-        running = false
-        post(message)
     }
 
     private func post(_ text: String) {
