@@ -161,7 +161,7 @@ struct MapTabView: View {
                 // 操作の列は上に残す。空いたところは地図で、下のカードだけスクロールする。
                 if let line = field.basicStakeoutLine {
                     Text(line)
-                        .font(SurveyType(16, .heavy))
+                        .font(SurveyType(22, .heavy))
                         .foregroundStyle(SurveyColor.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)

@@ -20,7 +20,7 @@ enum FieldTab: String, CaseIterable, Identifiable {
         switch self {
         case .map: return "地図"
         case .drawing: return "図面"
-        case .measure: return "測る"
+        case .measure: return "データ"
         case .export: return "出す"
         case .seat: return "オペ"
         }
@@ -30,7 +30,7 @@ enum FieldTab: String, CaseIterable, Identifiable {
         switch self {
         case .map: return "map"
         case .drawing: return "ruler"
-        case .measure: return "mappin"
+        case .measure: return "tray.full"
         case .export: return "square.and.arrow.up"
         case .seat: return "steeringwheel"
         }
@@ -65,6 +65,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var observations: FieldObservationLog
     @Published var showsWorkSettings = false
     @Published private(set) var captureMessage: String?
+    /// 測設を仮置きしたときの設計差。画面に残す。
+    @Published private(set) var stakeResult: String?
     @Published var plannedRounds = 3
     @Published private(set) var rounds: [BenchmarkRound] = []
     @Published private(set) var comparison: CampaignComparison?
@@ -2341,6 +2343,20 @@ final class FieldModel: ObservableObject {
         work.id == "boundary" ? "基準点" : work.shortTitle
     }
 
+    /// 仮置きの点。座標簿に同じ名前が無いものだけ。
+    func stagedPoints() -> [FieldObservation] {
+        let booked = Set(basicPoints().map(\.name))
+        return observations.observations.filter { !booked.contains($0.name) }
+    }
+
+    /// 検品した仮置きを、人が押したときだけ台帳へ入れる。
+    func acceptStaged(_ observation: FieldObservation) {
+        let work = workCatalog.works.first { $0.id == observation.workID }
+        let kind = observation.workID == "boundary" ? "GCP" : (work?.shortTitle ?? observation.workID)
+        remember(CoordinateBookIndex.entry(from: observation, kind: kind))
+        captureMessage = "\(observation.name)を台帳に入れました。"
+    }
+
     private func remember(_ entry: CoordinateBookEntry) {
         try? journal.upsertBook(entry)
         if let project = drawing.project {
@@ -2447,16 +2463,18 @@ final class FieldModel: ObservableObject {
         )
         let observation = FieldObservation(
             name: name,
-            workID: workCatalog.selected.id,
+            workID: "stakeout",
             captured: position,
             condition: condition
         )
         store(observation)
-        var entry = CoordinateBookIndex.entry(from: observation, kind: "測設")
         let height = guide.heightMeters.map { String(format: "%+.3f", $0) } ?? "—"
-        entry.source = String(format: "設計差 北 %+.3f 東 %+.3f 高 %@ %@", guide.northMeters, guide.eastMeters, height, condition.solutionLabel)
-        remember(entry)
-        captureMessage = "\(name)を測設として残しました。\(entry.source ?? "")"
+        let result = String(
+            format: "%@を仮置きしました。ΔX %+.3f ΔY %+.3f ΔH %@",
+            name, guide.eastMeters, guide.northMeters, height
+        )
+        stakeResult = result
+        captureMessage = result
         return true
     }
 
