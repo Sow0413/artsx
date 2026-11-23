@@ -10,18 +10,12 @@ struct MeasureLogView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if SurveyBuild.basicMode {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("データ")
-                        .font(SurveyType(28, .heavy))
-                    Text(field.operation.coach)
-                        .font(SurveyType(15, .semibold))
-                        .foregroundStyle(SurveyColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text("データ")
+                    .font(SurveyType(28, .heavy))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             measureList
         }
@@ -97,13 +91,15 @@ struct MeasureLogView: View {
                     LevelBubble(tiltRadians: field.sightTiltRadians)
                 }
                 }
+                if !SurveyBuild.basicMode {
                 OperationBar(
                     field: field,
-                    showsSkill: !SurveyBuild.basicMode,
-                    showsCoach: !SurveyBuild.basicMode,
-                    saveIdentifier: SurveyBuild.basicMode ? "basic-save" : nil
+                    showsSkill: true,
+                    showsCoach: true,
+                    saveIdentifier: nil
                 )
-                if field.operation.showsAdvanced {
+                }
+                if !SurveyBuild.basicMode, field.operation.showsAdvanced {
                     Text("今の作業「\(field.workCatalog.selected.title)」で点を残します。点名は頭のアルファベットと連番です。下見で取った点は捨てず、あとから測量点の座標に乗せ替えられます。")
                         .font(SurveyType(16, .semibold))
                         .foregroundStyle(SurveyColor.muted)
@@ -118,7 +114,7 @@ struct MeasureLogView: View {
                             .foregroundStyle(SurveyColor.muted)
                     }
                 }
-                if field.operation.level == .skilled || field.operation.controlOpen || field.operation.showsDetail {
+                if !SurveyBuild.basicMode, field.operation.level == .skilled || field.operation.controlOpen || field.operation.showsDetail {
                     controlSection
                 }
                 if !SurveyBuild.basicMode, let message = field.captureMessage {
@@ -127,7 +123,7 @@ struct MeasureLogView: View {
                         .foregroundStyle(SurveyColor.amber)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if SurveyBuild.basicMode || (field.gnssAvailable && field.operation.showsAdvanced) {
+                if !SurveyBuild.basicMode, field.gnssAvailable, field.operation.showsAdvanced {
                     gnssSection
                 }
                 if SurveyBuild.basicMode {

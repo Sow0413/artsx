@@ -61,19 +61,21 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["現場管理"].waitForExistence(timeout: 5), "データに現場管理が無い")
         XCTAssertTrue(app.staticTexts["データ管理"].exists)
         XCTAssertTrue(app.staticTexts["データ書き出し"].exists)
-        shot("16-data")
-        XCTAssertTrue(app.descendants(matching: .any)["rtk-status"].waitForExistence(timeout: 5), "データ画面に RTK の状態が無い")
-        let sheet = app.scrollViews["screen-measure"]
-        scrollClear(app.staticTexts["vidoc-status"], in: sheet)
-        XCTAssertTrue(app.staticTexts["ntrip-status"].exists)
-        shot("04-link")
-        let intro = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'します。'")).firstMatch
-        XCTAssertTrue(intro.waitForExistence(timeout: 5), "測るの説明が無い")
+        XCTAssertFalse(app.buttons["basic-save"].exists, "データに現在地を残すが残っている")
+        XCTAssertFalse(app.descendants(matching: .any)["rtk-status"].exists, "データの GNSS 状態が残っている")
         let measureBadge = app.descendants(matching: .any)["accuracy-badge"]
         XCTAssertTrue(measureBadge.waitForExistence(timeout: 5))
-        XCTAssertGreaterThanOrEqual(intro.frame.minY, measureBadge.frame.maxY - 1, "説明が黄帯の下に隠れている")
-        scrollClear(app.textFields["stakeout-height"], in: sheet)
+        XCTAssertLessThan(measureBadge.frame.height, 72, "データの精度帯が1行に収まっていない")
+        let site = app.staticTexts["現場管理"]
+        XCTAssertGreaterThanOrEqual(site.frame.minY, measureBadge.frame.maxY - 1, "現場管理が状態バーの下に無い")
+        shot("16-data")
+        let sheet = app.scrollViews["screen-measure"]
+        scrollClear(app.staticTexts["データ管理"], in: sheet)
         shot("04-measure")
+        shot("04-link")
+        scrollClear(app.buttons["basic-restore"], in: sheet)
+        XCTAssertLessThan(app.buttons["basic-restore"].frame.maxY, app.buttons["tab-measure"].frame.minY, "データタブの下まで届いていない")
+        shot("16-data-bottom")
 
         let project = app.textFields["basic-project-name"]
         scrollClear(project, in: sheet)
@@ -83,7 +85,6 @@ final class MapResponsivenessTests: XCTestCase {
         create.tap()
         let made = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteA'")).firstMatch
         XCTAssertTrue(made.waitForExistence(timeout: 5), "プロジェクトを作れない")
-        scrollClear(app.textFields["stakeout-latitude"], in: sheet)
         shot("07-project")
         scrollClear(project, in: sheet)
         replace(project, with: "SiteB")
@@ -94,18 +95,21 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(renamed.waitForExistence(timeout: 5), "名前を変えられない")
         shot("07b-rename")
 
-        let save = app.scrollViews["screen-measure"].buttons["basic-save"]
-        XCTAssertEqual(app.scrollViews["screen-measure"].buttons.matching(identifier: "basic-save").count, 1)
-        tapWhenClear(save, in: sheet, missing: "現在地を残すが押せない")
-        let confirm = app.buttons["この点を確定"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 12), "確認のボタンが出ない")
-        tapWhenClear(confirm, in: sheet, missing: "この点を確定が押せない")
-        let saved = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を残しました' AND NOT label CONTAINS '基準点'")).firstMatch
-        XCTAssertTrue(saved.waitForExistence(timeout: 12), "点を残した文が無い")
+        openTab("tab-map", showing: "map-record")
+        let record = app.buttons["map-record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 5), "地図の記録が無い")
+        record.tap()
+        let stagedNote = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を仮置きしました'")).firstMatch
+        XCTAssertTrue(stagedNote.waitForExistence(timeout: 12), "地図の記録で仮置きできない")
+        openTab("tab-measure", showing: "screen-measure")
+        let accept = app.buttons["accept-T1"]
+        tapWhenClear(accept, in: sheet, missing: "台帳へが押せない")
+        let saved = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を台帳に入れました'")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 12), "台帳へ入れた文が無い")
         scrollClear(saved, in: sheet)
         shot("08-save")
         let book = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'T1' AND label CONTAINS '下見'")).firstMatch
-        XCTAssertTrue(book.waitForExistence(timeout: 5), "残した点が座標簿に無い")
+        XCTAssertTrue(book.waitForExistence(timeout: 5), "台帳の点が座標簿に無い")
         scrollClear(book, in: sheet)
         shot("09-book")
 
@@ -130,8 +134,20 @@ final class MapResponsivenessTests: XCTestCase {
         scrollClear(restored, in: sheet)
         shot("13-restore")
 
+        openTab("tab-export", showing: "screen-export")
+        XCTAssertTrue(app.staticTexts["データから点の復元"].waitForExistence(timeout: 5), "出すに復元の入口が無い")
+        XCTAssertTrue(app.staticTexts["図面の縮尺設定／2点割り付け"].exists)
+        XCTAssertTrue(app.staticTexts["GNSSローカライズ"].exists)
+        XCTAssertTrue(app.staticTexts["CAD測設"].exists)
+        XCTAssertTrue(app.staticTexts["測設"].exists)
+        let exportBadge = app.descendants(matching: .any)["accuracy-badge"]
+        XCTAssertTrue(exportBadge.waitForExistence(timeout: 5))
+        XCTAssertLessThan(exportBadge.frame.height, 72, "出すの精度帯が1行に収まっていない")
+        shot("05-export")
+        let exportSheet = app.scrollViews["screen-export"]
         let stake = app.buttons["basic-stakeout"]
-        scrollClear(stake, in: sheet)
+        scrollClear(stake, in: exportSheet)
+        shot("17-deliver")
         stake.tap()
         openTab("tab-map", showing: "stakeout-guide")
         let guide = app.descendants(matching: .any)["stakeout-guide"]
@@ -146,13 +162,6 @@ final class MapResponsivenessTests: XCTestCase {
             mapGCP.tap()
         }
         shot("15-gcp")
-
-        openTab("tab-export", showing: "screen-export")
-        XCTAssertTrue(app.staticTexts["CAD測設"].waitForExistence(timeout: 5), "出すに測設の入口が無い")
-        XCTAssertTrue(app.staticTexts["データから点の復元"].exists)
-        shot("05-export")
-        shot("17-deliver")
-        openTab("tab-map", showing: "map-controls")
         shot("06-map-return")
     }
 

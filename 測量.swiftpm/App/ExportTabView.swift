@@ -30,9 +30,18 @@ struct ExportTabView: View {
                     body: "まだ使えません。次の版で、書き出したデータから点を戻します。"
                 )
                 guideCard(
+                    title: "図面の縮尺設定／2点割り付け",
+                    body: "まだ使えません。次の版で、図面の縮尺と2点の割り付けを置きます。"
+                )
+                guideCard(
+                    title: "GNSSローカライズ",
+                    body: "まだ使えません。次の版で、測った点から現場座標へ合わせます。"
+                )
+                guideCard(
                     title: "CAD測設",
                     body: "まだ使えません。次の版で、図面の点へ測設します。"
                 )
+                BasicStakeoutCard(field: field)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)

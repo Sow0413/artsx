@@ -3,16 +3,13 @@ import UIKit
 import SurveyCore
 import UniformTypeIdentifiers
 
-/// ベーシックのプロジェクト、座標簿、測設、バックアップ。ほかの測量機能は出さない。
+/// ベーシックの現場、データ管理、書き出し。測設は出すタブ。ほかの測量機能は出さない。
 struct BasicDesk: View {
     @ObservedObject var field: FieldModel
     @State private var projectName = ""
     @State private var rename = ""
     @State private var pointName = ""
     @State private var editing = ""
-    @State private var latitude = "35.11561"
-    @State private var longitude = "136.90213"
-    @State private var height = ""
     @State private var presentingFile = false
     @State private var file: BasicFile = .importBook
 
@@ -64,33 +61,6 @@ struct BasicDesk: View {
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
-            Text("測設")
-                .font(SurveyType(18, .heavy))
-            TextField("点名", text: $rename)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("basic-stake-name")
-            TextField("緯度", text: $latitude)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("stakeout-latitude")
-            TextField("経度", text: $longitude)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("stakeout-longitude")
-            TextField("楕円体高", text: $height)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("stakeout-height")
-            Button("この座標へ") {
-                field.aimBasic(name: rename, latitude: latitude, longitude: longitude, height: height)
-            }
-            .font(SurveyType(16, .heavy))
-            .accessibilityIdentifier("basic-stakeout")
-            if let line = field.basicStakeoutLine {
-                Text(line)
-                    .font(SurveyType(16, .heavy))
-                    .accessibilityIdentifier("stakeout-guide")
-            }
-            Button("測設を残す") { field.recordStake() }
-                .font(SurveyType(16, .heavy))
-                .accessibilityIdentifier("basic-record-stake")
 
             Text("データ管理")
                 .font(SurveyType(22, .heavy))
@@ -257,6 +227,55 @@ struct BasicDesk: View {
 
 private extension BasicDesk {
     static var uiTest: Bool { ProcessInfo.processInfo.arguments.contains("-surveyUITest") }
+}
+
+/// 座標を指定して測設する。出すタブに置く。計算は FieldModel のまま。
+struct BasicStakeoutCard: View {
+    @ObservedObject var field: FieldModel
+    @State private var name = ""
+    @State private var latitude = "35.11561"
+    @State private var longitude = "136.90213"
+    @State private var height = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("測設")
+                .font(SurveyType(22, .heavy))
+            TextField("点名", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("basic-stake-name")
+            TextField("緯度", text: $latitude)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("stakeout-latitude")
+            TextField("経度", text: $longitude)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("stakeout-longitude")
+            TextField("楕円体高", text: $height)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("stakeout-height")
+            Button("この座標へ") {
+                field.aimBasic(name: name, latitude: latitude, longitude: longitude, height: height)
+            }
+            .font(SurveyType(16, .heavy))
+            .accessibilityIdentifier("basic-stakeout")
+            if let line = field.basicStakeoutLine {
+                Text(line)
+                    .font(SurveyType(16, .heavy))
+                    .accessibilityIdentifier("stakeout-guide")
+            }
+            Button("測設を残す") { field.recordStake() }
+                .font(SurveyType(16, .heavy))
+                .accessibilityIdentifier("basic-record-stake")
+            if let message = field.captureMessage {
+                Text(message)
+                    .font(SurveyType(14, .semibold))
+                    .foregroundStyle(SurveyColor.amber)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
 }
 
 private enum BasicFile {
