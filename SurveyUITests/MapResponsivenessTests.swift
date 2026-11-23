@@ -65,9 +65,9 @@ final class MapResponsivenessTests: XCTestCase {
         shot("04-link")
         let intro = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'します。'")).firstMatch
         XCTAssertTrue(intro.waitForExistence(timeout: 5), "測るの説明が無い")
-        let badge = app.descendants(matching: .any)["accuracy-badge"]
-        XCTAssertTrue(badge.waitForExistence(timeout: 5))
-        XCTAssertGreaterThanOrEqual(intro.frame.minY, badge.frame.maxY - 1, "説明が黄帯の下に隠れている")
+        let measureBadge = app.descendants(matching: .any)["accuracy-badge"]
+        XCTAssertTrue(measureBadge.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(intro.frame.minY, measureBadge.frame.maxY - 1, "説明が黄帯の下に隠れている")
         scrollClear(app.textFields["stakeout-height"], in: sheet)
         shot("04-measure")
 
