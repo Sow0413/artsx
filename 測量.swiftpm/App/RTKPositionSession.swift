@@ -29,6 +29,8 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     @Published public private(set) var correctionAgeSeconds: Double?
     @Published public private(set) var ntripConnected = false
     @Published public private(set) var message: String = ""
+    @Published public private(set) var vidocLine = "未接続"
+    @Published public private(set) var ntripLine = "未接続"
 
     // 中身
     private let iphone = CoreLocationPositionSource()
@@ -43,6 +45,8 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
 
     private let gate = DispatchQueue(label: "arts.rtk.session")
     private var activeID: ObjectIdentifier?
+    private var rough: NTRIPClient.RoughPosition?
+    private var ntripRate = 0
     private var listeners: [Task<Void, Never>] = []
     private var armed = false
 
@@ -51,6 +55,12 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         self.readings = pair.stream
         self.continuation = pair.continuation
         super.init()
+        vidoc.onLink = { [weak self] line in
+            self?.setMain {
+                self?.vidocLine = line
+                self?.deviceConnected = line.hasPrefix("接続しました") || line.hasPrefix("NMEA")
+            }
+        }
     }
 
     // MARK: PositionSource
@@ -83,6 +93,8 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             self.satelliteCount = nil
             self.correctionAgeSeconds = nil
             self.message = ""
+            self.vidocLine = "未接続"
+            self.ntripLine = "未接続"
         }
         activate(iphone)
     }
@@ -96,17 +108,28 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             self.fix = .none
             self.horizontalAccuracyMeters = nil
             self.message = "ViDoc を探しています"
+            self.vidocLine = "探索中"
+            self.ntripLine = settings.correctionsEnabled ? "認証中" : "未接続"
         }
         activate(vidoc)
         if settings.correctionsEnabled, !settings.user.isEmpty, !password.isEmpty {
             let cfg = NTRIPClient.Config(host: settings.host, port: settings.port,
-                                         mountpoint: settings.mountpoint.rawValue,
+                                         mountpoint: settings.activeMount,
                                          user: settings.user, password: password)
             let client = NTRIPClient(config: cfg, sink: vidoc)
+            client.roughPosition = { [weak self] in self?.rough }
+            client.onBytesPerSecond = { [weak self] rate in
+                self?.setMain {
+                    self?.ntripRate = rate
+                    self?.refreshNTRIPRate()
+                }
+            }
             client.onStatus = { [weak self] status in
                 self?.setMain {
                     self?.message = status
-                    self?.ntripConnected = status.hasPrefix("NTRIP 接続")
+                    self?.ntripLine = status
+                    self?.ntripConnected = status.hasPrefix("NTRIP 接続") || status.hasPrefix("補正受信中")
+                    if self?.ntripConnected == true { self?.refreshNTRIPRate() }
                 }
             }
             ntrip = client
@@ -154,6 +177,13 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
             return
         }
         setMain {
+            if position.isPlottable {
+                self.rough = NTRIPClient.RoughPosition(
+                    latitudeDegrees: position.latitudeDegrees,
+                    longitudeDegrees: position.longitudeDegrees,
+                    ellipsoidalHeightMeters: position.ellipsoidalHeightMeters
+                )
+            }
             self.horizontalAccuracyMeters = position.hasValidHorizontalAccuracy ? position.horizontalAccuracyMeters : nil
             self.fix = position.fixQuality
             if self.mode == .rtk {
@@ -167,6 +197,12 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         }
     }
 
+    private func refreshNTRIPRate() {
+        guard ntripConnected else { return }
+        let age = correctionAgeSeconds.map { String(format: " 補正 %.0f秒", $0) } ?? ""
+        ntripLine = "補正受信中 \(ntripRate) B/s\(age)"
+    }
+
     private func setMain(_ work: @escaping () -> Void) {
         if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
@@ -177,19 +213,37 @@ public enum RTKKeychain {
     private static let service = "arts.survey.ntrip"
     public static func save(user: String, password: String) {
         #if canImport(Security)
-        let account = user.isEmpty ? "default" : user
+        write(account: account(user), password: password)
+        write(account: "ntrip", password: password)
+        #endif
+    }
+    public static func load(user: String) -> String {
+        #if canImport(Security)
+        let named = read(account: account(user))
+        return named.isEmpty ? read(account: "ntrip") : named
+        #else
+        return ""
+        #endif
+    }
+
+    private static func account(_ user: String) -> String {
+        user.isEmpty ? "default" : user
+    }
+
+    #if canImport(Security)
+    private static func write(account: String, password: String) {
         let data = Data(password.utf8)
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service,
                                    kSecAttrAccount as String: account]
         SecItemDelete(base as CFDictionary)
-        var add = base; add[kSecValueData as String] = data
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(add as CFDictionary, nil)
-        #endif
     }
-    public static func load(user: String) -> String {
-        #if canImport(Security)
-        let account = user.isEmpty ? "default" : user
+
+    private static func read(account: String) -> String {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                     kSecAttrService as String: service,
                                     kSecAttrAccount as String: account,
@@ -199,9 +253,7 @@ public enum RTKKeychain {
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data, let text = String(data: data, encoding: .utf8) else { return "" }
         return text
-        #else
-        return ""
-        #endif
     }
+    #endif
 }
 #endif
