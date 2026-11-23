@@ -58,44 +58,58 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(app.buttons["tab-map"].waitForExistence(timeout: 5))
 
         openTab("tab-measure", showing: "screen-measure")
-        XCTAssertTrue(app.staticTexts["現場管理"].waitForExistence(timeout: 5), "データに現場管理が無い")
-        XCTAssertTrue(app.staticTexts["データ管理"].exists)
-        XCTAssertTrue(app.staticTexts["データ書き出し"].exists)
+        let siteTile = app.buttons["open-site"]
+        let ledgerTile = app.buttons["open-ledger"]
+        let exportTile = app.buttons["open-export"]
+        XCTAssertTrue(siteTile.waitForExistence(timeout: 5), "データに現場管理が無い")
+        XCTAssertTrue(siteTile.label.contains("現場管理"))
+        XCTAssertTrue(ledgerTile.label.contains("データ管理"))
+        XCTAssertTrue(exportTile.label.contains("データ書き出し"))
+        XCTAssertTrue(siteTile.label.contains("先にここ"), "未選択の現場が目立っていない")
         XCTAssertFalse(app.buttons["basic-save"].exists, "データに現在地を残すが残っている")
         XCTAssertFalse(app.descendants(matching: .any)["rtk-status"].exists, "データの GNSS 状態が残っている")
         let measureBadge = app.descendants(matching: .any)["accuracy-badge"]
         XCTAssertTrue(measureBadge.waitForExistence(timeout: 5))
         XCTAssertLessThan(measureBadge.frame.height, 72, "データの精度帯が1行に収まっていない")
-        let site = app.staticTexts["現場管理"]
-        XCTAssertGreaterThanOrEqual(site.frame.minY, measureBadge.frame.maxY - 1, "現場管理が状態バーの下に無い")
+        XCTAssertGreaterThanOrEqual(siteTile.frame.minY, measureBadge.frame.maxY - 1, "現場管理が状態バーの下に無い")
+        XCTAssertGreaterThanOrEqual(siteTile.frame.height, 56, "現場管理のタイルが小さい")
         shot("16-data")
-        let sheet = app.scrollViews["screen-measure"]
-        scrollClear(app.staticTexts["データ管理"], in: sheet)
-        shot("04-measure")
-        shot("04-link")
-        scrollClear(app.buttons["basic-restore"], in: sheet)
-        XCTAssertLessThan(app.buttons["basic-restore"].frame.maxY, app.buttons["tab-measure"].frame.minY, "データタブの下まで届いていない")
-        XCTAssertGreaterThanOrEqual(app.buttons["basic-restore"].frame.height, 88, "復元がタイルの高さでない")
+        let home = app.scrollViews["screen-measure"]
+        scrollClear(exportTile, in: home)
         shot("16-data-bottom")
+        scrollClear(siteTile, in: home)
 
+        siteTile.tap()
+        let siteSheet = app.scrollViews["screen-site"]
+        XCTAssertTrue(siteSheet.waitForExistence(timeout: 5), "現場管理が開かない")
+        XCTAssertLessThan(measureBadge.frame.height, 72, "現場管理の精度帯が1行でない")
+        shot("18-site")
+        shot("04-link")
         let project = app.textFields["basic-project-name"]
-        scrollClear(project, in: sheet)
+        scrollClear(project, in: siteSheet)
         replace(project, with: "SiteA")
         let create = app.buttons["basic-create"]
-        scrollClear(create, in: sheet)
-        XCTAssertGreaterThanOrEqual(create.frame.height, 88, "作るがタイルの高さでない")
+        scrollClear(create, in: siteSheet)
+        XCTAssertGreaterThanOrEqual(create.frame.height, 56, "作るが小さい")
         create.tap()
         let made = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteA'")).firstMatch
         XCTAssertTrue(made.waitForExistence(timeout: 5), "プロジェクトを作れない")
         shot("07-project")
-        scrollClear(project, in: sheet)
+        scrollClear(project, in: siteSheet)
         replace(project, with: "SiteB")
         let rename = app.buttons["basic-rename"]
-        scrollClear(rename, in: sheet)
+        scrollClear(rename, in: siteSheet)
         rename.tap()
         let renamed = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'SiteB'")).firstMatch
         XCTAssertTrue(renamed.waitForExistence(timeout: 5), "名前を変えられない")
         shot("07b-rename")
+        shot("18-site-bottom")
+        app.buttons["data-back"].tap()
+        XCTAssertTrue(home.waitForExistence(timeout: 5), "データトップに戻らない")
+        let recordNext = app.buttons["go-map-record"]
+        XCTAssertTrue(recordNext.waitForExistence(timeout: 5), "地図で記録へ戻れない")
+        scrollClear(recordNext, in: home)
+        shot("16-data-record")
 
         openTab("tab-map", showing: "map-record")
         XCTAssertTrue(record.waitForExistence(timeout: 5), "地図の記録が無い")
@@ -103,55 +117,90 @@ final class MapResponsivenessTests: XCTestCase {
         let stagedNote = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を仮置きしました'")).firstMatch
         XCTAssertTrue(stagedNote.waitForExistence(timeout: 12), "地図の記録で仮置きできない")
         openTab("tab-measure", showing: "screen-measure")
+        let ledgerHome = app.buttons["open-ledger"]
+        scrollClear(ledgerHome, in: app.scrollViews["screen-measure"])
+        XCTAssertTrue(ledgerHome.label.contains("仮置き"), "仮置きの件数が目立っていない")
+        ledgerHome.tap()
+        let ledger = app.scrollViews["screen-ledger"]
+        XCTAssertTrue(ledger.waitForExistence(timeout: 5), "データ管理が開かない")
+        shot("19-ledger")
+        shot("04-measure")
         let accept = app.buttons["accept-T1"]
-        tapWhenClear(accept, in: sheet, missing: "台帳へが押せない")
+        XCTAssertTrue(accept.waitForExistence(timeout: 8), "台帳へが無い")
+        scrollClear(accept, in: ledger)
+        XCTAssertGreaterThanOrEqual(accept.frame.height, 56, "台帳へ入れるが小さい")
+        accept.tap()
         let saved = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を台帳に入れました'")).firstMatch
         XCTAssertTrue(saved.waitForExistence(timeout: 12), "台帳へ入れた文が無い")
-        scrollClear(saved, in: sheet)
+        scrollClear(saved, in: ledger)
         shot("08-save")
         let book = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'T1' AND label CONTAINS '下見'")).firstMatch
         XCTAssertTrue(book.waitForExistence(timeout: 5), "台帳の点が座標簿に無い")
-        scrollClear(book, in: sheet)
+        scrollClear(book, in: ledger)
         shot("09-book")
+        shot("19-ledger-bottom")
+        app.buttons["data-back"].tap()
+        XCTAssertTrue(app.scrollViews["screen-measure"].waitForExistence(timeout: 5))
 
-        tapClear("basic-export-csv", in: sheet)
+        app.buttons["open-export"].tap()
+        let exportData = app.scrollViews["screen-data-export"]
+        XCTAssertTrue(exportData.waitForExistence(timeout: 5), "データ書き出しが開かない")
+        shot("20-data-export")
+        tapClear("basic-export-csv", in: exportData)
         let wrote = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '書きました'")).firstMatch
         XCTAssertTrue(wrote.waitForExistence(timeout: 5), "座標一覧を書き出せない")
-        scrollClear(wrote, in: sheet)
+        XCTAssertTrue(app.staticTexts["export-where"].waitForExistence(timeout: 5), "保存先が無い")
+        scrollClear(wrote, in: exportData)
         shot("10-export")
-        tapClear("basic-import", in: sheet)
+        tapClear("basic-import", in: exportData)
+        confirm("上書きして読む")
         let imported = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '1点を読みました'")).firstMatch
         XCTAssertTrue(imported.waitForExistence(timeout: 5), "座標を読み込めない")
-        scrollClear(imported, in: sheet)
+        scrollClear(imported, in: exportData)
         shot("11-import")
-        tapClear("basic-backup", in: sheet)
+        tapClear("basic-backup", in: exportData)
         let backup = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'バックアップを作りました'")).firstMatch
         XCTAssertTrue(backup.waitForExistence(timeout: 5), "バックアップを作れない")
-        scrollClear(backup, in: sheet)
+        scrollClear(backup, in: exportData)
         shot("12-backup")
-        tapClear("basic-restore", in: sheet)
+        tapClear("basic-restore", in: exportData)
+        confirm("戻す")
         let restored = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '1点を戻しました'")).firstMatch
         XCTAssertTrue(restored.waitForExistence(timeout: 5), "バックアップから戻せない")
-        scrollClear(restored, in: sheet)
+        scrollClear(restored, in: exportData)
         shot("13-restore")
+        shot("20-data-export-bottom")
 
         openTab("tab-export", showing: "screen-export")
-        XCTAssertTrue(app.staticTexts["データから点の復元"].waitForExistence(timeout: 5), "出すに復元の入口が無い")
-        XCTAssertTrue(app.staticTexts["図面の縮尺設定／2点割り付け"].exists)
-        XCTAssertTrue(app.staticTexts["GNSSローカライズ"].exists)
-        XCTAssertTrue(app.staticTexts["CAD測設"].exists)
-        XCTAssertTrue(app.staticTexts["次の版"].exists, "未実装の入口に次の版が無い")
+        let exportSheet = app.scrollViews["screen-export"]
+        XCTAssertTrue(app.buttons["open-draw"].waitForExistence(timeout: 5), "出すに図面の入口が無い")
+        XCTAssertTrue(app.buttons["open-scale"].label.contains("図面の縮尺設定／2点割り付け"))
+        XCTAssertTrue(app.buttons["open-scale"].label.contains("次の版"), "未実装の入口に次の版が無い")
+        XCTAssertTrue(app.buttons["open-localize"].label.contains("GNSSローカライズ"))
+        XCTAssertTrue(app.buttons["open-cad"].label.contains("CAD測設"))
+        XCTAssertTrue(app.buttons["open-restore-points"].label.contains("データから点の復元"))
         XCTAssertTrue(app.staticTexts["測設"].exists)
         let exportBadge = app.descendants(matching: .any)["accuracy-badge"]
         XCTAssertTrue(exportBadge.waitForExistence(timeout: 5))
         XCTAssertLessThan(exportBadge.frame.height, 72, "出すの精度帯が1行に収まっていない")
         shot("05-export")
-        let exportSheet = app.scrollViews["screen-export"]
+        visitDeliver("open-draw", screen: "screen-draw", shotName: "21-draw")
+        visitDeliver("open-scale", screen: "screen-scale", shotName: "22-scale")
+        visitDeliver("open-localize", screen: "screen-localize", shotName: "23-localize")
+        visitDeliver("open-cad", screen: "screen-cad", shotName: "24-cad")
+        visitDeliver("open-restore-points", screen: "screen-restore-points", shotName: "25-restore-points")
+        let coordinate = app.buttons["open-coordinate"]
+        scrollClear(coordinate, in: exportSheet)
+        shot("17-deliver")
+        coordinate.tap()
+        let stakeSheet = app.scrollViews["screen-coordinate"]
+        XCTAssertTrue(stakeSheet.waitForExistence(timeout: 5), "座標測設が開かない")
+        XCTAssertTrue(app.staticTexts["purpose-stake"].waitForExistence(timeout: 5), "測設の目的が無い")
+        shot("26-coordinate")
         let stake = app.buttons["basic-stakeout"]
         let kept = app.buttons["basic-record-stake"]
-        scrollClear(kept, in: exportSheet)
-        XCTAssertGreaterThanOrEqual(stake.frame.height, 88, "測設がタイルの高さでない")
-        shot("17-deliver")
+        scrollClear(kept, in: stakeSheet)
+        XCTAssertGreaterThanOrEqual(stake.frame.height, 56, "測設がタイルの高さでない")
         shot("17-deliver-bottom")
         stake.tap()
         openTab("tab-map", showing: "stakeout-guide")
@@ -168,6 +217,25 @@ final class MapResponsivenessTests: XCTestCase {
         }
         shot("15-gcp")
         shot("06-map-return")
+    }
+
+    private func visitDeliver(_ button: String, screen: String, shotName: String) {
+        let control = app.buttons[button]
+        scrollClear(control, in: app.scrollViews["screen-export"])
+        control.tap()
+        XCTAssertTrue(app.scrollViews[screen].waitForExistence(timeout: 5), "\(screen) が開かない")
+        XCTAssertTrue(app.staticTexts["次の版"].waitForExistence(timeout: 5), "次の版が無い")
+        shot(shotName)
+        app.buttons["deliver-back"].tap()
+        XCTAssertTrue(app.scrollViews["screen-export"].waitForExistence(timeout: 5), "出すトップに戻らない")
+    }
+
+    private func confirm(_ title: String) {
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "確認が出ない")
+        let button = alert.buttons[title]
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "\(title) が無い")
+        button.tap()
     }
 
     private func replace(_ field: XCUIElement, with text: String) {

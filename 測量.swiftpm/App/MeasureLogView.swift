@@ -8,15 +8,13 @@ struct MeasureLogView: View {
     private let listBottomClearance: CGFloat = 68 + 24
 
     var body: some View {
+        if SurveyBuild.basicMode {
+            BasicDesk(field: field)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(SurveyColor.background)
+                .foregroundStyle(SurveyColor.text)
+        } else {
         VStack(alignment: .leading, spacing: 0) {
-            if SurveyBuild.basicMode {
-                Text("データ")
-                    .font(SurveyType(28, .heavy))
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                    .padding(.bottom, 4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
             measureList
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

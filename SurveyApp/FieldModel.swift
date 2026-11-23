@@ -65,6 +65,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var observations: FieldObservationLog
     @Published var showsWorkSettings = false
     @Published private(set) var captureMessage: String?
+    /// 測設を仮置きしたときの設計差。画面に残す。
+    @Published private(set) var stakeResult: String?
     @Published var plannedRounds = 3
     @Published private(set) var rounds: [BenchmarkRound] = []
     @Published private(set) var comparison: CampaignComparison?
@@ -2461,16 +2463,18 @@ final class FieldModel: ObservableObject {
         )
         let observation = FieldObservation(
             name: name,
-            workID: workCatalog.selected.id,
+            workID: "stakeout",
             captured: position,
             condition: condition
         )
         store(observation)
-        var entry = CoordinateBookIndex.entry(from: observation, kind: "測設")
         let height = guide.heightMeters.map { String(format: "%+.3f", $0) } ?? "—"
-        entry.source = String(format: "設計差 北 %+.3f 東 %+.3f 高 %@ %@", guide.northMeters, guide.eastMeters, height, condition.solutionLabel)
-        remember(entry)
-        captureMessage = "\(name)を測設として残しました。\(entry.source ?? "")"
+        let result = String(
+            format: "%@を仮置きしました。ΔX %+.3f ΔY %+.3f ΔH %@",
+            name, guide.eastMeters, guide.northMeters, height
+        )
+        stakeResult = result
+        captureMessage = result
         return true
     }
 

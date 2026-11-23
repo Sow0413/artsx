@@ -1,10 +1,31 @@
 import SwiftUI
 import SurveyCore
 
+private enum DeliverPage: Hashable {
+    case drawing
+    case scale
+    case localize
+    case cad
+    case restore
+    case coordinate
+
+    var identifier: String {
+        switch self {
+        case .drawing: return "open-draw"
+        case .scale: return "open-scale"
+        case .localize: return "open-localize"
+        case .cad: return "open-cad"
+        case .restore: return "open-restore-points"
+        case .coordinate: return "open-coordinate"
+        }
+    }
+}
+
 struct ExportTabView: View {
     @ObservedObject var field: FieldModel
     @State private var accuracyText = ""
     @State private var importedDay = ""
+    @State private var deliverPath: [DeliverPage] = []
 
     private let listBottomClearance: CGFloat = 68 + 24
 
@@ -17,36 +38,125 @@ struct ExportTabView: View {
     }
 
     private var futureEntrance: some View {
+        NavigationStack(path: $deliverPath) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("図面を合わせて、点へ測設する。")
+                        .font(SurveyType(18, .heavy))
+                        .lineLimit(1)
+                        .accessibilityIdentifier("purpose-deliver")
+                    stepTile(order: 1, title: "図面を読み込む", systemImage: "doc", page: .drawing, locked: false)
+                    stepTile(order: 2, title: "図面の縮尺設定／2点割り付け", systemImage: "ruler", page: .scale, locked: true)
+                    stepTile(order: 3, title: "GNSSローカライズ", systemImage: "location.north.line", page: .localize, locked: true)
+                    stepTile(order: 4, title: "CAD測設", systemImage: "square.and.pencil", page: .cad, locked: true)
+                    Text("別の入口")
+                        .font(SurveyType(18, .heavy))
+                        .padding(.top, 8)
+                    stepTile(order: nil, title: "データから点の復元", systemImage: "arrow.uturn.backward", page: .restore, locked: true)
+                    Text("測設")
+                        .font(SurveyType(18, .heavy))
+                        .padding(.top, 8)
+                    stepTile(order: nil, title: "座標を打って測設", systemImage: "scope", page: .coordinate, locked: false)
+                }
+                .padding(20)
+                .padding(.bottom, listBottomClearance)
+            }
+            .accessibilityIdentifier("screen-export")
+            .background(SurveyColor.background)
+            .navigationTitle("出す")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar(deliverPath.isEmpty ? .hidden : .visible, for: .navigationBar)
+            .navigationDestination(for: DeliverPage.self) { page in
+                deliverPage(page)
+            }
+        }
+        .foregroundStyle(SurveyColor.text)
+    }
+
+    private func stepTile(order: Int?, title: String, systemImage: String, page: DeliverPage, locked: Bool) -> some View {
+        Button {
+            deliverPath.append(page)
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(locked ? SurveyColor.muted : SurveyColor.blue)
+                    .frame(width: 40)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(order.map { "\($0) \(title)" } ?? title)
+                        .font(SurveyType(18, .heavy))
+                        .lineLimit(2)
+                    Text(locked ? "未着手・次の版" : "未着手")
+                        .font(SurveyType(15, .heavy))
+                        .foregroundStyle(locked ? SurveyColor.muted : SurveyColor.amber)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(SurveyColor.muted)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+            .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(locked ? SurveyColor.line : SurveyColor.blue, lineWidth: locked ? 1 : 3)
+            )
+            .opacity(locked ? 0.72 : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(page.identifier)
+        .accessibilityLabel("\(title)。\(locked ? "未着手。次の版" : "未着手")")
+    }
+
+    @ViewBuilder
+    private func deliverPage(_ page: DeliverPage) -> some View {
+        switch page {
+        case .coordinate:
+            BasicStakeoutCard(field: field)
+                .navigationTitle("座標を打って測設")
+                .navigationBarTitleDisplayMode(.inline)
+                .deliverBack { deliverPath.removeLast() }
+        case .drawing:
+            laterPage(title: "図面を読み込む", purpose: "図面のファイルを読み込む。", identifier: "screen-draw")
+        case .scale:
+            laterPage(title: "図面の縮尺設定／2点割り付け", purpose: "2点の距離差で合否を見る。2cmと1/10000。", identifier: "screen-scale")
+        case .localize:
+            laterPage(title: "GNSSローカライズ", purpose: "測った点で現場座標に合わせる。", identifier: "screen-localize")
+        case .cad:
+            laterPage(title: "CAD測設", purpose: "図面の点を選んで誘導し、測設を残す。", identifier: "screen-cad")
+        case .restore:
+            laterPage(title: "データから点の復元", purpose: "書き出したデータから点を戻す。", identifier: "screen-restore-points")
+        }
+    }
+
+    private func laterPage(title: String, purpose: String, identifier: String) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("出す")
-                    .font(SurveyType(28, .heavy))
-                Text("書き出しはデータの中に移しました。ここは、これから使う入口です。")
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title)
+                    .font(SurveyType(22, .heavy))
+                Text(purpose)
+                    .font(SurveyType(18, .heavy))
+                    .lineLimit(2)
+                Text("未着手")
+                    .font(SurveyType(20, .heavy))
+                    .foregroundStyle(SurveyColor.amber)
+                Text("次の版")
+                    .font(SurveyType(18, .heavy))
+                    .foregroundStyle(SurveyColor.muted)
+                Text("前の段の計算は、次の版で入ります。")
                     .font(SurveyType(16, .semibold))
                     .foregroundStyle(SurveyColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(alignment: .top, spacing: 10) {
-                    futureTile(title: "データから点の復元", systemImage: "arrow.uturn.backward")
-                    futureTile(title: "図面の縮尺設定／2点割り付け", systemImage: "ruler")
-                }
-                HStack(alignment: .top, spacing: 10) {
-                    futureTile(title: "GNSSローカライズ", systemImage: "location.north.line")
-                    futureTile(title: "CAD測設", systemImage: "square.and.pencil")
-                }
-                BasicStakeoutCard(field: field)
+                    .lineLimit(1)
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityIdentifier("screen-export")
+        .accessibilityIdentifier(identifier)
         .background(SurveyColor.background)
-        .foregroundStyle(SurveyColor.text)
-    }
-
-    /// まだ中身の無い入口。押せず、薄く「次の版」と出す。
-    private func futureTile(title: String, systemImage: String) -> some View {
-        DeskTileLabel(title: title, systemImage: systemImage, caption: "次の版", dimmed: true)
-            .accessibilityElement(children: .contain)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .deliverBack { deliverPath.removeLast() }
     }
 
     private var legacyExport: some View {
@@ -275,5 +385,21 @@ struct ExportTabView: View {
         case .dgps: return "DGPS"
         case .standalone, .none: return "単独"
         }
+    }
+}
+
+private extension View {
+    func deliverBack(action: @escaping () -> Void) -> some View {
+        navigationBarBackButtonHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: action) {
+                        Label("戻る", systemImage: "chevron.left")
+                            .font(SurveyType(18, .heavy))
+                            .frame(minWidth: 56, minHeight: 56)
+                    }
+                    .accessibilityIdentifier("deliver-back")
+                }
+            }
     }
 }
