@@ -234,15 +234,19 @@ struct MeasureLogView: View {
             #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
             if let session = field.rtkSession {
                 Text(rtkLine(session))
-                    .font(SurveyType(18, .heavy))
+                    .font(SurveyType(16, .heavy))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .accessibilityIdentifier("rtk-status")
                 Text("ViDoc \(session.vidocLine)")
                     .font(SurveyType(15, .heavy))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
                     .accessibilityIdentifier("vidoc-status")
                 Text("NTRIP \(session.ntripLine)")
                     .font(SurveyType(15, .heavy))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
                     .accessibilityIdentifier("ntrip-status")
             }
             #endif

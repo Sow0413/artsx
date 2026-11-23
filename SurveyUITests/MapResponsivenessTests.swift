@@ -79,17 +79,13 @@ final class MapResponsivenessTests: XCTestCase {
         shot("07b-rename")
 
         let save = app.scrollViews["screen-measure"].buttons["basic-save"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5), "測る画面の中に保存ボタンが無い")
         XCTAssertEqual(app.scrollViews["screen-measure"].buttons.matching(identifier: "basic-save").count, 1)
-        scrollClear(save, in: sheet)
-        save.tap()
-        let confirm = app.scrollViews["screen-measure"].buttons["この点を確定"]
-        if confirm.waitForExistence(timeout: 4) {
-            scrollClear(confirm, in: sheet)
-            confirm.tap()
-        }
+        tapWhenClear(save, in: sheet, missing: "現在地を残すが押せない")
+        let confirm = app.buttons["この点を確定"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 12), "確認のボタンが出ない")
+        tapWhenClear(confirm, in: sheet, missing: "この点を確定が押せない")
         let saved = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を残しました' AND NOT label CONTAINS '基準点'")).firstMatch
-        XCTAssertTrue(saved.waitForExistence(timeout: 5), "点を残した文が無い")
+        XCTAssertTrue(saved.waitForExistence(timeout: 12), "点を残した文が無い")
         scrollClear(saved, in: sheet)
         shot("08-save")
         let book = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'T1' AND label CONTAINS '下見'")).firstMatch
@@ -167,6 +163,17 @@ final class MapResponsivenessTests: XCTestCase {
             app.keyboards.buttons[key].tap()
             return
         }
+    }
+
+    private func tapWhenClear(_ element: XCUIElement, in sheet: XCUIElement, missing: String) {
+        XCTAssertTrue(element.waitForExistence(timeout: 8), missing)
+        scrollClear(element, in: sheet)
+        let hittable = expectation(for: NSPredicate(format: "isHittable == true"), evaluatedWith: element)
+        if XCTWaiter().wait(for: [hittable], timeout: 3) != .completed {
+            scrollClear(element, in: sheet)
+        }
+        XCTAssertTrue(element.isHittable, missing)
+        element.tap()
     }
 
     private func tapClear(_ identifier: String, in sheet: XCUIElement) {

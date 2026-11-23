@@ -127,14 +127,16 @@ struct RTKSettingsView: View {
     }
 
     private func labeled(_ title: String, _ value: String, id: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(title)
-                .font(SurveyType(13, .semibold))
+                .font(SurveyType(15, .heavy))
                 .foregroundStyle(SurveyColor.muted)
             Text(value)
-                .font(SurveyType(16, .heavy))
-                .fixedSize(horizontal: false, vertical: true)
+                .font(SurveyType(15, .heavy))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
                 .accessibilityIdentifier(id)
+            Spacer(minLength: 0)
         }
     }
 
