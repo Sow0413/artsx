@@ -96,7 +96,6 @@ final class MapResponsivenessTests: XCTestCase {
         shot("07b-rename")
 
         openTab("tab-map", showing: "map-record")
-        let record = app.buttons["map-record"]
         XCTAssertTrue(record.waitForExistence(timeout: 5), "地図の記録が無い")
         record.tap()
         let stagedNote = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を仮置きしました'")).firstMatch
