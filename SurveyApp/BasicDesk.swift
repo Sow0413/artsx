@@ -634,9 +634,9 @@ struct DeskTile: View {
     var systemImage: String
     var caption: String? = nil
     var dimmed = false
+    var identifier: String? = nil
     var prominent = false
     var danger = false
-    var identifier: String? = nil
     var action: () -> Void
 
     var body: some View {
