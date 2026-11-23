@@ -21,6 +21,7 @@ struct MeasureLogView: View {
         .clipped()
         .background(SurveyColor.background)
         .foregroundStyle(SurveyColor.text)
+        }
     }
 
     private var measureList: some View {
