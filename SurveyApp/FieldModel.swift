@@ -20,7 +20,7 @@ enum FieldTab: String, CaseIterable, Identifiable {
         switch self {
         case .map: return "地図"
         case .drawing: return "図面"
-        case .measure: return "測る"
+        case .measure: return "データ"
         case .export: return "出す"
         case .seat: return "オペ"
         }
@@ -30,7 +30,7 @@ enum FieldTab: String, CaseIterable, Identifiable {
         switch self {
         case .map: return "map"
         case .drawing: return "ruler"
-        case .measure: return "mappin"
+        case .measure: return "tray.full"
         case .export: return "square.and.arrow.up"
         case .seat: return "steeringwheel"
         }
@@ -2339,6 +2339,20 @@ final class FieldModel: ObservableObject {
 
     private func bookKind(for work: WorkRequirement) -> String {
         work.id == "boundary" ? "基準点" : work.shortTitle
+    }
+
+    /// 仮置きの点。座標簿に同じ名前が無いものだけ。
+    func stagedPoints() -> [FieldObservation] {
+        let booked = Set(basicPoints().map(\.name))
+        return observations.observations.filter { !booked.contains($0.name) }
+    }
+
+    /// 検品した仮置きを、人が押したときだけ台帳へ入れる。
+    func acceptStaged(_ observation: FieldObservation) {
+        let work = workCatalog.works.first { $0.id == observation.workID }
+        let kind = observation.workID == "boundary" ? "GCP" : (work?.shortTitle ?? observation.workID)
+        remember(CoordinateBookIndex.entry(from: observation, kind: kind))
+        captureMessage = "\(observation.name)を台帳に入れました。"
     }
 
     private func remember(_ entry: CoordinateBookEntry) {

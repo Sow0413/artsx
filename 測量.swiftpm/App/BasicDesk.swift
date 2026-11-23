@@ -18,6 +18,12 @@ struct BasicDesk: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("現場管理")
+                .font(SurveyType(22, .heavy))
+                .accessibilityIdentifier("section-site")
+            Text("現場の切替と作成。")
+                .font(SurveyType(14, .semibold))
+                .foregroundStyle(SurveyColor.muted)
             Text("プロジェクト")
                 .font(SurveyType(18, .heavy))
             if field.drawing.projects.isEmpty {
@@ -58,7 +64,59 @@ struct BasicDesk: View {
                     .font(SurveyType(14, .semibold))
                     .foregroundStyle(SurveyColor.muted)
             }
+            Text("測設")
+                .font(SurveyType(18, .heavy))
+            TextField("点名", text: $rename)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("basic-stake-name")
+            TextField("緯度", text: $latitude)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("stakeout-latitude")
+            TextField("経度", text: $longitude)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("stakeout-longitude")
+            TextField("楕円体高", text: $height)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("stakeout-height")
+            Button("この座標へ") {
+                field.aimBasic(name: rename, latitude: latitude, longitude: longitude, height: height)
+            }
+            .font(SurveyType(16, .heavy))
+            .accessibilityIdentifier("basic-stakeout")
+            if let line = field.basicStakeoutLine {
+                Text(line)
+                    .font(SurveyType(16, .heavy))
+                    .accessibilityIdentifier("stakeout-guide")
+            }
+            Button("測設を残す") { field.recordStake() }
+                .font(SurveyType(16, .heavy))
+                .accessibilityIdentifier("basic-record-stake")
 
+            Text("データ管理")
+                .font(SurveyType(22, .heavy))
+                .accessibilityIdentifier("section-data")
+            Text("仮置きを見てから、台帳へ入れます。自動では入れません。")
+                .font(SurveyType(14, .semibold))
+                .foregroundStyle(SurveyColor.muted)
+            let staged = field.stagedPoints()
+            if staged.isEmpty {
+                Text("仮置きはまだありません。地図の記録で残します。")
+                    .font(SurveyType(15, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+            }
+            ForEach(staged) { observation in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("仮置き \(observation.name) \(observation.captured.solutionLabel)")
+                        .font(SurveyType(16, .heavy))
+                    Text(CoordinateText.accuracyMeters(observation.captured.horizontalAccuracyMeters))
+                        .font(SurveyType(13, .semibold))
+                        .foregroundStyle(SurveyColor.muted)
+                    Button("台帳へ") { field.acceptStaged(observation) }
+                        .font(SurveyType(16, .heavy))
+                        .accessibilityIdentifier("accept-\(observation.name)")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Text("座標簿")
                 .font(SurveyType(18, .heavy))
                 .accessibilityIdentifier("basic-book")
@@ -98,6 +156,12 @@ struct BasicDesk: View {
                 .accessibilityIdentifier("basic-point-rename")
             }
 
+            Text("データ書き出し")
+                .font(SurveyType(22, .heavy))
+                .accessibilityIdentifier("section-export")
+            Text("座標一覧と SIMA、読み込み、バックアップ。")
+                .font(SurveyType(14, .semibold))
+                .foregroundStyle(SurveyColor.muted)
             HStack {
                 Button("座標一覧") { field.exportBasic(.csv) }
                     .accessibilityIdentifier("basic-export-csv")
@@ -139,34 +203,6 @@ struct BasicDesk: View {
                         .font(SurveyType(16, .heavy))
                 }
             }
-
-            Text("測設")
-                .font(SurveyType(18, .heavy))
-            TextField("点名", text: $rename)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("basic-stake-name")
-            TextField("緯度", text: $latitude)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("stakeout-latitude")
-            TextField("経度", text: $longitude)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("stakeout-longitude")
-            TextField("楕円体高", text: $height)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityIdentifier("stakeout-height")
-            Button("この座標へ") {
-                field.aimBasic(name: rename, latitude: latitude, longitude: longitude, height: height)
-            }
-            .font(SurveyType(16, .heavy))
-            .accessibilityIdentifier("basic-stakeout")
-            if let line = field.basicStakeoutLine {
-                Text(line)
-                    .font(SurveyType(16, .heavy))
-                    .accessibilityIdentifier("stakeout-guide")
-            }
-            Button("測設を残す") { field.recordStake() }
-                .font(SurveyType(16, .heavy))
-                .accessibilityIdentifier("basic-record-stake")
             if let message = field.captureMessage {
                 Text(message)
                     .font(SurveyType(14, .semibold))

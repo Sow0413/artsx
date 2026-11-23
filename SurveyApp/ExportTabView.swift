@@ -9,6 +9,54 @@ struct ExportTabView: View {
     private let listBottomClearance: CGFloat = 68 + 24
 
     var body: some View {
+        if SurveyBuild.basicMode {
+            futureEntrance
+        } else {
+            legacyExport
+        }
+    }
+
+    private var futureEntrance: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("出す")
+                    .font(SurveyType(28, .heavy))
+                Text("書き出しはデータの中に移しました。ここは、これから使う入口です。")
+                    .font(SurveyType(16, .semibold))
+                    .foregroundStyle(SurveyColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                guideCard(
+                    title: "データから点の復元",
+                    body: "まだ使えません。次の版で、書き出したデータから点を戻します。"
+                )
+                guideCard(
+                    title: "CAD測設",
+                    body: "まだ使えません。次の版で、図面の点へ測設します。"
+                )
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("screen-export")
+        .background(SurveyColor.background)
+        .foregroundStyle(SurveyColor.text)
+    }
+
+    private func guideCard(title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(SurveyType(20, .heavy))
+            Text(body)
+                .font(SurveyType(15, .semibold))
+                .foregroundStyle(SurveyColor.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var legacyExport: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("出す")

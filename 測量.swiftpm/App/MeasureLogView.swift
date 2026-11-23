@@ -11,7 +11,7 @@ struct MeasureLogView: View {
         VStack(alignment: .leading, spacing: 0) {
             if SurveyBuild.basicMode {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("測る")
+                    Text("データ")
                         .font(SurveyType(28, .heavy))
                     Text(field.operation.coach)
                         .font(SurveyType(15, .semibold))
@@ -35,7 +35,7 @@ struct MeasureLogView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if !SurveyBuild.basicMode {
-                Text("測る")
+                Text("データ")
                     .font(SurveyType(28, .heavy))
                 }
                 if !SurveyBuild.basicMode {

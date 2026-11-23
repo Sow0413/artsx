@@ -58,7 +58,11 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(app.buttons["tab-map"].waitForExistence(timeout: 5))
 
         openTab("tab-measure", showing: "screen-measure")
-        XCTAssertTrue(app.descendants(matching: .any)["rtk-status"].waitForExistence(timeout: 5), "測る画面に RTK の状態が無い")
+        XCTAssertTrue(app.staticTexts["現場管理"].waitForExistence(timeout: 5), "データに現場管理が無い")
+        XCTAssertTrue(app.staticTexts["データ管理"].exists)
+        XCTAssertTrue(app.staticTexts["データ書き出し"].exists)
+        shot("16-data")
+        XCTAssertTrue(app.descendants(matching: .any)["rtk-status"].waitForExistence(timeout: 5), "データ画面に RTK の状態が無い")
         let sheet = app.scrollViews["screen-measure"]
         scrollClear(app.staticTexts["vidoc-status"], in: sheet)
         XCTAssertTrue(app.staticTexts["ntrip-status"].exists)
@@ -144,8 +148,10 @@ final class MapResponsivenessTests: XCTestCase {
         shot("15-gcp")
 
         openTab("tab-export", showing: "screen-export")
-        scrollClear(app.textFields["book-imported-day"], in: app.scrollViews["screen-export"])
+        XCTAssertTrue(app.staticTexts["CAD測設"].waitForExistence(timeout: 5), "出すに測設の入口が無い")
+        XCTAssertTrue(app.staticTexts["データから点の復元"].exists)
         shot("05-export")
+        shot("17-deliver")
         openTab("tab-map", showing: "map-controls")
         shot("06-map-return")
     }
