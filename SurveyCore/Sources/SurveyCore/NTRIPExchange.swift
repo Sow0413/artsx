@@ -1,0 +1,369 @@
+import Foundation
+
+/// NTRIP の要求と応答。ソケットは持たないので、Linux のテストから偽 caster に投げられる。
+public enum NTRIPDialect: String, Sendable, Equatable {
+    case v1
+    case v2
+}
+
+public enum NTRIPReply: Equatable, Sendable {
+    case stream
+    case sourcetable
+    case unauthorized
+    case missingMount
+    case unavailable
+    case other(Int)
+
+    public var message: String {
+        switch self {
+        case .stream: return "補正受信中"
+        case .sourcetable: return "マウント一覧"
+        case .unauthorized: return "IDまたはパスワードが違います（401）"
+        case .missingMount: return "マウントポイントがありません（404）"
+        case .unavailable: return "同じIDが別の機器で接続中か、一時的に混雑しています。少し待って再接続してください"
+        case .other(let code): return "NTRIP が拒否しました（\(code)）"
+        }
+    }
+}
+
+public struct NTRIPWire: Equatable, Sendable {
+    public var bytes: Data
+    /// 認証の中身は *** に伏せた、ログ用の文面。
+    public var log: String
+
+    public init(bytes: Data, log: String) {
+        self.bytes = bytes
+        self.log = log
+    }
+}
+
+public struct NTRIPHeader: Equatable, Sendable {
+    public var reply: NTRIPReply
+    public var statusLine: String
+    public var chunked: Bool
+    public var body: Data
+
+    public init(reply: NTRIPReply, statusLine: String, chunked: Bool, body: Data) {
+        self.reply = reply
+        self.statusLine = statusLine
+        self.chunked = chunked
+        self.body = body
+    }
+}
+
+public enum NTRIPExchange {
+    public static let userAgent = "NTRIP artsx/1.1"
+    /// 応答のあとに送る間隔。5秒以下。既定は2秒。
+    public static let ggaIntervalSeconds: TimeInterval = 2
+
+    public static func request(
+        host: String,
+        mount: String?,
+        user: String,
+        password: String,
+        dialect: NTRIPDialect,
+        gga: String?
+    ) -> NTRIPWire {
+        let path = mount.map { $0.isEmpty ? "/" : "/\($0)" } ?? "/"
+        let version = dialect == .v1 ? "HTTP/1.0" : "HTTP/1.1"
+        var lines = ["GET \(path) \(version)"]
+        if dialect == .v2 {
+            lines.append("Host: \(host)")
+            lines.append("Ntrip-Version: Ntrip/2.0")
+        }
+        lines.append("User-Agent: \(userAgent)")
+        lines.append("Authorization: Basic \(basicToken(user: user, password: password))")
+        lines.append("Accept: */*")
+        lines.append("Connection: close")
+        var wire = lines.joined(separator: "\r\n") + "\r\n\r\n"
+        if let gga, !gga.isEmpty {
+            wire += gga.hasSuffix("\r\n") ? gga : gga + "\r\n"
+        }
+        var masked = lines
+        if let index = masked.firstIndex(where: { $0.hasPrefix("Authorization:") }) {
+            masked[index] = "Authorization: Basic ***"
+        }
+        let log = masked.joined(separator: "\r\n") + "\r\n\r\n" + (gga.map { ($0.hasSuffix("\r\n") ? $0 : $0 + "\r\n") } ?? "")
+        return NTRIPWire(bytes: Data(wire.utf8), log: log)
+    }
+
+    public static func basicToken(user: String, password: String) -> String {
+        Data("\(user):\(password)".utf8).base64EncodedString()
+    }
+
+    /// ヘッダが揃うまで nil。ICY 200 OK だけの応答も境目にする。
+    public static func parseHeader(_ data: Data) -> NTRIPHeader? {
+        let separator = Data("\r\n\r\n".utf8)
+        let split: Data.Index
+        let headData: Data
+        let body: Data
+        if let range = data.range(of: separator) {
+            split = range.upperBound
+            headData = data.subdata(in: data.startIndex..<range.lowerBound)
+            body = data.subdata(in: split..<data.endIndex)
+        } else if let range = data.range(of: Data("ICY 200 OK\r\n".utf8)) {
+            headData = data.subdata(in: data.startIndex..<range.lowerBound)
+            body = data.subdata(in: range.upperBound..<data.endIndex)
+        } else {
+            return nil
+        }
+        let head = String(data: headData, encoding: .ascii) ?? ""
+        let status = head.split(whereSeparator: \.isNewline).first.map(String.init) ?? head
+        let folded = head.lowercased()
+        let chunked = folded.contains("transfer-encoding:") && folded.contains("chunked")
+        return NTRIPHeader(reply: classify(status), statusLine: status, chunked: chunked, body: body)
+    }
+
+    public static func classify(_ statusLine: String) -> NTRIPReply {
+        let line = statusLine.uppercased()
+        if line.contains("SOURCETABLE") { return .sourcetable }
+        if line.contains("ICY") && line.contains("200") { return .stream }
+        if let code = httpCode(line) {
+            switch code {
+            case 200: return .stream
+            case 401: return .unauthorized
+            case 404: return .missingMount
+            case 503: return .unavailable
+            default: return .other(code)
+            }
+        }
+        return .other(0)
+    }
+
+    public static func mounts(in sourcetable: String) -> [String] {
+        sourcetable.split(whereSeparator: \.isNewline).compactMap { raw in
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.uppercased().hasPrefix("STR;") else { return nil }
+            let fields = line.split(separator: ";", omittingEmptySubsequences: false)
+            guard fields.count > 1 else { return nil }
+            let name = String(fields[1])
+            return name.isEmpty ? nil : name
+        }
+    }
+
+    /// 現在地から $GPGGA を作る。チェックサム付き。
+    public static func gpgga(
+        latitudeDegrees: Double,
+        longitudeDegrees: Double,
+        ellipsoidalHeightMeters: Double?,
+        at date: Date = Date()
+    ) -> String {
+        let calendar = Calendar(identifier: .gregorian)
+        let parts = calendar.dateComponents(in: TimeZone(secondsFromGMT: 0)!, from: date)
+        let time = String(format: "%02d%02d%02d.00", parts.hour ?? 0, parts.minute ?? 0, parts.second ?? 0)
+        let lat = coordinate(latitudeDegrees, latitude: true)
+        let lon = coordinate(longitudeDegrees, latitude: false)
+        let height = ellipsoidalHeightMeters.map { String(format: "%.1f", $0) } ?? ""
+        let body = "GPGGA,\(time),\(lat.value),\(lat.hemisphere),\(lon.value),\(lon.hemisphere),1,08,1.0,\(height),M,0.0,M,,"
+        return "$\(body)*\(checksum(body))"
+    }
+
+    public static func checksum(_ body: String) -> String {
+        var value: UInt8 = 0
+        for byte in body.utf8 { value ^= byte }
+        return String(format: "%02X", value)
+    }
+
+    private static func httpCode(_ line: String) -> Int? {
+        let parts = line.split(separator: " ")
+        guard parts.count >= 2, let code = Int(parts[1]) else { return nil }
+        return code
+    }
+
+    private static func coordinate(_ degrees: Double, latitude: Bool) -> (value: String, hemisphere: String) {
+        let hemisphere: String
+        if latitude {
+            hemisphere = degrees < 0 ? "S" : "N"
+        } else {
+            hemisphere = degrees < 0 ? "W" : "E"
+        }
+        let absolute = abs(degrees)
+        let whole = Int(absolute)
+        let minutes = (absolute - Double(whole)) * 60
+        if latitude {
+            return (String(format: "%02d%07.4f", whole, minutes), hemisphere)
+        }
+        return (String(format: "%03d%07.4f", whole, minutes), hemisphere)
+    }
+}
+
+/// HTTP/1.1 の chunked 本体を、届いた分だけ RTCM に戻す。
+public struct NTRIPChunkDecoder: Sendable {
+    private var buffer = Data()
+
+    public init() {}
+
+    public mutating func feed(_ data: Data) -> Data {
+        buffer.append(data)
+        var output = Data()
+        let newline = Data("\r\n".utf8)
+        while let range = buffer.range(of: newline) {
+            let sizeText = String(data: buffer.subdata(in: buffer.startIndex..<range.lowerBound), encoding: .ascii) ?? ""
+            let size = Int(sizeText.trimmingCharacters(in: .whitespaces), radix: 16) ?? -1
+            guard size >= 0 else {
+                buffer.removeAll(keepingCapacity: false)
+                break
+            }
+            let payloadStart = range.upperBound
+            let needed = size + 2
+            guard buffer.distance(from: payloadStart, to: buffer.endIndex) >= needed else { break }
+            let payloadEnd = buffer.index(payloadStart, offsetBy: size)
+            if size > 0 { output.append(buffer.subdata(in: payloadStart..<payloadEnd)) }
+            buffer.removeSubrange(buffer.startIndex..<buffer.index(payloadEnd, offsetBy: 2))
+            if size == 0 { break }
+        }
+        return output
+    }
+}
+
+/// `<STX>nmea<ETX>` と、FFF2 へ書く RTCM の切り方。
+public enum ViDocLink {
+    public static let nmeaStartCommand = Data([0x02, 0x6E, 0x6D, 0x65, 0x61, 0x03])
+    /// 244 バイト連続書きは RTCM の 6 割以上を落とす。180 を上限にする。
+    public static let maxChunkBytes = 180
+    public static let minimumChunkBytes = 20
+    /// チャンク間隔。10〜15 ms。既定は 12 ms。
+    public static let rtcmChunkIntervalMs = 12
+
+    public static func chunkSize(maximumWriteLength: Int) -> Int {
+        min(maxChunkBytes, max(minimumChunkBytes, maximumWriteLength))
+    }
+
+    public static func rtcmChunks(_ data: Data, maximumWriteLength: Int) -> [Data] {
+        let size = chunkSize(maximumWriteLength: maximumWriteLength)
+        guard !data.isEmpty else { return [] }
+        var chunks: [Data] = []
+        var offset = 0
+        while offset < data.count {
+            let end = min(offset + size, data.count)
+            chunks.append(data.subdata(in: offset..<end))
+            offset = end
+        }
+        return chunks
+    }
+}
+
+/// 連続書きを避け、次のチャンクを出してよいかを時刻と送信口の空きで決める。
+public struct RTCMWriteSchedule: Equatable, Sendable {
+    public var intervalMs: Int
+    public private(set) var nextAllowed: TimeInterval
+
+    public init(intervalMs: Int = ViDocLink.rtcmChunkIntervalMs, nextAllowed: TimeInterval = -.infinity) {
+        self.intervalMs = intervalMs
+        self.nextAllowed = nextAllowed
+    }
+
+    public func allows(at now: TimeInterval, transportReady: Bool) -> Bool {
+        transportReady && now + 1e-9 >= nextAllowed
+    }
+
+    public func advanced(afterSendingAt now: TimeInterval) -> RTCMWriteSchedule {
+        var copy = self
+        copy.nextAllowed = now + Double(intervalMs) / 1_000
+        return copy
+    }
+}
+
+/// 届いた RTCM を順に貯める。上限を超えたら、フレームの途中ではなく古い文ごと捨てる。
+public struct RTCMOutboundBuffer: Sendable {
+    public static let capBytes = 16 * 1024
+    private var frames: [Data] = []
+    private var partial = Data()
+    private var frontIsPartial = false
+
+    public init() {}
+
+    public var bufferedBytes: Int { frames.reduce(0) { $0 + $1.count } }
+
+    public mutating func append(_ data: Data) {
+        guard !data.isEmpty else { return }
+        partial.append(data)
+        while let frame = nextFrame() {
+            frames.append(frame)
+        }
+        trimToCap()
+    }
+
+    public mutating func nextChunk(maximumBytes: Int) -> Data? {
+        guard maximumBytes > 0, !frames.isEmpty else { return nil }
+        var first = frames[0]
+        let count = min(maximumBytes, first.count)
+        let chunk = Data(first.prefix(count))
+        first.removeFirst(count)
+        if first.isEmpty {
+            frames.removeFirst()
+            frontIsPartial = false
+        } else {
+            frames[0] = first
+            frontIsPartial = true
+        }
+        return chunk
+    }
+
+    private mutating func nextFrame() -> Data? {
+        while partial.count >= 3 {
+            if partial[partial.startIndex] != 0xD3 {
+                partial.removeFirst()
+                continue
+            }
+            let high = Int(partial[partial.index(partial.startIndex, offsetBy: 1)] & 0x03)
+            let low = Int(partial[partial.index(partial.startIndex, offsetBy: 2)])
+            let length = (high << 8) | low
+            let total = length + 6
+            guard partial.count >= total else { return nil }
+            let frame = Data(partial.prefix(total))
+            partial.removeFirst(total)
+            return frame
+        }
+        return nil
+    }
+
+    private mutating func trimToCap() {
+        while bufferedBytes > Self.capBytes, !frames.isEmpty {
+            if frames.count == 1, frontIsPartial { break }
+            if frontIsPartial, frames.count > 1 {
+                frames.remove(at: 1)
+            } else {
+                frames.removeFirst()
+                frontIsPartial = false
+            }
+        }
+        if partial.count > Self.capBytes {
+            partial.removeAll(keepingCapacity: false)
+        }
+    }
+}
+
+/// ViDoc の広告を拾うか。iOS は localName を落とすことが多い。GATT は FFF0、広告の Service Data は FFE1、製造者は Minew 0x0639。
+public enum ViDocDiscovery {
+    public static let serviceUUID = "FFF0"
+    public static let advertisementServiceDataUUID = "FFE1"
+    public static let minewCompanyID: UInt16 = 0x0639
+
+    public static func matches(
+        localName: String,
+        serviceUUIDs: [String] = [],
+        overflowServiceUUIDs: [String] = [],
+        serviceDataUUIDs: [String] = [],
+        manufacturerData: Data? = nil
+    ) -> Bool {
+        if companyID(manufacturerData) == minewCompanyID { return true }
+        let advertised = (serviceUUIDs + overflowServiceUUIDs + serviceDataUUIDs).map(normalize)
+        if advertised.contains(advertisementServiceDataUUID) || advertised.contains(serviceUUID) { return true }
+        let name = localName.lowercased()
+        return ["vigram", "vidoc", "vida"].contains { name.contains($0) }
+    }
+
+    public static func companyID(_ data: Data?) -> UInt16? {
+        guard let data, data.count >= 2 else { return nil }
+        return UInt16(data[data.startIndex]) | (UInt16(data[data.startIndex + 1]) << 8)
+    }
+
+    private static func normalize(_ uuid: String) -> String {
+        let hex = uuid.replacingOccurrences(of: "-", with: "").uppercased()
+        if hex.count >= 8, hex.hasPrefix("0000") {
+            return String(hex.dropFirst(4).prefix(4))
+        }
+        return String(hex.suffix(4))
+    }
+}

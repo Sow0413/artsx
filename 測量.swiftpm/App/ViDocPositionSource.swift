@@ -28,7 +28,11 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private static let serviceUUID = CBUUID(string: "FFF0")
     private static let notifyUUID  = CBUUID(string: "FFF1")
     private static let writeUUID   = CBUUID(string: "FFF2")
-    private static let startCmd: [UInt8] = [0x02, 0x6e, 0x6d, 0x65, 0x61, 0x03]   // <STX>nmea<ETX>
+    private var notifyChar: CBCharacteristic?
+    private var nmeaStartSent = false
+    private var rtcmBuffer = RTCMOutboundBuffer()
+    private var rtcmSchedule = RTCMWriteSchedule()
+    private var rtcmDrainScheduled = false
 
     private let queue = DispatchQueue(label: "arts.vidoc.ble")
     private var central: CBCentralManager?
@@ -42,6 +46,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public var correctionSource: String?
     // 最新の GGA 文（NTRIP へ概略位置として送るのに使う）
     public private(set) var lastGGA: String?
+    /// 画面向けの接続段階。Bluetooth のキューからメインへ渡す。
+    public var onLink: ((String) -> Void)?
+    private var deviceName = ""
     // 最後に RTCM を流した時刻（文に補正遅れが無いときの算出に使う）
     private var lastRTCMAt: Date?
 
@@ -74,23 +81,48 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         }
     }
 
-    /// NTRIPClient から RTCM3 を注入する。FFF2 へ MTU 刻みで書く（BLE の 1 パケット上限に合わせる）。
+    /// NTRIPClient から RTCM3 を注入する。180 バイト以下に切り、12 ms 以上あけて FFF2 へ書く。
     public func injectRTCM(_ data: Data) {
         queue.async {
-            guard let p = self.peripheral, let ch = self.writeChar, !data.isEmpty else { return }
-            let mtu = max(20, p.maximumWriteValueLength(for: .withoutResponse))
-            var offset = 0
-            while offset < data.count {
-                let end = min(offset + mtu, data.count)
-                p.writeValue(data.subdata(in: offset..<end), for: ch, type: .withoutResponse)
-                offset = end
-            }
-            self.lastRTCMAt = Date()
+            self.rtcmBuffer.append(data)
+            self.drainRTCM()
+        }
+    }
+
+    public func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        queue.async { self.drainRTCM() }
+    }
+
+    private func drainRTCM() {
+        guard let peripheral, let writeChar else { return }
+        let size = ViDocLink.chunkSize(maximumWriteLength: peripheral.maximumWriteValueLength(for: .withoutResponse))
+        let now = Date().timeIntervalSinceReferenceDate
+        guard rtcmSchedule.allows(at: now, transportReady: peripheral.canSendWriteWithoutResponse) else {
+            if !peripheral.canSendWriteWithoutResponse { return }
+            scheduleRTCMDrain(after: max(0, rtcmSchedule.nextAllowed - now))
+            return
+        }
+        guard let chunk = rtcmBuffer.nextChunk(maximumBytes: size) else { return }
+        peripheral.writeValue(chunk, for: writeChar, type: .withoutResponse)
+        rtcmSchedule = rtcmSchedule.advanced(afterSendingAt: now)
+        lastRTCMAt = Date()
+        scheduleRTCMDrain(after: Double(ViDocLink.rtcmChunkIntervalMs) / 1_000)
+    }
+
+    private func scheduleRTCMDrain(after seconds: TimeInterval) {
+        guard !rtcmDrainScheduled else { return }
+        rtcmDrainScheduled = true
+        queue.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self else { return }
+            self.rtcmDrainScheduled = false
+            self.drainRTCM()
         }
     }
 
     private func startScan() {
-        // ViDoc は実 GATT が FFF0 だが広告 ServiceData は別(FFE1)なので、サービス指定と無指定を併用して名前でも拾う。
+        // 広告の Service Data は FFE1 で、GATT の FFF0 は UUID 一覧に出ないことがある。
+        // サービス指定のスキャンだと FFE1 だけの機体を見落とすので、前面では全件を見てから判定する。
+        report("探索中")
         central?.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
@@ -100,8 +132,16 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         case .poweredOn:
             if running { startScan() }
         case .unauthorized:
+            report("Bluetooth が許可されていません")
             continuation.yield(PositionReading(position: nil, availability: .denied))
+        case .poweredOff:
+            report("Bluetooth がオフです")
+            continuation.yield(PositionReading(position: nil, availability: .unavailable))
+        case .unsupported:
+            report("この端末では Bluetooth を使えません")
+            continuation.yield(PositionReading(position: nil, availability: .unavailable))
         default:
+            report("Bluetooth を準備しています")
             continuation.yield(PositionReading(position: nil, availability: .unavailable))
         }
     }
@@ -109,17 +149,29 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                                advertisementData: [String : Any], rssi RSSI: NSNumber) {
         let name = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? ""
-        let advertisesService = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.contains(Self.serviceUUID) ?? false
-        guard advertisesService
-                || name.localizedCaseInsensitiveContains("vidoc")
-                || name.localizedCaseInsensitiveContains("vida") else { return }
+        let services = (advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID])?.map(\.uuidString) ?? []
+        let overflow = (advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID])?.map(\.uuidString) ?? []
+        let serviceData = (advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data])?.keys.map(\.uuidString) ?? []
+        let manufacturer = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+        guard ViDocDiscovery.matches(
+            localName: name,
+            serviceUUIDs: services,
+            overflowServiceUUIDs: overflow,
+            serviceDataUUIDs: serviceData,
+            manufacturerData: manufacturer
+        ) else { return }
         central.stopScan()
+        deviceName = name.isEmpty ? "ViDoc" : name
+        report("ViDoc を見つけました（\(deviceName)）")
         self.peripheral = peripheral
         peripheral.delegate = self
         central.connect(peripheral, options: nil)
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        let name = peripheral.name ?? deviceName
+        deviceName = name.isEmpty ? deviceName : name
+        report("接続しました（\(deviceName)）")
         peripheral.discoverServices([Self.serviceUUID])
     }
 
@@ -129,6 +181,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         writeChar = nil
+        notifyChar = nil
+        nmeaStartSent = false
         stage = .iphone
         continuation.yield(PositionReading(position: nil, availability: .waiting))
         if running { startScan() }   // 前面にいるあいだはつなぎ直す（README のとおり）
@@ -142,13 +196,29 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        var notify: CBCharacteristic?
         for c in service.characteristics ?? [] {
-            if c.uuid == Self.notifyUUID { peripheral.setNotifyValue(true, for: c) }
-            if c.uuid == Self.writeUUID  { writeChar = c }
+            if c.uuid == Self.notifyUUID { notify = c }
+            if c.uuid == Self.writeUUID { writeChar = c }
         }
-        if let ch = writeChar {   // 開始コマンドで NMEA を出させる
-            peripheral.writeValue(Data(Self.startCmd), for: ch, type: .withoutResponse)
+        notifyChar = notify
+        if let notify {
+            peripheral.setNotifyValue(true, for: notify)
         }
+        sendNMEAStart(peripheral)
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard characteristic.uuid == Self.notifyUUID, error == nil else { return }
+        notifyChar = characteristic
+        sendNMEAStart(peripheral)
+    }
+
+    /// FFF1 の notify が乗ってから、FFF2 へ開始コマンドを書く。
+    private func sendNMEAStart(_ peripheral: CBPeripheral) {
+        guard !nmeaStartSent, let notify = notifyChar, notify.isNotifying, let write = writeChar else { return }
+        nmeaStartSent = true
+        peripheral.writeValue(ViDocLink.nmeaStartCommand, for: write, type: .withoutResponse)
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -168,6 +238,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private func handleNMEA(_ line: String) {
         guard let epoch = nmea.consume(line) else { return }
         lastGGA = epoch.sentence
+        let count = epoch.satelliteCount.map(String.init) ?? "—"
+        report("NMEA 受信中 衛星 \(count) \(Self.qualityLabel(epoch.fixQuality))")
         let age = epoch.correctionAgeSeconds ?? lastRTCMAt.map { Date().timeIntervalSince($0) }
         stage = epoch.stage
         let stationID = epoch.stationID
@@ -193,6 +265,22 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             headingDegrees: nil
         )
         continuation.yield(PositionReading(position: position, availability: .available))
+    }
+
+    private func report(_ line: String) {
+        let callback = onLink
+        DispatchQueue.main.async { callback?(line) }
+    }
+
+    private static func qualityLabel(_ quality: FixQuality) -> String {
+        switch quality {
+        case .rtkFix: return "FIX"
+        case .float: return "FLOAT"
+        case .dgps: return "DGPS"
+        case .clas: return "CLAS"
+        case .standalone: return "単独"
+        case .none: return "未測位"
+        }
     }
 }
 #endif
