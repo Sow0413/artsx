@@ -82,6 +82,10 @@ final class FieldModel: ObservableObject {
     /// 出すの1段目。現場の下敷きに置いた図面。
     @Published private(set) var projectSheet: ProjectSheet?
     @Published private(set) var sheetMessage: String?
+    @Published var instrument = SiteInstrument()
+    @Published var instrumentMessage: String?
+    @Published var tiltDegrees: Double?
+    @Published var receiverFirmware: String?
     @Published var operation = OperationDesk.load()
     @Published var showsToolOrder = false
     @Published var stature = StatureProfile.load()
@@ -1247,16 +1251,32 @@ final class FieldModel: ObservableObject {
             return false
         }
         guard !asGCP || position.fixQuality == .rtkFix else { return false }
+        if !PrecisionGate.tiltAllowsStart(degrees: tiltDegrees) {
+            captureMessage = "鉛直から 0.5° を超えているので、観測を始めません。"
+            return false
+        }
+        if instrument.complianceEnabled {
+            let duration = epochWatch.duration(at: position.timestamp)
+            if !PrecisionGate.complianceAllowsStart(fix: position.fixQuality == .rtkFix, durationSeconds: duration) {
+                captureMessage = "準拠モードは FIX が 10 秒以上のときだけ仮置きできます。"
+                return false
+            }
+        }
         guard let name = nextPointName else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
-        let condition = ObservationCondition.snapshot(
+        var condition = ObservationCondition.snapshot(
             position: position,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
             epochCount: epochWatch.count
         )
+        condition.firmware = receiverFirmware ?? rtkSession?.firmwareVersion
+        condition.antennaMethod = instrument.antennaMethodLabel
+        if let height = position.ellipsoidalHeightMeters {
+            condition.groundHeightMeters = instrument.groundMarkMeters(ellipsoidal: height)
+        }
         let observation = FieldObservation(
             name: name,
             workID: asGCP ? "boundary" : workCatalog.selected.id,
@@ -2448,6 +2468,17 @@ final class FieldModel: ObservableObject {
             captureMessage = "位置が無いので残せません。"
             return false
         }
+        if !PrecisionGate.tiltAllowsStart(degrees: tiltDegrees) {
+            captureMessage = "鉛直から 0.5° を超えているので、観測を始めません。"
+            return false
+        }
+        if instrument.complianceEnabled {
+            let duration = epochWatch.duration(at: position.timestamp)
+            if !PrecisionGate.complianceAllowsStart(fix: position.fixQuality == .rtkFix, durationSeconds: duration) {
+                captureMessage = "準拠モードは FIX が 10 秒以上のときだけ仮置きできます。"
+                return false
+            }
+        }
         guard let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else {
             captureMessage = "目標までの距離を出せません。"
             return false
@@ -2456,7 +2487,7 @@ final class FieldModel: ObservableObject {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
-        let condition = ObservationCondition.snapshot(
+        var condition = ObservationCondition.snapshot(
             position: position,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
@@ -2464,6 +2495,11 @@ final class FieldModel: ObservableObject {
             stature: stature,
             sight: liveSight
         )
+        condition.firmware = receiverFirmware ?? rtkSession?.firmwareVersion
+        condition.antennaMethod = instrument.antennaMethodLabel
+        if let height = position.ellipsoidalHeightMeters {
+            condition.groundHeightMeters = instrument.groundMarkMeters(ellipsoidal: height)
+        }
         let observation = FieldObservation(
             name: name,
             workID: "stakeout",
@@ -2501,7 +2537,7 @@ final class FieldModel: ObservableObject {
             return
         }
         let root = drawing.projectsRoot
-        let dxfCount = kind == "dxf" ? (try? DrawingImport.load(data, fileName: fileName).entities.count) : nil
+        let parsed = kind == "dxf" ? try? DrawingImport.load(data, fileName: fileName) : nil
         do {
             let record = try ProjectStore.saveSheet(
                 data: data,
@@ -2511,13 +2547,86 @@ final class FieldModel: ObservableObject {
                 at: root
             )
             projectSheet = record
-            if let dxfCount {
-                sheetMessage = "済。\(record.fileName)。DXF \(dxfCount) 要素。"
+            var note = "済。\(record.fileName)。"
+            if let parsed {
+                drawing.zone = SiteDXF.zone
+                drawing.axis = .cadEastNorth
+                let names = SiteDXF.controlNames(in: parsed)
+                if names.isEmpty {
+                    note += "DXF \(parsed.entities.count) 要素。16系（EPSG \(SiteDXF.epsg)）、X東 Y北。"
+                } else {
+                    let bad = SiteDXF.mismatches(drawing: names, ledger: basicPoints().map(\.name))
+                    note += bad.isEmpty
+                        ? "測設_基準点は台帳と一致。"
+                        : "台帳と違う: \(bad.joined(separator: " "))。"
+                }
             } else {
-                sheetMessage = "済。\(record.fileName)。\(record.byteCount) バイト。"
+                note += "\(record.byteCount) バイト。"
             }
+            sheetMessage = note
         } catch {
             sheetMessage = "図面を置けませんでした。"
+        }
+    }
+
+    func refreshInstrument() {
+        guard let name = drawing.project?.name else { return }
+        instrument = ProjectStore.loadInstrument(projectName: name, at: drawing.projectsRoot)
+    }
+
+    func saveInstrument() {
+        guard let name = drawing.project?.name else {
+            instrumentMessage = "先に現場を作ってください。"
+            return
+        }
+        let missingKBM = instrument.kbmSource.isEmpty || instrument.kbmVersion.isEmpty || instrument.kbmDate.isEmpty
+        if instrument.kbmH != nil, missingKBM {
+            instrumentMessage = "H の出典、版、日付を入れてください。"
+            return
+        }
+        if instrument.cameraKind == "spcPlus" {
+            instrument.cameraX = CameraOffset.spcPlus15ProMax.x
+            instrument.cameraY = CameraOffset.spcPlus15ProMax.y
+            instrument.cameraZ = CameraOffset.spcPlus15ProMax.z
+        }
+        do {
+            try ProjectStore.saveInstrument(instrument, projectName: name, at: drawing.projectsRoot)
+            let kbm = KBMCorrection.accepted(
+                first: instrument.kbmFirstN,
+                firstAt: instrument.kbmFirstAt,
+                second: instrument.kbmSecondN,
+                secondAt: instrument.kbmSecondAt
+            )
+            let firmware = receiverFirmware ?? rtkSession?.firmwareVersion ?? "未取得"
+            instrumentMessage = "残しました。カメラ \(instrument.cameraKind) \(instrument.antennaMethodLabel) \(instrument.antennaToGroundMeters.map { String(format: "%.3f m", $0) } ?? "—")。\(KBMCorrection.title) \(kbm ? "2cm以内" : "未了")。ファームウェア \(firmware)。レーザーは送っていません。"
+        } catch {
+            instrumentMessage = "設定を置けませんでした。"
+        }
+    }
+
+    func recordKBMSample(ellipsoidal: Double) {
+        guard let h = instrument.kbmH else {
+            instrumentMessage = "成果の高さ H を入れてください。"
+            return
+        }
+        let sample = KBMCorrection.n(ellipsoidal: ellipsoidal, orthometric: h)
+        let now = Date()
+        if instrument.kbmFirstAt == nil {
+            instrument.kbmFirstN = sample
+            instrument.kbmFirstAt = now
+            instrumentMessage = "\(KBMCorrection.title) 1回目 N \(String(format: "%+.3f", sample)) m。"
+        } else if instrument.kbmFirstAt != now {
+            instrument.kbmSecondN = sample
+            instrument.kbmSecondAt = now
+            let ok = KBMCorrection.accepted(
+                first: instrument.kbmFirstN,
+                firstAt: instrument.kbmFirstAt,
+                second: instrument.kbmSecondN,
+                secondAt: instrument.kbmSecondAt
+            )
+            instrumentMessage = ok
+                ? "\(KBMCorrection.title) 2回の差は 2cm 以内。KBM は点検点にしません。"
+                : "\(KBMCorrection.title) 2回の差が 2cm を超えています。"
         }
     }
 

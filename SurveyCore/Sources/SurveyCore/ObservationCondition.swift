@@ -18,6 +18,12 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     public var stage: PositionStage
     /// 段階0の iPhone だけで付く。ポール高ではない。
     public var stature: StatureRecord?
+    /// ViDoc の Ver_ バナー。古い記録は nil。
+    public var firmware: String?
+    /// ポール高または下レーザー。カメラオフセットとは別。
+    public var antennaMethod: String?
+    /// 楕円体高からアンテナ高を引いた、地上標識の高さ。
+    public var groundHeightMeters: Double?
 
     public init(
         solution: FixQuality,
@@ -34,7 +40,10 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         epochCount: Int?,
         receiver: ReceiverKind,
         stage: PositionStage,
-        stature: StatureRecord? = nil
+        stature: StatureRecord? = nil,
+        firmware: String? = nil,
+        antennaMethod: String? = nil,
+        groundHeightMeters: Double? = nil
     ) {
         self.solution = solution
         self.solutionLabel = solutionLabel
@@ -51,6 +60,9 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         self.receiver = receiver
         self.stage = stage
         self.stature = stature
+        self.firmware = firmware
+        self.antennaMethod = antennaMethod
+        self.groundHeightMeters = groundHeightMeters
     }
 
     public init(from decoder: Decoder) throws {
@@ -70,6 +82,9 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         receiver = try container.decode(ReceiverKind.self, forKey: .receiver)
         stage = try container.decode(PositionStage.self, forKey: .stage)
         stature = try container.decodeIfPresent(StatureRecord.self, forKey: .stature)
+        firmware = try container.decodeIfPresent(String.self, forKey: .firmware)
+        antennaMethod = try container.decodeIfPresent(String.self, forKey: .antennaMethod)
+        groundHeightMeters = try container.decodeIfPresent(Double.self, forKey: .groundHeightMeters)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -89,12 +104,16 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         try container.encode(receiver, forKey: .receiver)
         try container.encode(stage, forKey: .stage)
         try container.encodeIfPresent(stature, forKey: .stature)
+        try container.encodeIfPresent(firmware, forKey: .firmware)
+        try container.encodeIfPresent(antennaMethod, forKey: .antennaMethod)
+        try container.encodeIfPresent(groundHeightMeters, forKey: .groundHeightMeters)
     }
 
     private enum CodingKeys: String, CodingKey {
         case solution, solutionLabel, satellites, satelliteCount, pdop
         case horizontalAccuracyMeters, verticalAccuracyMeters, correctionAgeSeconds, correctionSource
         case observedAt, durationSeconds, epochCount, receiver, stage, stature
+        case firmware, antennaMethod, groundHeightMeters
     }
 
     public static func snapshot(

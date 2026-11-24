@@ -110,6 +110,19 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(recordNext.waitForExistence(timeout: 5), "地図で記録へ戻れない")
         scrollClear(recordNext, in: home)
         shot("16-data-record")
+        let setup = app.buttons["open-setup"]
+        scrollClear(setup, in: home)
+        setup.tap()
+        let setupSheet = app.scrollViews["screen-setup"]
+        XCTAssertTrue(setupSheet.waitForExistence(timeout: 5), "器械設定が開かない")
+        shot("27-setup")
+        let saveSetup = app.buttons["setup-save"]
+        scrollClear(saveSetup, in: setupSheet)
+        saveSetup.tap()
+        XCTAssertTrue(app.staticTexts["setup-result"].waitForExistence(timeout: 5), "器械設定の結果が無い")
+        shot("27-setup-result")
+        app.buttons["data-back"].tap()
+        XCTAssertTrue(home.waitForExistence(timeout: 5))
 
         openTab("tab-map", showing: "map-record")
         XCTAssertTrue(record.waitForExistence(timeout: 5), "地図の記録が無い")

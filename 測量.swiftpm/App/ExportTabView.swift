@@ -124,11 +124,13 @@ struct ExportTabView: View {
             }
             .navigationTitle("図面を読み込む")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(SurveyColor.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .deliverBack { deliverPath.removeLast() }
         case .scale:
             laterPage(title: "図面の縮尺設定／2点割り付け", purpose: "2点の距離差で合否を見る。2cmと1/10000。", identifier: "screen-scale")
         case .localize:
-            laterPage(title: "GNSSローカライズ", purpose: "測った点で現場座標に合わせる。", identifier: "screen-localize")
+            laterPage(title: "GNSSローカライズ", purpose: "既知点3点以上。計算は次の版。", identifier: "screen-localize")
         case .cad:
             laterPage(title: "CAD測設", purpose: "図面の点を選んで誘導し、測設を残す。", identifier: "screen-cad")
         case .restore:

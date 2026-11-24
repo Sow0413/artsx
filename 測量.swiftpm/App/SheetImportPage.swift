@@ -18,8 +18,6 @@ struct SheetImportPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("図面を読み込む")
-                    .font(SurveyType(22, .heavy))
                 Text("この現場に、図面を1枚置く。")
                     .font(SurveyType(18, .heavy))
                     .lineLimit(1)

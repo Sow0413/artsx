@@ -7,6 +7,7 @@ private enum BasicPage: Hashable {
     case site
     case ledger
     case export
+    case setup
 }
 
 /// ベーシックの現場、データ管理、書き出し。測設は出すタブ。ほかの測量機能は出さない。
@@ -61,6 +62,16 @@ struct BasicDesk: View {
                         page: .ledger
                     )
                     menuTile(
+                        title: "器械設定",
+                        systemImage: "slider.horizontal.3",
+                        detail: "カメラ、アンテナ、高さ補正。",
+                        status: field.instrument.complianceEnabled ? "準拠モード" : "通常",
+                        badge: nil,
+                        emphasized: false,
+                        identifier: "open-setup",
+                        page: .setup
+                    )
+                    menuTile(
                         title: "データ書き出し",
                         systemImage: "square.and.arrow.up",
                         detail: "一覧、読み込み、控え。",
@@ -84,6 +95,7 @@ struct BasicDesk: View {
                 case .site: sitePage
                 case .ledger: ledgerPage
                 case .export: exportPage
+                case .setup: setupPage
                 }
             }
         }
@@ -198,6 +210,12 @@ struct BasicDesk: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(identifier)
+    }
+
+    private var setupPage: some View {
+        subpage(title: "器械設定", identifier: "screen-setup") {
+            InstrumentSetupForm(field: field)
+        }
     }
 
     private var sitePage: some View {

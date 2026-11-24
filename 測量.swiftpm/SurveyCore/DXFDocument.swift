@@ -418,6 +418,13 @@ public enum DXFParser {
             return (text, "UTF-8")
         }
         let codePage = scanCodePage(data)
+        let acad = scanGroupValue(data, name: "$ACADVER")
+        if SiteDXF.prefersUTF8(acadVersion: acad) || isShiftJIS(codePage) {
+            if let text = String(data: data, encoding: .utf8),
+               SiteDXF.prefersUTF8(acadVersion: acad) || text.contains("測設") || text.contains("IRB-") {
+                return (text, "UTF-8")
+            }
+        }
         if isShiftJIS(codePage) {
             guard let text = String(data: data, encoding: .shiftJIS) else { throw DXFError.undecodable }
             return (text, codePage ?? "Shift_JIS")
@@ -437,13 +444,16 @@ public enum DXFParser {
         return folded.contains("932") || folded.contains("SHIFT_JIS") || folded.contains("CP932")
     }
 
-    private static func scanCodePage(_ data: Data) -> String? {
-        guard let token = data.range(of: Data("$DWGCODEPAGE".utf8)) else { return nil }
+    private static func scanGroupValue(_ data: Data, name: String) -> String? {
+        guard let token = data.range(of: Data(name.utf8)) else { return nil }
         let tail = data[token.upperBound...].prefix(200)
         let text = String(tail.map { $0 < 128 ? Character(UnicodeScalar($0)) : "?" })
         let lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let marker = lines.firstIndex(of: "3"), lines.indices.contains(marker + 1) else { return nil }
-        return lines[marker + 1]
+        return lines.first { !$0.isEmpty && Int($0) == nil }
+    }
+
+    private static func scanCodePage(_ data: Data) -> String? {
+        scanGroupValue(data, name: "$DWGCODEPAGE")
     }
 
     private static func pairLines(_ text: String) -> [(Int, String)] {

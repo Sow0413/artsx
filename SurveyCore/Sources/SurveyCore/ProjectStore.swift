@@ -412,6 +412,17 @@ public enum ProjectStore {
         return try? read(ProjectSheet.self, from: url)
     }
 
+    public static func saveInstrument(_ instrument: SiteInstrument, projectName: String, at root: URL) throws {
+        let directory = try projectDirectory(projectName, at: root)
+        try write(instrument, to: directory.appendingPathComponent("器械.json"))
+    }
+
+    public static func loadInstrument(projectName: String, at root: URL) -> SiteInstrument {
+        guard let directory = try? projectDirectory(projectName, at: root) else { return SiteInstrument() }
+        let url = directory.appendingPathComponent("器械.json")
+        return (try? read(SiteInstrument.self, from: url)) ?? SiteInstrument()
+    }
+
     public static func sheetData(projectName: String, at root: URL) -> Data? {
         guard let record = loadSheet(projectName: projectName, at: root),
               let directory = try? projectDirectory(projectName, at: root) else { return nil }

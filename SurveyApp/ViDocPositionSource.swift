@@ -21,6 +21,7 @@ import CoreBluetooth
 public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManagerDelegate, CBPeripheralDelegate, @unchecked Sendable {
     public let receiver: ReceiverKind = .rtk
     public private(set) var stage: PositionStage = .iphone   // Fix/Float 到達で .rtk に上げる
+    public var onFirmware: ((String) -> Void)?
     public let readings: AsyncStream<PositionReading>
     private let continuation: AsyncStream<PositionReading>.Continuation
 
@@ -282,6 +283,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             guard let line = String(data: lineData, encoding: .ascii)?
                 .trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else { continue }
             let now = Date().timeIntervalSinceReferenceDate
+            if let version = ViDocFirmware.version(in: line) {
+                onFirmware?(version)
+            }
             if let command = boot.onNotify(line, at: now) {
                 outbound.enqueueCommand(command)
                 drainRTCM()
