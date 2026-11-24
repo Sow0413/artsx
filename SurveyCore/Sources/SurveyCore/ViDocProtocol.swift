@@ -372,6 +372,13 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     public private(set) var expect: ViDocBinaryExpect = .none
     public private(set) var firmwareLabel: String?
     public private(set) var hasProbed = false
+    public private(set) var lightIsOn = false
+    public enum Lamp: Equatable, Sendable { case off, aiming, ranging }
+    public var lamp: Lamp {
+        if phase == .range { return .ranging }
+        if lightIsOn { return .aiming }
+        return .off
+    }
     public enum LaserReading: Equatable, Sendable {
         case meters(Double)
         case failed
@@ -383,6 +390,9 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     private var phase: Phase = .idle
     private var laserOffArmed = false
     private var rangingDown = true
+    private var lightOnAt: TimeInterval?
+    private var rangeHoldUntil: TimeInterval?
+    private var heldRangeSeconds: UInt8?
     private struct RangeSample: Equatable, Sendable {
         var distanceMillimetres: Int
         var quality: Int
@@ -403,26 +413,35 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     }
 
     public mutating func tick(at now: TimeInterval) -> [Data] {
-        guard let deadline, now + 1e-9 >= deadline else { return [] }
+        let laser = serviceLaser(at: now)
+        guard let deadline, now + 1e-9 >= deadline else { return laser }
         switch phase {
         case .switchProbe:
-            if switchAttempt < 2 { return beginSwitch(attempt: switchAttempt + 1, at: now) }
+            if switchAttempt < 2 { return laser + beginSwitch(attempt: switchAttempt + 1, at: now) }
             mode = .legacy
             phase = .idle
             expect = .none
             self.deadline = nil
-            return takeQueuedLaser(at: now)
+            return laser + takeQueuedLaser(at: now)
         case .version:
-            return sendAngle(at: now)
-        case .angle: return sendAccel(at: now)
-        case .accel: return sendMag(at: now)
-        case .mag: return sendTemp(at: now)
-        case .temp: return sendAngle(at: now)
-        case .range: return finishRange(at: now)
+            return laser + sendAngle(at: now)
+        case .angle: return laser + sendAccel(at: now)
+        case .accel: return laser + sendMag(at: now)
+        case .mag: return laser + sendTemp(at: now)
+        case .temp: return laser + sendAngle(at: now)
+        case .range: return laser + finishRange(at: now)
         case .idle:
             self.deadline = nil
-            return []
+            return laser
         }
+    }
+
+    /// 下向きの赤い点。測距は混ぜない。
+    public mutating func lightDown(at now: TimeInterval) -> [Data] {
+        guard mode != .probing, let frame = ViDocProtocol.lightOn(down: true, trailed: mode == .modern) else { return [] }
+        lightIsOn = true
+        lightOnAt = now
+        return [frame]
     }
 
     public mutating func receive(_ reply: ViDocReply, at now: TimeInterval) -> [Data] {
@@ -457,14 +476,14 @@ public struct ViDocCommandPlan: Equatable, Sendable {
         return pendingLaser
     }
 
-    /// 下向き Auto の測距を 1 フレームだけ出す。点灯は送らない。応答のあと消灯を 1 回。
+    /// 点灯から 0.5 秒以上あとに、測距フレームだけを出す。点灯と測距を続けては出さない。
     public mutating func measureDown(seconds: UInt8, at now: TimeInterval) -> [Data] {
         let seconds = min(max(seconds, 1), 30)
         guard mode != .probing else {
             queuedSeconds = seconds
             return []
         }
-        return laserPair(seconds: seconds, at: now)
+        return beginRangeIfReady(seconds: seconds, at: now)
     }
 
     private mutating func beginSwitch(attempt: Int, at now: TimeInterval) -> [Data] {
@@ -517,7 +536,40 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     private mutating func takeQueuedLaser(at now: TimeInterval) -> [Data] {
         guard let seconds = queuedSeconds else { return [] }
         queuedSeconds = nil
+        return beginRangeIfReady(seconds: seconds, at: now)
+    }
+
+    private mutating func beginRangeIfReady(seconds: UInt8, at now: TimeInterval) -> [Data] {
+        guard lightIsOn, let lightOnAt else { return [] }
+        if now + 1e-9 < lightOnAt + 0.5 {
+            heldRangeSeconds = seconds
+            rangeHoldUntil = lightOnAt + 0.5
+            return []
+        }
+        heldRangeSeconds = nil
+        rangeHoldUntil = nil
         return laserPair(seconds: seconds, at: now)
+    }
+
+    private mutating func serviceLaser(at now: TimeInterval) -> [Data] {
+        if let hold = rangeHoldUntil, now + 1e-9 >= hold, let seconds = heldRangeSeconds, phase != .range {
+            rangeHoldUntil = nil
+            heldRangeSeconds = nil
+            return laserPair(seconds: seconds, at: now)
+        }
+        if lightIsOn, phase != .range, let onAt = lightOnAt, now + 1e-9 >= onAt + 30 {
+            return extinguish()
+        }
+        return []
+    }
+
+    private mutating func extinguish() -> [Data] {
+        lightIsOn = false
+        lightOnAt = nil
+        rangeHoldUntil = nil
+        heldRangeSeconds = nil
+        guard let off = ViDocProtocol.lightOff(trailed: mode == .modern) else { return [] }
+        return [off]
     }
 
     private mutating func laserPair(seconds: UInt8, at now: TimeInterval) -> [Data] {
@@ -549,6 +601,8 @@ public struct ViDocCommandPlan: Equatable, Sendable {
             return mode == .modern ? sendAngle(at: now) : []
         }
         laserOffArmed = false
+        lightIsOn = false
+        lightOnAt = nil
         phase = .idle
         expect = .none
         deadline = nil

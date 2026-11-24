@@ -89,6 +89,7 @@ final class FieldModel: ObservableObject {
     @Published var tiltMaxDegrees: Double?
     @Published var deviceTiltLive = false
     @Published var laserReadingMeters: Double?
+    @Published var laserLamp: ViDocCommandPlan.Lamp = .off
     private var tiltWindow: [(TimeInterval, Double)] = []
     @Published var receiverFirmware: String?
     @Published var operation = OperationDesk.load()
@@ -358,6 +359,12 @@ final class FieldModel: ObservableObject {
         }
         rtkSession?.onLaserFailed = { [weak self] in
             self?.instrumentMessage = "測れず"
+        }
+        rtkSession?.onLaserLamp = { [weak self] lamp in
+            self?.laserLamp = lamp
+        }
+        rtkSession?.onLaserNeedAim = { [weak self] in
+            self?.instrumentMessage = "先に点灯してください。"
         }
         #endif
         gnss.onDiscover = { [weak self] choice in
@@ -2632,10 +2639,17 @@ final class FieldModel: ObservableObject {
         tiltMaxDegrees = stats.maximum
     }
 
+    func lightLowerLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.lightLowerLaser()
+        #else
+        instrumentMessage = "受信機が無いので点灯できません。"
+        #endif
+    }
+
     func measureLowerLaser() {
         #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
         rtkSession?.measureLowerLaser()
-        instrumentMessage = "下レーザーを測っています。"
         #else
         instrumentMessage = "受信機が無いので測れません。"
         #endif

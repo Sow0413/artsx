@@ -50,6 +50,7 @@ struct InstrumentSetupForm: View {
             Text("ポール高").tag("pole")
             Text("下レーザー").tag("laser")
         }
+        .pickerStyle(.segmented)
         .accessibilityIdentifier("antenna-kind")
         if field.instrument.antennaMethod == "laser" {
             Text("筐体 0.1877m + 測った距離")
@@ -58,15 +59,30 @@ struct InstrumentSetupForm: View {
             TextField("レーザー距離 m", text: $laserText)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("laser-distance")
-            Button(action: field.measureLowerLaser) {
-                Text("下レーザーを測る")
-                    .font(SurveyType(18, .heavy))
-                    .frame(maxWidth: .infinity, minHeight: 72)
-                    .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .foregroundStyle(SurveyColor.text)
+            Text(laserLampLabel)
+                .font(SurveyType(18, .heavy))
+                .lineLimit(1)
+                .accessibilityIdentifier("laser-status")
+            HStack(spacing: 12) {
+                Button(action: field.lightLowerLaser) {
+                    Text("点灯")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 72)
+                        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .foregroundStyle(SurveyColor.text)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("laser-light")
+                Button(action: field.measureLowerLaser) {
+                    Text("測る")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 72)
+                        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .foregroundStyle(SurveyColor.text)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("laser-measure")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("laser-measure")
         } else {
             TextField("ポール高 m", text: $poleText)
                 .textFieldStyle(.roundedBorder)
@@ -160,6 +176,14 @@ struct InstrumentSetupForm: View {
     private var cameraLine: String {
         let value = field.instrument
         return String(format: "X %.3f  Y %.3f  Z %.3f m", value.cameraX, value.cameraY, value.cameraZ)
+    }
+
+    private var laserLampLabel: String {
+        switch field.laserLamp {
+        case .ranging: return "測定中（点滅）"
+        case .aiming: return "点灯中"
+        case .off: return "消灯"
+        }
     }
 
     private var tiltLine: String {

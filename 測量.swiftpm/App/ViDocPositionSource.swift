@@ -26,6 +26,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public var onTilt: ((Double) -> Void)?
     public var onLaserMeters: ((Double) -> Void)?
     public var onLaserFailed: (() -> Void)?
+    public var onLaserLamp: ((ViDocCommandPlan.Lamp) -> Void)?
+    public var onLaserNeedAim: (() -> Void)?
     public let readings: AsyncStream<PositionReading>
     private let continuation: AsyncStream<PositionReading>.Continuation
 
@@ -52,6 +54,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private var stream = ViDocStreamParser()
     private var plan = ViDocCommandPlan()
     private var sawDeviceAngle = false
+    private var publishedLamp: ViDocCommandPlan.Lamp = .off
     private var nmea = NMEAParser()
     private var running = false
 
@@ -275,6 +278,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
                 self.outbound.enqueueCommand(frame)
             }
             self.publishLaser()
+            self.publishLamp()
             self.stream.expect = self.plan.expect
             if !self.outbound.commands.isEmpty { self.drainRTCM() }
         }
@@ -337,9 +341,17 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             outbound.enqueueCommand(frame)
         }
         publishLaser()
+        publishLamp()
         if let label = plan.firmwareLabel { onFirmware?(label) }
         stream.expect = plan.expect
         if !outbound.commands.isEmpty { drainRTCM() }
+    }
+
+    private func publishLamp() {
+        let lamp = plan.lamp
+        guard lamp != publishedLamp else { return }
+        publishedLamp = lamp
+        onLaserLamp?(lamp)
     }
 
     private func publishLaser() {
@@ -353,13 +365,31 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         }
     }
 
+    public func lightLowerLaser() {
+        queue.async {
+            guard ViDocLaser.enabled else { return }
+            let now = Date().timeIntervalSinceReferenceDate
+            for frame in self.plan.lightDown(at: now) {
+                self.outbound.enqueueCommand(frame)
+            }
+            self.publishLamp()
+            self.stream.expect = self.plan.expect
+            self.drainRTCM()
+        }
+    }
+
     public func measureLowerLaser(seconds: UInt8 = 5) {
         queue.async {
             guard ViDocLaser.enabled else { return }
             let now = Date().timeIntervalSinceReferenceDate
-            for frame in self.plan.measureDown(seconds: seconds, at: now) {
+            let frames = self.plan.measureDown(seconds: seconds, at: now)
+            if frames.isEmpty, !self.plan.lightIsOn {
+                self.onLaserNeedAim?()
+            }
+            for frame in frames {
                 self.outbound.enqueueCommand(frame)
             }
+            self.publishLamp()
             self.stream.expect = self.plan.expect
             self.drainRTCM()
         }
@@ -418,6 +448,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         plan = ViDocCommandPlan()
         stream = ViDocStreamParser()
         sawDeviceAngle = false
+        publishedLamp = .off
+        onLaserLamp?(.off)
         bootGeneration += 1
         writeChar = nil
         notifyChar = nil

@@ -116,6 +116,16 @@ final class MapResponsivenessTests: XCTestCase {
         let setupSheet = app.scrollViews["screen-setup"]
         XCTAssertTrue(setupSheet.waitForExistence(timeout: 5), "器械設定が開かない")
         shot("27-setup")
+        let downLaser = app.buttons["下レーザー"]
+        scrollClear(downLaser, in: setupSheet)
+        downLaser.tap()
+        let aim = app.buttons["laser-light"]
+        let readLaser = app.buttons["laser-measure"]
+        XCTAssertTrue(aim.waitForExistence(timeout: 5), "点灯が無い")
+        XCTAssertTrue(readLaser.waitForExistence(timeout: 5), "測るが無い")
+        XCTAssertTrue(app.staticTexts["laser-status"].waitForExistence(timeout: 5), "レーザーの状態が無い")
+        scrollClear(aim, in: setupSheet)
+        shot("27-laser")
         let saveSetup = app.buttons["setup-save"]
         scrollClear(saveSetup, in: setupSheet)
         saveSetup.tap()

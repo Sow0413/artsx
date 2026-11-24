@@ -37,6 +37,8 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     public var onDeviceTilt: ((Double) -> Void)?
     public var onLaserDistance: ((Double) -> Void)?
     public var onLaserFailed: (() -> Void)?
+    public var onLaserLamp: ((ViDocCommandPlan.Lamp) -> Void)?
+    public var onLaserNeedAim: (() -> Void)?
     @Published public private(set) var ntripLine = "未接続"
     @Published public private(set) var holdGCPUntilFix = false
 
@@ -77,6 +79,12 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         vidoc.onLaserFailed = { [weak self] in
             self?.setMain { self?.onLaserFailed?() }
         }
+        vidoc.onLaserLamp = { [weak self] lamp in
+            self?.setMain { self?.onLaserLamp?(lamp) }
+        }
+        vidoc.onLaserNeedAim = { [weak self] in
+            self?.setMain { self?.onLaserNeedAim?() }
+        }
         vidoc.onLink = { [weak self] line in
             self?.setMain {
                 self?.vidocLine = line
@@ -90,6 +98,10 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     }
 
     // MARK: PositionSource
+    public func lightLowerLaser() {
+        vidoc.lightLowerLaser()
+    }
+
     public func measureLowerLaser() {
         vidoc.measureLowerLaser()
     }

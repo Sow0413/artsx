@@ -106,7 +106,10 @@ final class ViDocProtocolTests: XCTestCase {
         var modern = ViDocCommandPlan()
         _ = modern.nmeaWasSent(at: 0)
         _ = modern.receive(.switched, at: 0.1)
+        _ = modern.lightDown(at: 0.4)
+        XCTAssertEqual(modern.lamp, .aiming)
         let frame = modern.measureDown(seconds: 5, at: 1)
+        XCTAssertEqual(modern.lamp, .ranging)
         let trailer = Data([0x3C, 0x3B, 0x3D, 0x01, 0x03, 0x02])
         XCTAssertEqual(frame, [Data([0x55, 0x03, 0x05, 0x5D]) + trailer])
         XCTAssertEqual(frame.first?.count, 10)
@@ -121,6 +124,37 @@ final class ViDocProtocolTests: XCTestCase {
             }
         }
         XCTAssertEqual(modern.takeLaserReading(), .meters(1.2))
+        XCTAssertEqual(modern.lamp, .off)
+    }
+
+    func testLaserWaitsHalfASecondThenBlinksAndTurnsOffAfterThirty() {
+        var plan = ViDocCommandPlan()
+        _ = plan.nmeaWasSent(at: 0)
+        _ = plan.tick(at: 1)
+        _ = plan.tick(at: 2)
+        XCTAssertEqual(plan.mode, .legacy)
+        XCTAssertEqual(plan.measureDown(seconds: 5, at: 3), [])
+        XCTAssertEqual(plan.lamp, .off)
+        XCTAssertEqual(plan.lightDown(at: 10), [Data([0x55, 0x04, 0x00, 0x59])])
+        XCTAssertEqual(plan.lamp, .aiming)
+        XCTAssertEqual(plan.measureDown(seconds: 5, at: 10.49), [])
+        XCTAssertEqual(plan.lamp, .aiming)
+        XCTAssertEqual(plan.tick(at: 10.49), [])
+        let ranged = plan.tick(at: 10.5)
+        XCTAssertEqual(ranged, [Data([0x55, 0x03, 0x05, 0x5D])])
+        XCTAssertEqual(plan.lamp, .ranging)
+        XCTAssertFalse(ranged.contains { $0.dropFirst().first == 4 })
+
+        var idle = ViDocCommandPlan()
+        _ = idle.nmeaWasSent(at: 0)
+        _ = idle.tick(at: 1)
+        _ = idle.tick(at: 2)
+        _ = idle.lightDown(at: 10)
+        XCTAssertEqual(idle.tick(at: 39.9), [])
+        XCTAssertEqual(idle.lamp, .aiming)
+        XCTAssertEqual(idle.tick(at: 40), [Data([0x55, 0x05, 0x00, 0x5A])])
+        XCTAssertEqual(idle.lamp, .off)
+        XCTAssertEqual(idle.tick(at: 41), [])
     }
 
     func testSwitchRetryLegacyLaserAndMADGate() {
@@ -132,6 +166,7 @@ final class ViDocProtocolTests: XCTestCase {
         XCTAssertEqual(plan.tick(at: 1), [ViDocProtocol.switchFrame()!])
         XCTAssertTrue(plan.tick(at: 2).isEmpty)
         XCTAssertEqual(plan.mode, .legacy)
+        _ = plan.lightDown(at: 2.4)
         let legacy = plan.measureDown(seconds: 5, at: 3)
         XCTAssertEqual(legacy, [Data([0x55, 0x03, 0x05, 0x5D])])
         XCTAssertTrue(plan.receive(.range(startMillimetres: 0, endMillimetres: 0, distanceMillimetres: 1500, quality: 1), at: 4).isEmpty)
