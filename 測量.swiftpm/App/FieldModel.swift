@@ -1256,7 +1256,7 @@ final class FieldModel: ObservableObject {
             return false
         }
         if instrument.complianceEnabled {
-            let duration = epochWatch.duration(at: position.timestamp)
+            let duration = epochWatch.duration(at: position.timestamp) ?? 0
             if !PrecisionGate.complianceAllowsStart(fix: position.fixQuality == .rtkFix, durationSeconds: duration) {
                 captureMessage = "準拠モードは FIX が 10 秒以上のときだけ仮置きできます。"
                 return false
@@ -2473,7 +2473,7 @@ final class FieldModel: ObservableObject {
             return false
         }
         if instrument.complianceEnabled {
-            let duration = epochWatch.duration(at: position.timestamp)
+            let duration = epochWatch.duration(at: position.timestamp) ?? 0
             if !PrecisionGate.complianceAllowsStart(fix: position.fixQuality == .rtkFix, durationSeconds: duration) {
                 captureMessage = "準拠モードは FIX が 10 秒以上のときだけ仮置きできます。"
                 return false
