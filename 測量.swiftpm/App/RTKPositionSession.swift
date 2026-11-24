@@ -36,6 +36,7 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     @Published public private(set) var firmwareVersion: String?
     public var onDeviceTilt: ((Double) -> Void)?
     public var onLaserDistance: ((Double) -> Void)?
+    public var onLaserFailed: (() -> Void)?
     @Published public private(set) var ntripLine = "未接続"
     @Published public private(set) var holdGCPUntilFix = false
 
@@ -72,6 +73,9 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         }
         vidoc.onLaserMeters = { [weak self] meters in
             self?.setMain { self?.onLaserDistance?(meters) }
+        }
+        vidoc.onLaserFailed = { [weak self] in
+            self?.setMain { self?.onLaserFailed?() }
         }
         vidoc.onLink = { [weak self] line in
             self?.setMain {

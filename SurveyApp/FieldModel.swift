@@ -356,6 +356,9 @@ final class FieldModel: ObservableObject {
             self?.laserReadingMeters = meters
             self?.instrumentMessage = String(format: "下レーザー %.3f m", meters)
         }
+        rtkSession?.onLaserFailed = { [weak self] in
+            self?.instrumentMessage = "測れず"
+        }
         #endif
         gnss.onDiscover = { [weak self] choice in
             DispatchQueue.main.async {

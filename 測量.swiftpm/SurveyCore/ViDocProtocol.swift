@@ -116,8 +116,8 @@ public enum ViDocReply: Equatable, Sendable {
             return .range(
                 startMillimetres: int16BE(frame, 1),
                 endMillimetres: int16BE(frame, 3),
-                distanceMillimetres: int16BE(frame, 5),
-                quality: int16BE(frame, 7)
+                distanceMillimetres: uint16BE(frame, 5),
+                quality: uint16BE(frame, 7)
             )
         case 0xB0 where frame.count == 10:
             return .angle(
@@ -161,6 +161,11 @@ public enum ViDocReply: Equatable, Sendable {
         return Int(Int16(bitPattern: raw))
     }
 
+    private static func uint16BE(_ data: Data, _ offset: Int) -> Int {
+        let index = data.startIndex + offset
+        return Int(UInt16(data[index]) << 8 | UInt16(data[index + 1]))
+    }
+
     private static func floatLE(_ data: Data, _ offset: Int) -> Float {
         let index = data.startIndex + offset
         let bits = UInt32(data[index])
@@ -168,6 +173,30 @@ public enum ViDocReply: Equatable, Sendable {
             | UInt32(data[index + 2]) << 16
             | UInt32(data[index + 3]) << 24
         return Float(bitPattern: bits)
+    }
+}
+
+public enum LaserRangeBatch {
+    public static let replyLimit = 7
+
+    /// 0〜600 は良好、601〜1000 は可。0xFFFF、品質 1000 超、下 40 m 以上、前 20 m 以上は使わない。
+    public static func usable(distanceMillimetres: Int, quality: Int, down: Bool) -> Bool {
+        if distanceMillimetres == 0xFFFF || quality > 1000 { return false }
+        let meters = Double(distanceMillimetres) / 1000
+        if down, meters >= 40 { return false }
+        if !down, meters >= 20 { return false }
+        if quality < 0 { return false }
+        return quality <= 1000
+    }
+
+    /// 良好と可だけを残した距離の中央値（m）。無ければ nil（測れず）。
+    public static func medianMeters(_ samples: [(distanceMillimetres: Int, quality: Int)], down: Bool) -> Double? {
+        let kept = samples.compactMap { sample -> Double? in
+            guard usable(distanceMillimetres: sample.distanceMillimetres, quality: sample.quality, down: down) else { return nil }
+            return Double(sample.distanceMillimetres)
+        }
+        guard let median = TiltMath.median(kept) else { return nil }
+        return median / 1000
     }
 }
 
@@ -343,11 +372,22 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     public private(set) var expect: ViDocBinaryExpect = .none
     public private(set) var firmwareLabel: String?
     public private(set) var hasProbed = false
+    public enum LaserReading: Equatable, Sendable {
+        case meters(Double)
+        case failed
+    }
+    private var pendingLaser: LaserReading?
 
     private var switchAttempt = 0
     private var deadline: TimeInterval?
     private var phase: Phase = .idle
     private var laserOffArmed = false
+    private var rangingDown = true
+    private struct RangeSample: Equatable, Sendable {
+        var distanceMillimetres: Int
+        var quality: Int
+    }
+    private var rangeSamples: [RangeSample] = []
     private var queuedSeconds: UInt8?
     private enum Phase: Equatable, Sendable { case idle, switchProbe, version, angle, accel, mag, temp, range }
 
@@ -378,7 +418,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
         case .accel: return sendMag(at: now)
         case .mag: return sendTemp(at: now)
         case .temp: return sendAngle(at: now)
-        case .range: return sendLaserOff(at: now)
+        case .range: return finishRange(at: now)
         case .idle:
             self.deadline = nil
             return []
@@ -402,14 +442,22 @@ public struct ViDocCommandPlan: Equatable, Sendable {
             return sendTemp(at: now)
         case .temperature where mode == .modern && phase != .range:
             return sendAngle(at: now)
-        case .range:
-            return sendLaserOff(at: now)
+        case .range(_, _, let distance, let quality):
+            guard phase == .range, laserOffArmed, rangeSamples.count < LaserRangeBatch.replyLimit else { return [] }
+            rangeSamples.append(RangeSample(distanceMillimetres: distance, quality: quality))
+            guard rangeSamples.count >= LaserRangeBatch.replyLimit else { return [] }
+            return finishRange(at: now)
         default:
             return []
         }
     }
 
-    /// 下向き Auto。点灯、測距、応答のあと消灯を 1 回。従来モードは 4 バイト。
+    public mutating func takeLaserReading() -> LaserReading? {
+        defer { pendingLaser = nil }
+        return pendingLaser
+    }
+
+    /// 下向き Auto の測距を 1 フレームだけ出す。点灯は送らない。応答のあと消灯を 1 回。
     public mutating func measureDown(seconds: UInt8, at now: TimeInterval) -> [Data] {
         let seconds = min(max(seconds, 1), 30)
         guard mode != .probing else {
@@ -474,14 +522,23 @@ public struct ViDocCommandPlan: Equatable, Sendable {
 
     private mutating func laserPair(seconds: UInt8, at now: TimeInterval) -> [Data] {
         let trailed = mode == .modern
-        guard let on = ViDocProtocol.lightOn(down: true, trailed: trailed),
-              let down = ViDocProtocol.range(down: true, speed: .auto, seconds: seconds, trailed: trailed) else { return [] }
+        guard let down = ViDocProtocol.range(down: true, speed: .auto, seconds: seconds, trailed: trailed) else { return [] }
         phase = .range
         expect = .range
         laserOffArmed = true
+        rangingDown = true
+        rangeSamples.removeAll(keepingCapacity: true)
+        pendingLaser = nil
         queuedSeconds = nil
         deadline = now + Double(seconds) + 2
-        return [on, down]
+        return [down]
+    }
+
+    private mutating func finishRange(at now: TimeInterval) -> [Data] {
+        let samples = rangeSamples.map { (distanceMillimetres: $0.distanceMillimetres, quality: $0.quality) }
+        pendingLaser = LaserRangeBatch.medianMeters(samples, down: rangingDown).map(LaserReading.meters) ?? .failed
+        rangeSamples.removeAll(keepingCapacity: false)
+        return sendLaserOff(at: now)
     }
 
     private mutating func sendLaserOff(at now: TimeInterval) -> [Data] {

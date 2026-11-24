@@ -77,6 +77,52 @@ final class ViDocProtocolTests: XCTestCase {
         XCTAssertEqual(dop.gnss.vdop ?? 0, 1.1, accuracy: 1e-9)
     }
 
+    func testRangeUsesUnsignedDistanceAndMedianOfGoodSamples() throws {
+        var missed = Data([0x01, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x10])
+        missed.append(ViDocProtocol.checksum(of: missed))
+        guard case let .range(_, _, distance, quality) = try XCTUnwrap(ViDocReply.decode(missed, expect: .range)) else {
+            return XCTFail("距離を読めない")
+        }
+        XCTAssertEqual(distance, 0xFFFF)
+        XCTAssertEqual(quality, 0x0010)
+        XCTAssertFalse(LaserRangeBatch.usable(distanceMillimetres: distance, quality: quality, down: true))
+        XCTAssertFalse(LaserRangeBatch.usable(distanceMillimetres: 1_500, quality: 1100, down: true))
+        XCTAssertFalse(LaserRangeBatch.usable(distanceMillimetres: 40_000, quality: 100, down: true))
+        XCTAssertFalse(LaserRangeBatch.usable(distanceMillimetres: 20_000, quality: 100, down: false))
+        XCTAssertTrue(LaserRangeBatch.usable(distanceMillimetres: 1_200, quality: 601, down: true))
+        let median = LaserRangeBatch.medianMeters(
+            [
+                (distanceMillimetres: 1_000, quality: 100),
+                (distanceMillimetres: 0xFFFF, quality: 10),
+                (distanceMillimetres: 1_400, quality: 1100),
+                (distanceMillimetres: 1_200, quality: 700),
+                (distanceMillimetres: 1_600, quality: 200)
+            ],
+            down: true
+        )
+        XCTAssertEqual(median ?? 0, 1.2, accuracy: 1e-9)
+        XCTAssertNil(LaserRangeBatch.medianMeters([(distanceMillimetres: 0xFFFF, quality: 1)], down: true))
+
+        var modern = ViDocCommandPlan()
+        _ = modern.nmeaWasSent(at: 0)
+        _ = modern.receive(.switched, at: 0.1)
+        let frame = modern.measureDown(seconds: 5, at: 1)
+        let trailer = Data([0x3C, 0x3B, 0x3D, 0x01, 0x03, 0x02])
+        XCTAssertEqual(frame, [Data([0x55, 0x03, 0x05, 0x5D]) + trailer])
+        XCTAssertEqual(frame.first?.count, 10)
+        XCTAssertNotEqual(frame.first?[1], 4)
+        let samples = [1_000, 1_000, 1_200, 1_200, 1_200, 1_400, 1_400]
+        for (index, distance) in samples.enumerated() {
+            let replies = modern.receive(.range(startMillimetres: 0, endMillimetres: 0, distanceMillimetres: distance, quality: 10), at: 2)
+            if index < samples.count - 1 {
+                XCTAssertTrue(replies.isEmpty)
+            } else {
+                XCTAssertEqual(replies.first, ViDocProtocol.lightOff(trailed: true))
+            }
+        }
+        XCTAssertEqual(modern.takeLaserReading(), .meters(1.2))
+    }
+
     func testSwitchRetryLegacyLaserAndMADGate() {
         var plan = ViDocCommandPlan()
         XCTAssertEqual(plan.nmeaWasSent(at: 0), [ViDocProtocol.switchFrame()!])
@@ -87,10 +133,11 @@ final class ViDocProtocolTests: XCTestCase {
         XCTAssertTrue(plan.tick(at: 2).isEmpty)
         XCTAssertEqual(plan.mode, .legacy)
         let legacy = plan.measureDown(seconds: 5, at: 3)
-        XCTAssertEqual(legacy.map(\.count), [4, 4])
-        XCTAssertEqual(legacy.last, Data([0x55, 0x03, 0x05, 0x5D]))
-        let off = plan.receive(.range(startMillimetres: 0, endMillimetres: 0, distanceMillimetres: 1500, quality: 1), at: 8)
-        XCTAssertEqual(off, [ViDocProtocol.lightOff(trailed: false)!])
+        XCTAssertEqual(legacy, [Data([0x55, 0x03, 0x05, 0x5D])])
+        XCTAssertTrue(plan.receive(.range(startMillimetres: 0, endMillimetres: 0, distanceMillimetres: 1500, quality: 1), at: 4).isEmpty)
+        let off = plan.tick(at: 10)
+        XCTAssertEqual(off.first, ViDocProtocol.lightOff(trailed: false))
+        XCTAssertEqual(plan.takeLaserReading(), .meters(1.5))
 
         var modern = ViDocCommandPlan()
         _ = modern.nmeaWasSent(at: 0)

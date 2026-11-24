@@ -25,6 +25,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public var onFirmware: ((String) -> Void)?
     public var onTilt: ((Double) -> Void)?
     public var onLaserMeters: ((Double) -> Void)?
+    public var onLaserFailed: (() -> Void)?
     public let readings: AsyncStream<PositionReading>
     private let continuation: AsyncStream<PositionReading>.Continuation
 
@@ -273,6 +274,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             for frame in self.plan.tick(at: now) {
                 self.outbound.enqueueCommand(frame)
             }
+            self.publishLaser()
             self.stream.expect = self.plan.expect
             if !self.outbound.commands.isEmpty { self.drainRTCM() }
         }
@@ -326,8 +328,6 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             if let tilt = TiltMath.fromAcceleration(x: Double(x), y: Double(y), z: Double(z)) {
                 onTilt?(tilt)
             }
-        case .range(_, _, let distance, _):
-            onLaserMeters?(Double(distance) / 1000)
         case .version(let label):
             onFirmware?(label)
         default:
@@ -336,9 +336,21 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         for frame in plan.receive(reply, at: now) {
             outbound.enqueueCommand(frame)
         }
+        publishLaser()
         if let label = plan.firmwareLabel { onFirmware?(label) }
         stream.expect = plan.expect
         if !outbound.commands.isEmpty { drainRTCM() }
+    }
+
+    private func publishLaser() {
+        switch plan.takeLaserReading() {
+        case .meters(let meters):
+            onLaserMeters?(meters)
+        case .failed:
+            onLaserFailed?()
+        case nil:
+            break
+        }
     }
 
     public func measureLowerLaser(seconds: UInt8 = 5) {
