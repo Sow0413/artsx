@@ -58,6 +58,15 @@ struct InstrumentSetupForm: View {
             TextField("レーザー距離 m", text: $laserText)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("laser-distance")
+            Button(action: field.measureLowerLaser) {
+                Text("下レーザーを測る")
+                    .font(SurveyType(18, .heavy))
+                    .frame(maxWidth: .infinity, minHeight: 72)
+                    .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .foregroundStyle(SurveyColor.text)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("laser-measure")
         } else {
             TextField("ポール高 m", text: $poleText)
                 .textFieldStyle(.roundedBorder)
@@ -70,6 +79,23 @@ struct InstrumentSetupForm: View {
         TextField("版", text: $version).textFieldStyle(.roundedBorder).accessibilityIdentifier("kbm-version")
         TextField("日付", text: $dateText).textFieldStyle(.roundedBorder).accessibilityIdentifier("kbm-date")
         TextField("成果の高さ H m", text: $hText).textFieldStyle(.roundedBorder).accessibilityIdentifier("kbm-h")
+        Text("N = h − H。時間を空けた2回で、差は 2cm 以内。")
+            .font(SurveyType(16, .semibold))
+            .foregroundStyle(SurveyColor.muted)
+            .lineLimit(2)
+        Text(kbmStatus)
+            .font(SurveyType(18, .heavy))
+            .lineLimit(4)
+            .accessibilityIdentifier("kbm-status")
+        Button(action: takeKBMSample) {
+            Text(field.instrument.kbmFirstAt == nil ? "1回目を測る" : "2回目を測る")
+                .font(SurveyType(18, .heavy))
+                .frame(maxWidth: .infinity, minHeight: 72)
+                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(SurveyColor.text)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("kbm-sample")
         Toggle("準拠モード", isOn: compliance)
             .font(SurveyType(16, .heavy))
             .accessibilityIdentifier("compliance-switch")
@@ -120,6 +146,9 @@ struct InstrumentSetupForm: View {
             customY = String(field.instrument.cameraY)
             customZ = String(field.instrument.cameraZ)
             startTilt()
+        }
+        .onChange(of: field.laserReadingMeters) { _, meters in
+            if let meters { laserText = String(format: "%.3f", meters) }
         }
         .onDisappear {
             #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
@@ -182,17 +211,51 @@ struct InstrumentSetupForm: View {
             if let y = Double(customY) { field.instrument.cameraY = y }
             if let z = Double(customZ) { field.instrument.cameraZ = z }
         }
-        if let h = field.instrument.kbmH {
-            let ellipsoidal = field.reading.position?.ellipsoidalHeightMeters ?? h
-            field.recordKBMSample(ellipsoidal: ellipsoidal)
+    }
+
+    private var kbmStatus: String {
+        let instrument = field.instrument
+        let first = instrument.kbmFirstN.map { String(format: "1回目 N %+.3f m", $0) } ?? "1回目 未観測"
+        let second = instrument.kbmSecondN.map { String(format: "2回目 N %+.3f m", $0) } ?? "2回目 未観測"
+        guard let a = instrument.kbmFirstN, let b = instrument.kbmSecondN else {
+            return "\(first)。\(second)。差はまだありません。"
         }
+        let accepted = KBMCorrection.accepted(
+            first: a,
+            firstAt: instrument.kbmFirstAt,
+            second: b,
+            secondAt: instrument.kbmSecondAt
+        )
+        let diff = abs(a - b) * 100
+        return String(format: "%@。%@。差 %.1f cm。%@", first, second, diff, accepted ? "2cm以内" : "2cmを超えています")
+    }
+
+    private func takeKBMSample() {
+        field.instrument.kbmSource = source
+        field.instrument.kbmVersion = version
+        field.instrument.kbmDate = dateText
+        guard let h = Double(hText) else {
+            field.instrumentMessage = "成果の高さ H を入れてください。"
+            return
+        }
+        if source.isEmpty || version.isEmpty || dateText.isEmpty {
+            field.instrumentMessage = "H の出典、版、日付を入れてください。"
+            return
+        }
+        field.instrument.kbmH = h
+        guard let ellipsoidal = field.reading.position?.ellipsoidalHeightMeters else {
+            field.instrumentMessage = "いまの高さが無いので、KBMを測れません。"
+            return
+        }
+        field.recordKBMSample(ellipsoidal: ellipsoidal)
     }
 
     private func startTilt() {
         #if !SURVEY_PLAYGROUND && canImport(CoreMotion)
         SystemMotion.shared.onPitchRadians = { pitch in
             let degrees = StatureMath.tiltFromVertical(pitchRadians: pitch).map { $0 * 180 / .pi }
-            DispatchQueue.main.async { field.tiltDegrees = degrees }
+            guard let degrees else { return }
+            DispatchQueue.main.async { field.noteTilt(degrees, fromDevice: false) }
         }
         SystemMotion.shared.setPitch(true)
         #endif

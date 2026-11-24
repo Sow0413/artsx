@@ -452,6 +452,8 @@ struct BasicDesk: View {
         .foregroundStyle(SurveyColor.text)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(SurveyColor.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {

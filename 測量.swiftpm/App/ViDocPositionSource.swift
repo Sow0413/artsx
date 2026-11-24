@@ -10,7 +10,8 @@ import CoreBluetooth
 //   Service 0xFFF0
 //     0xFFF1  Notify  … ViDoc の出力。待機中は <STX>df Ver_0.0.4、開始後は NMEA。
 //     0xFFF2  Write   … 入力。開始コマンドと、RTK 補正(RTCM3)を流す口。
-//   接続のたび FFF2 へ <STX>start<ETX>、FFF1 の電池行（または 2 秒）のあと <STX>nmea<ETX>。
+//   接続のたび FFF2 へ start\r\n、ready のあと <STX>nmea<ETX>。
+//   fw 3.0 は続けて cmd 22 を 10 バイトまとめて 1 回書く。応答が無ければ従来の 4 バイト測距。
 //   NTRIP(ドコモ d-gnss.jp)の RTCM3 を FFF2 に流すと quality が 2(DGPS)→4(RTK Fix) に上がる。
 //
 // PositionSource に準拠するので、iPhone / CLAS と同じ読み方で画面に入る（README の設計どおり）。
@@ -22,6 +23,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public let receiver: ReceiverKind = .rtk
     public private(set) var stage: PositionStage = .iphone   // Fix/Float 到達で .rtk に上げる
     public var onFirmware: ((String) -> Void)?
+    public var onTilt: ((Double) -> Void)?
+    public var onLaserMeters: ((Double) -> Void)?
     public let readings: AsyncStream<PositionReading>
     private let continuation: AsyncStream<PositionReading>.Continuation
 
@@ -45,7 +48,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var writeChar: CBCharacteristic?
-    private var nmeaBuffer = Data()
+    private var stream = ViDocStreamParser()
+    private var plan = ViDocCommandPlan()
+    private var sawDeviceAngle = false
     private var nmea = NMEAParser()
     private var running = false
 
@@ -251,10 +256,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         let now = Date().timeIntervalSinceReferenceDate
         recovery.linkUp(at: now)
         reportState("接続しました（\(deviceName)）")
-        outbound.enqueueCommand(boot.onConnect(at: now))
+        enqueueBoot(boot.onConnect(at: now))
         bootGeneration += 1
         armBootTick()
-        drainRTCM()
     }
 
     private func armBootTick() {
@@ -264,10 +268,13 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
         timer.setEventHandler { [weak self] in
             guard let self, self.bootGeneration == generation else { return }
-            if let command = self.boot.onTick(at: Date().timeIntervalSinceReferenceDate) {
-                self.outbound.enqueueCommand(command)
-                self.drainRTCM()
+            let now = Date().timeIntervalSinceReferenceDate
+            self.enqueueBoot(self.boot.onTick(at: now))
+            for frame in self.plan.tick(at: now) {
+                self.outbound.enqueueCommand(frame)
             }
+            self.stream.expect = self.plan.expect
+            if !self.outbound.commands.isEmpty { self.drainRTCM() }
         }
         timer.resume()
         bootTimer = timer
@@ -276,29 +283,80 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard characteristic.uuid == Self.notifyUUID, let data = characteristic.value else { return }
         recovery.notify(at: Date().timeIntervalSinceReferenceDate)
-        nmeaBuffer.append(data)
-        while let nl = nmeaBuffer.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
-            let lineData = nmeaBuffer.subdata(in: nmeaBuffer.startIndex..<nl)
-            nmeaBuffer.removeSubrange(nmeaBuffer.startIndex...nl)
-            guard let line = String(data: lineData, encoding: .ascii)?
-                .trimmingCharacters(in: .whitespacesAndNewlines), !line.isEmpty else { continue }
-            let now = Date().timeIntervalSinceReferenceDate
-            if let version = ViDocFirmware.version(in: line) {
-                onFirmware?(version)
+        let now = Date().timeIntervalSinceReferenceDate
+        stream.expect = plan.expect
+        for event in stream.feed(data) {
+            switch event {
+            case .text(let line):
+                if plan.firmwareLabel == nil, let version = ViDocFirmware.version(in: line) {
+                    onFirmware?(version)
+                }
+                enqueueBoot(boot.onNotify(line, at: now))
+                if ViDocLink.isNMEA(line) { handleNMEA(line) }
+            case .reply(let reply):
+                handleReply(reply, at: now)
             }
-            if let command = boot.onNotify(line, at: now) {
-                outbound.enqueueCommand(command)
-                drainRTCM()
-            }
-            if line.hasPrefix("$") { handleNMEA(line) }
         }
-        if nmeaBuffer.count > 4096 { nmeaBuffer.removeAll(keepingCapacity: true) }
+    }
+
+    /// プロトコルの 10 バイト（従来レーザーは 4 バイト）は、コマンド 1 件として 1 回で書く。
+    private func enqueueBoot(_ command: Data?) {
+        guard let command else { return }
+        if command == ViDocLink.startCommand, plan.hasProbed {
+            plan.noteRestart()
+            stream = ViDocStreamParser()
+            sawDeviceAngle = false
+        }
+        outbound.enqueueCommand(command)
+        if command == ViDocLink.nmeaCommand {
+            for frame in plan.nmeaWasSent(at: Date().timeIntervalSinceReferenceDate) {
+                outbound.enqueueCommand(frame)
+            }
+        }
+        stream.expect = plan.expect
+        drainRTCM()
+    }
+
+    private func handleReply(_ reply: ViDocReply, at now: TimeInterval) {
+        switch reply {
+        case .angle(let pitch, let roll):
+            sawDeviceAngle = true
+            onTilt?(TiltMath.fromPitchRoll(pitchDegrees: pitch, rollDegrees: roll))
+        case .accel(let x, let y, let z) where !sawDeviceAngle:
+            if let tilt = TiltMath.fromAcceleration(x: Double(x), y: Double(y), z: Double(z)) {
+                onTilt?(tilt)
+            }
+        case .range(_, _, let distance, _):
+            onLaserMeters?(Double(distance) / 1000)
+        case .version(let label):
+            onFirmware?(label)
+        default:
+            break
+        }
+        for frame in plan.receive(reply, at: now) {
+            outbound.enqueueCommand(frame)
+        }
+        if let label = plan.firmwareLabel { onFirmware?(label) }
+        stream.expect = plan.expect
+        if !outbound.commands.isEmpty { drainRTCM() }
+    }
+
+    public func measureLowerLaser(seconds: UInt8 = 5) {
+        queue.async {
+            guard ViDocLaser.enabled else { return }
+            let now = Date().timeIntervalSinceReferenceDate
+            for frame in self.plan.measureDown(seconds: seconds, at: now) {
+                self.outbound.enqueueCommand(frame)
+            }
+            self.stream.expect = self.plan.expect
+            self.drainRTCM()
+        }
     }
 
     private func handleNMEA(_ line: String) {
         guard let epoch = nmea.consume(line) else { return }
         lastGGA = epoch.sentence
-        let count = epoch.satelliteCount.map(String.init) ?? "—"
+        let count = (stream.gnss.satelliteCount ?? epoch.satelliteCount).map(String.init) ?? "—"
         reportState("NMEA 受信中 衛星 \(count) \(Self.qualityLabel(epoch.fixQuality))")
         let age = epoch.correctionAgeSeconds ?? lastRTCMAt.map { Date().timeIntervalSince($0) }
         stage = epoch.stage
@@ -316,9 +374,11 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             fixQuality: epoch.fixQuality,
             receiver: .rtk,
             frame: .wgs84ITRF,
-            satelliteCount: epoch.satelliteCount,
+            satelliteCount: stream.gnss.satelliteCount ?? epoch.satelliteCount,
             satellites: nil,
-            pdop: epoch.pdop,
+            pdop: stream.gnss.pdop ?? epoch.pdop,
+            hdop: stream.gnss.hdop,
+            vdop: stream.gnss.vdop,
             correctionAgeSeconds: age,
             correctionSource: srcLabel,
             courseDegrees: nil,
@@ -343,6 +403,9 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         outbound.clearCommands()
         outbound.corrections.dropOlder(than: 2, now: now)
         boot = ViDocBoot()
+        plan = ViDocCommandPlan()
+        stream = ViDocStreamParser()
+        sawDeviceAngle = false
         bootGeneration += 1
         writeChar = nil
         notifyChar = nil

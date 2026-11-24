@@ -76,6 +76,15 @@ public struct SiteInstrument: Codable, Equatable, Sendable {
 public enum CameraOffset {
     public static let spcPlus15ProMax = (x: 0.022, y: 0.056, z: 0.017)
 
+    public static func displayName(_ kind: String) -> String {
+        switch kind {
+        case "spcPlus": return "SPC+"
+        case "spc": return "SPC"
+        case "custom": return "Custom"
+        default: return kind
+        }
+    }
+
     /// iPhone 17 Pro / Pro Max は SPC+ の公開値が無い。Custom だけ。
     /// hw.machine の iPhone17,1 は 16 Pro なので、ここには入れない。
     public static func customOnly(machine: String) -> Bool {
@@ -223,9 +232,9 @@ public enum SiteDXF {
 }
 
 public enum ViDocLaser {
-    /// cmd22 のバイト列はリポジトリに無い。送らない。mode 7 と認証の書き換えも送らない。
-    public static let enabled = false
-    public static let heldReason = "レーザー cmd22 のバイト列が無いので送りません。"
+    /// 測距と cmd 22 だけ送る。mode 7、ロック、認証の書き換えは送らない。
+    public static let enabled = true
+    public static let heldReason = "測距コマンドだけ送ります。リセットは送りません。"
 }
 
 public enum ViDocFirmware {

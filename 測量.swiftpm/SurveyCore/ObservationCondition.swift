@@ -7,6 +7,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     public var satellites: [SatelliteCount]
     public var satelliteCount: Int?
     public var pdop: Double?
+    public var hdop: Double?
+    public var vdop: Double?
     public var horizontalAccuracyMeters: Double
     public var verticalAccuracyMeters: Double?
     public var correctionAgeSeconds: Double?
@@ -24,6 +26,10 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     public var antennaMethod: String?
     /// 楕円体高からアンテナ高を引いた、地上標識の高さ。
     public var groundHeightMeters: Double?
+    /// 外れ値を除いた区間の傾き。門は中央値。
+    public var tiltMedianDegrees: Double?
+    public var tiltMeanDegrees: Double?
+    public var tiltMaxDegrees: Double?
 
     public init(
         solution: FixQuality,
@@ -43,7 +49,12 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         stature: StatureRecord? = nil,
         firmware: String? = nil,
         antennaMethod: String? = nil,
-        groundHeightMeters: Double? = nil
+        groundHeightMeters: Double? = nil,
+        hdop: Double? = nil,
+        vdop: Double? = nil,
+        tiltMedianDegrees: Double? = nil,
+        tiltMeanDegrees: Double? = nil,
+        tiltMaxDegrees: Double? = nil
     ) {
         self.solution = solution
         self.solutionLabel = solutionLabel
@@ -63,6 +74,11 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         self.firmware = firmware
         self.antennaMethod = antennaMethod
         self.groundHeightMeters = groundHeightMeters
+        self.hdop = hdop
+        self.vdop = vdop
+        self.tiltMedianDegrees = tiltMedianDegrees
+        self.tiltMeanDegrees = tiltMeanDegrees
+        self.tiltMaxDegrees = tiltMaxDegrees
     }
 
     public init(from decoder: Decoder) throws {
@@ -85,6 +101,11 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         firmware = try container.decodeIfPresent(String.self, forKey: .firmware)
         antennaMethod = try container.decodeIfPresent(String.self, forKey: .antennaMethod)
         groundHeightMeters = try container.decodeIfPresent(Double.self, forKey: .groundHeightMeters)
+        hdop = try container.decodeIfPresent(Double.self, forKey: .hdop)
+        vdop = try container.decodeIfPresent(Double.self, forKey: .vdop)
+        tiltMedianDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMedianDegrees)
+        tiltMeanDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMeanDegrees)
+        tiltMaxDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMaxDegrees)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -107,13 +128,19 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         try container.encodeIfPresent(firmware, forKey: .firmware)
         try container.encodeIfPresent(antennaMethod, forKey: .antennaMethod)
         try container.encodeIfPresent(groundHeightMeters, forKey: .groundHeightMeters)
+        try container.encodeIfPresent(hdop, forKey: .hdop)
+        try container.encodeIfPresent(vdop, forKey: .vdop)
+        try container.encodeIfPresent(tiltMedianDegrees, forKey: .tiltMedianDegrees)
+        try container.encodeIfPresent(tiltMeanDegrees, forKey: .tiltMeanDegrees)
+        try container.encodeIfPresent(tiltMaxDegrees, forKey: .tiltMaxDegrees)
     }
 
     private enum CodingKeys: String, CodingKey {
         case solution, solutionLabel, satellites, satelliteCount, pdop
         case horizontalAccuracyMeters, verticalAccuracyMeters, correctionAgeSeconds, correctionSource
         case observedAt, durationSeconds, epochCount, receiver, stage, stature
-        case firmware, antennaMethod, groundHeightMeters
+        case firmware, antennaMethod, groundHeightMeters, hdop, vdop
+        case tiltMedianDegrees, tiltMeanDegrees, tiltMaxDegrees
     }
 
     public static func snapshot(
@@ -179,7 +206,19 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
                 lines.append("地盤高 \(String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), ground))m")
             }
         }
+        if !dopLine.isEmpty { lines.append(dopLine) }
+        if let tiltMedianDegrees {
+            let mean = tiltMeanDegrees.map { String(format: "%.2f", $0) } ?? "—"
+            let peak = tiltMaxDegrees.map { String(format: "%.2f", $0) } ?? "—"
+            lines.append(String(format: "傾き 中央 %.2f° 平均 %@° 最大 %@°", tiltMedianDegrees, mean, peak))
+        }
         return lines
+    }
+
+    private var dopLine: String {
+        let h = hdop.map { String(format: "HDOP %.1f", $0) }
+        let v = vdop.map { String(format: "VDOP %.1f", $0) }
+        return [h, v].compactMap { $0 }.joined(separator: " ")
     }
 
     static let stamp: DateFormatter = {

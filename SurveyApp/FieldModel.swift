@@ -85,6 +85,11 @@ final class FieldModel: ObservableObject {
     @Published var instrument = SiteInstrument()
     @Published var instrumentMessage: String?
     @Published var tiltDegrees: Double?
+    @Published var tiltMeanDegrees: Double?
+    @Published var tiltMaxDegrees: Double?
+    @Published var deviceTiltLive = false
+    @Published var laserReadingMeters: Double?
+    private var tiltWindow: [(TimeInterval, Double)] = []
     @Published var receiverFirmware: String?
     @Published var operation = OperationDesk.load()
     @Published var showsToolOrder = false
@@ -341,6 +346,17 @@ final class FieldModel: ObservableObject {
         gnss.onState = { [weak self] state in
             self?.gnssState = state
         }
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.onDeviceTilt = { [weak self] degrees in
+            self?.noteTilt(degrees, fromDevice: true)
+        }
+        rtkSession?.onLaserDistance = { [weak self] meters in
+            self?.instrument.laserMeters = meters
+            self?.instrument.antennaMethod = "laser"
+            self?.laserReadingMeters = meters
+            self?.instrumentMessage = String(format: "下レーザー %.3f m", meters)
+        }
+        #endif
         gnss.onDiscover = { [weak self] choice in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -1272,11 +1288,7 @@ final class FieldModel: ObservableObject {
             durationSeconds: epochWatch.duration(at: position.timestamp),
             epochCount: epochWatch.count
         )
-        condition.firmware = receiverFirmware ?? rtkSession?.firmwareVersion
-        condition.antennaMethod = instrument.antennaMethodLabel
-        if let height = position.ellipsoidalHeightMeters {
-            condition.groundHeightMeters = instrument.groundMarkMeters(ellipsoidal: height)
-        }
+        annotate(&condition, position: position)
         let observation = FieldObservation(
             name: name,
             workID: asGCP ? "boundary" : workCatalog.selected.id,
@@ -2495,11 +2507,7 @@ final class FieldModel: ObservableObject {
             stature: stature,
             sight: liveSight
         )
-        condition.firmware = receiverFirmware ?? rtkSession?.firmwareVersion
-        condition.antennaMethod = instrument.antennaMethodLabel
-        if let height = position.ellipsoidalHeightMeters {
-            condition.groundHeightMeters = instrument.groundMarkMeters(ellipsoidal: height)
-        }
+        annotate(&condition, position: position)
         let observation = FieldObservation(
             name: name,
             workID: "stakeout",
@@ -2598,10 +2606,53 @@ final class FieldModel: ObservableObject {
                 secondAt: instrument.kbmSecondAt
             )
             let firmware = receiverFirmware ?? rtkSession?.firmwareVersion ?? "未取得"
-            instrumentMessage = "残しました。カメラ \(instrument.cameraKind) \(instrument.antennaMethodLabel) \(instrument.antennaToGroundMeters.map { String(format: "%.3f m", $0) } ?? "—")。\(KBMCorrection.title) \(kbm ? "2cm以内" : "未了")。ファームウェア \(firmware)。レーザーは送っていません。"
+            let height = instrument.antennaToGroundMeters.map { String(format: "%.3f m", $0) } ?? "—"
+            instrumentMessage = "残しました。カメラ \(CameraOffset.displayName(instrument.cameraKind)) \(instrument.antennaMethodLabel) \(height)。ファームウェア \(firmware)。"
         } catch {
             instrumentMessage = "設定を置けませんでした。"
         }
+    }
+
+    func noteTilt(_ degrees: Double, fromDevice: Bool) {
+        guard degrees.isFinite else { return }
+        if fromDevice, !deviceTiltLive {
+            deviceTiltLive = true
+            tiltWindow.removeAll(keepingCapacity: true)
+        }
+        if !fromDevice, deviceTiltLive { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        tiltWindow.append((now, degrees))
+        tiltWindow.removeAll { now - $0.0 > 15 }
+        guard let stats = TiltMath.stats(tiltWindow.map(\.1)) else { return }
+        tiltDegrees = stats.median
+        tiltMeanDegrees = stats.mean
+        tiltMaxDegrees = stats.maximum
+    }
+
+    func measureLowerLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.measureLowerLaser()
+        instrumentMessage = "下レーザーを測っています。"
+        #else
+        instrumentMessage = "受信機が無いので測れません。"
+        #endif
+    }
+
+    private func annotate(_ condition: inout ObservationCondition, position: GeodeticPosition) {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        condition.firmware = receiverFirmware ?? rtkSession?.firmwareVersion
+        #else
+        condition.firmware = receiverFirmware
+        #endif
+        condition.antennaMethod = instrument.antennaMethodLabel
+        if let height = position.ellipsoidalHeightMeters {
+            condition.groundHeightMeters = instrument.groundMarkMeters(ellipsoidal: height)
+        }
+        condition.hdop = position.hdop
+        condition.vdop = position.vdop
+        condition.tiltMedianDegrees = tiltDegrees
+        condition.tiltMeanDegrees = tiltMeanDegrees
+        condition.tiltMaxDegrees = tiltMaxDegrees
     }
 
     func recordKBMSample(ellipsoidal: Double) {

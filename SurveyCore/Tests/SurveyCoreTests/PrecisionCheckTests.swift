@@ -50,8 +50,8 @@ final class PrecisionCheckTests: XCTestCase {
         XCTAssertEqual(ViDocFirmware.version(in: "\u{02}df Ver_3.0.0.0\u{03}"), "3.0.0.0")
         XCTAssertTrue(ViDocLink.isWaitLine("df Ver_3.0.0.0"))
         XCTAssertFalse(ViDocLink.isReadyText("df Ver_3.0.0.0"))
-        XCTAssertFalse(ViDocLaser.enabled)
-        XCTAssertFalse(ViDocLaser.heldReason.isEmpty)
+        XCTAssertTrue(ViDocLaser.enabled)
+        XCTAssertTrue(ViDocLaser.heldReason.contains("リセット"))
     }
 
     func testZoneXVINamesUseIRBPrefix() {

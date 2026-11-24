@@ -34,6 +34,8 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     @Published public private(set) var message: String = ""
     @Published public private(set) var vidocLine = "未接続"
     @Published public private(set) var firmwareVersion: String?
+    public var onDeviceTilt: ((Double) -> Void)?
+    public var onLaserDistance: ((Double) -> Void)?
     @Published public private(set) var ntripLine = "未接続"
     @Published public private(set) var holdGCPUntilFix = false
 
@@ -65,10 +67,18 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         vidoc.onFirmware = { [weak self] version in
             self?.setMain { self?.firmwareVersion = version }
         }
+        vidoc.onTilt = { [weak self] degrees in
+            self?.setMain { self?.onDeviceTilt?(degrees) }
+        }
+        vidoc.onLaserMeters = { [weak self] meters in
+            self?.setMain { self?.onLaserDistance?(meters) }
+        }
         vidoc.onLink = { [weak self] line in
             self?.setMain {
                 self?.vidocLine = line
-                if let version = ViDocFirmware.version(in: line) { self?.firmwareVersion = version }
+                if let version = ViDocFirmware.version(in: line), self?.firmwareVersion?.contains("build") != true {
+                    self?.firmwareVersion = version
+                }
                 self?.deviceConnected = line.hasPrefix("接続しました") || line.hasPrefix("NMEA")
                 if line.hasPrefix("再接続中") { self?.holdGCPUntilFix = true }
             }
@@ -76,6 +86,10 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     }
 
     // MARK: PositionSource
+    public func measureLowerLaser() {
+        vidoc.measureLowerLaser()
+    }
+
     public func start() {
         if !armed {
             armed = true
