@@ -1,8 +1,8 @@
 import Foundation
 
-/// 再接続の待ち。通常は 1, 2, 4, 8 秒、以降は 15 秒。503 と到達不能は 10, 20, 30 秒。
+/// 再接続の待ち。弱い回線は 2, 4, 8, 16, 32 秒、以降は 60 秒。503 と到達不能は 10, 20, 30 秒。
 public struct LinkBackoff: Equatable, Sendable {
-    public static let sequence: [TimeInterval] = [1, 2, 4, 8, 15]
+    public static let sequence: [TimeInterval] = [2, 4, 8, 16, 32, 60]
     public static let sessionHold: [TimeInterval] = [10, 20, 30]
     public private(set) var index = 0
     public var slow = false

@@ -218,6 +218,7 @@ public enum ViDocStreamEvent: Equatable, Sendable {
 public struct ViDocStreamParser {
     public private(set) var gnss = ViDocGNSS()
     public var expect: ViDocBinaryExpect = .none
+    public var onUBX: ((Data, UInt8, UInt8) -> Void)?
     private var buffer = Data()
 
     public init() {}
@@ -263,6 +264,7 @@ public struct ViDocStreamParser {
             return .again
         }
         rememberUBX(frame, payloadLength: length)
+        onUBX?(frame, frame[frame.startIndex + 2], frame[frame.startIndex + 3])
         buffer.removeFirst(total)
         return .again
     }
@@ -373,6 +375,9 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     public private(set) var firmwareLabel: String?
     public private(set) var hasProbed = false
     public private(set) var lightIsOn = false
+    public var observing = false
+    /// true は下、false は前。点灯した側だけ測る。
+    public private(set) var beamIsDown = true
     public enum Lamp: Equatable, Sendable { case off, aiming, ranging }
     public var lamp: Lamp {
         if phase == .range { return .ranging }
@@ -425,7 +430,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
             return laser + takeQueuedLaser(at: now)
         case .version:
             return laser + sendAngle(at: now)
-        case .angle: return laser + sendAccel(at: now)
+        case .angle: return laser + (observing ? sendAngle(at: now) : sendAccel(at: now))
         case .accel: return laser + sendMag(at: now)
         case .mag: return laser + sendTemp(at: now)
         case .temp: return laser + sendAngle(at: now)
@@ -438,8 +443,17 @@ public struct ViDocCommandPlan: Equatable, Sendable {
 
     /// 下向きの赤い点。測距は混ぜない。
     public mutating func lightDown(at now: TimeInterval) -> [Data] {
-        guard mode != .probing, let frame = ViDocProtocol.lightOn(down: true, trailed: mode == .modern) else { return [] }
+        light(down: true, at: now)
+    }
+
+    public mutating func lightFront(at now: TimeInterval) -> [Data] {
+        light(down: false, at: now)
+    }
+
+    private mutating func light(down: Bool, at now: TimeInterval) -> [Data] {
+        guard mode != .probing, let frame = ViDocProtocol.lightOn(down: down, trailed: mode == .modern) else { return [] }
         lightIsOn = true
+        beamIsDown = down
         lightOnAt = now
         return [frame]
     }
@@ -454,7 +468,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
             guard mode == .modern else { return [] }
             return sendAngle(at: now)
         case .angle where mode == .modern && phase != .range:
-            return sendAccel(at: now)
+            return observing ? sendAngle(at: now) : sendAccel(at: now)
         case .accel where mode == .modern && phase != .range:
             return sendMag(at: now)
         case .mag where mode == .modern && phase != .range:
@@ -478,7 +492,16 @@ public struct ViDocCommandPlan: Equatable, Sendable {
 
     /// 点灯から 0.5 秒以上あとに、測距フレームだけを出す。点灯と測距を続けては出さない。
     public mutating func measureDown(seconds: UInt8, at now: TimeInterval) -> [Data] {
+        measure(down: true, seconds: seconds, at: now)
+    }
+
+    public mutating func measureFront(seconds: UInt8, at now: TimeInterval) -> [Data] {
+        measure(down: false, seconds: seconds, at: now)
+    }
+
+    private mutating func measure(down: Bool, seconds: UInt8, at now: TimeInterval) -> [Data] {
         let seconds = min(max(seconds, 1), 30)
+        guard lightIsOn, beamIsDown == down else { return [] }
         guard mode != .probing else {
             queuedSeconds = seconds
             return []
@@ -574,11 +597,11 @@ public struct ViDocCommandPlan: Equatable, Sendable {
 
     private mutating func laserPair(seconds: UInt8, at now: TimeInterval) -> [Data] {
         let trailed = mode == .modern
-        guard let down = ViDocProtocol.range(down: true, speed: .auto, seconds: seconds, trailed: trailed) else { return [] }
+        guard let down = ViDocProtocol.range(down: beamIsDown, speed: .auto, seconds: seconds, trailed: trailed) else { return [] }
         phase = .range
         expect = .range
         laserOffArmed = true
-        rangingDown = true
+        rangingDown = beamIsDown
         rangeSamples.removeAll(keepingCapacity: true)
         pendingLaser = nil
         queuedSeconds = nil

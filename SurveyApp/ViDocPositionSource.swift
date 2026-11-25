@@ -55,6 +55,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private var plan = ViDocCommandPlan()
     private var sawDeviceAngle = false
     private var publishedLamp: ViDocCommandPlan.Lamp = .off
+    private var ppkBase: URL?
     private var nmea = NMEAParser()
     private var running = false
 
@@ -291,6 +292,10 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         recovery.notify(at: Date().timeIntervalSinceReferenceDate)
         let now = Date().timeIntervalSinceReferenceDate
         stream.expect = plan.expect
+        stream.onUBX = { [weak self] frame, klass, message in
+            guard let base = self?.ppkBase else { return }
+            PPKLog.appendUBX(frame, classID: klass, messageID: message, base: base)
+        }
         for event in stream.feed(data) {
             switch event {
             case .text(let line):
@@ -365,6 +370,41 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         }
     }
 
+    public func setObserving(_ on: Bool) {
+        queue.async { self.plan.observing = on }
+    }
+
+    public func setPPKBase(_ url: URL?) {
+        queue.async { self.ppkBase = url }
+    }
+
+    public func lightFrontLaser() {
+        queue.async {
+            guard ViDocLaser.enabled else { return }
+            let now = Date().timeIntervalSinceReferenceDate
+            for frame in self.plan.lightFront(at: now) {
+                self.outbound.enqueueCommand(frame)
+            }
+            self.publishLamp()
+            self.drainRTCM()
+        }
+    }
+
+    public func measureFrontLaser(seconds: UInt8 = 5) {
+        queue.async {
+            guard ViDocLaser.enabled else { return }
+            let now = Date().timeIntervalSinceReferenceDate
+            let frames = self.plan.measureFront(seconds: seconds, at: now)
+            if frames.isEmpty, !self.plan.lightIsOn || self.plan.beamIsDown {
+                self.onLaserNeedAim?()
+            }
+            for frame in frames { self.outbound.enqueueCommand(frame) }
+            self.publishLamp()
+            self.stream.expect = self.plan.expect
+            self.drainRTCM()
+        }
+    }
+
     public func lightLowerLaser() {
         queue.async {
             guard ViDocLaser.enabled else { return }
@@ -398,9 +438,11 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private func handleNMEA(_ line: String) {
         guard let epoch = nmea.consume(line) else { return }
         lastGGA = epoch.sentence
-        let count = (stream.gnss.satelliteCount ?? epoch.satelliteCount).map(String.init) ?? "—"
-        reportState("NMEA 受信中 衛星 \(count) \(Self.qualityLabel(epoch.fixQuality))")
         let age = epoch.correctionAgeSeconds ?? lastRTCMAt.map { Date().timeIntervalSince($0) }
+        let quality: FixQuality = (age ?? 0) > 10 ? .standalone : epoch.fixQuality
+        let count = (stream.gnss.satelliteCount ?? epoch.satelliteCount).map(String.init) ?? "—"
+        let ageText = age.map { String(format: " 補正 %.0f秒", $0) } ?? ""
+        reportState("NMEA 受信中 衛星 \(count) \(Self.qualityLabel(quality))\(ageText)")
         stage = epoch.stage
         let stationID = epoch.stationID
         let srcLabel = correctionSource.map { stationID.isEmpty ? $0 : "\($0) #\(stationID)" }
@@ -413,7 +455,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             verticalAccuracyMeters: epoch.verticalAccuracyMeters,
             timestamp: Date(),
             stage: epoch.stage,
-            fixQuality: epoch.fixQuality,
+            fixQuality: quality,
             receiver: .rtk,
             frame: .wgs84ITRF,
             satelliteCount: stream.gnss.satelliteCount ?? epoch.satelliteCount,

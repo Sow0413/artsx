@@ -126,6 +126,36 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["laser-status"].waitForExistence(timeout: 5), "レーザーの状態が無い")
         scrollClear(aim, in: setupSheet)
         shot("27-laser")
+        let frontAim = app.buttons["laser-front-light"]
+        let frontRead = app.buttons["laser-front-measure"]
+        scrollClear(frontAim, in: setupSheet)
+        XCTAssertTrue(frontAim.waitForExistence(timeout: 5), "前の点灯が無い")
+        XCTAssertTrue(frontRead.waitForExistence(timeout: 5), "前の測るが無い")
+        shot("27-front-laser")
+        let calib = app.buttons["open-calib"]
+        scrollClear(calib, in: setupSheet)
+        calib.tap()
+        XCTAssertTrue(app.staticTexts["screen-calib-tilt"].waitForExistence(timeout: 5), "傾きの校正が開かない")
+        shot("29-calib-tilt")
+        app.buttons["calib-read-a"].tap()
+        let readB = app.buttons["calib-read-b"]
+        XCTAssertTrue(readB.waitForExistence(timeout: 5), "B を読めない")
+        readB.tap()
+        app.buttons["calib-save"].tap()
+        XCTAssertTrue(app.staticTexts["screen-calib-mag"].waitForExistence(timeout: 5), "方位の校正が開かない")
+        shot("30-calib-mag")
+        app.buttons["calib-mock-spin"].tap()
+        XCTAssertTrue(app.staticTexts["screen-calib-live"].waitForExistence(timeout: 5), "確かめが開かない")
+        shot("31-calib-live")
+        app.buttons["calib-close"].tap()
+        let ppk = app.buttons["ppk-toggle"]
+        scrollClear(ppk, in: setupSheet)
+        ppk.tap()
+        let ppkState = app.staticTexts["ppk-status"]
+        XCTAssertTrue(ppkState.waitForExistence(timeout: 5))
+        XCTAssertTrue(ppkState.label.contains("記録中"))
+        shot("28-ppk")
+        ppk.tap()
         let saveSetup = app.buttons["setup-save"]
         scrollClear(saveSetup, in: setupSheet)
         saveSetup.tap()

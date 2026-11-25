@@ -30,6 +30,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     public var tiltMedianDegrees: Double?
     public var tiltMeanDegrees: Double?
     public var tiltMaxDegrees: Double?
+    /// この点に使った IMU 校正を保存した時刻。無い記録は nil。
+    public var calibrationUsedAt: Date?
 
     public init(
         solution: FixQuality,
@@ -54,7 +56,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         vdop: Double? = nil,
         tiltMedianDegrees: Double? = nil,
         tiltMeanDegrees: Double? = nil,
-        tiltMaxDegrees: Double? = nil
+        tiltMaxDegrees: Double? = nil,
+        calibrationUsedAt: Date? = nil
     ) {
         self.solution = solution
         self.solutionLabel = solutionLabel
@@ -79,6 +82,7 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         self.tiltMedianDegrees = tiltMedianDegrees
         self.tiltMeanDegrees = tiltMeanDegrees
         self.tiltMaxDegrees = tiltMaxDegrees
+        self.calibrationUsedAt = calibrationUsedAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -106,6 +110,7 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         tiltMedianDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMedianDegrees)
         tiltMeanDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMeanDegrees)
         tiltMaxDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMaxDegrees)
+        calibrationUsedAt = try container.decodeIfPresent(Date.self, forKey: .calibrationUsedAt)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -133,6 +138,7 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         try container.encodeIfPresent(tiltMedianDegrees, forKey: .tiltMedianDegrees)
         try container.encodeIfPresent(tiltMeanDegrees, forKey: .tiltMeanDegrees)
         try container.encodeIfPresent(tiltMaxDegrees, forKey: .tiltMaxDegrees)
+        try container.encodeIfPresent(calibrationUsedAt, forKey: .calibrationUsedAt)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -140,7 +146,7 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         case horizontalAccuracyMeters, verticalAccuracyMeters, correctionAgeSeconds, correctionSource
         case observedAt, durationSeconds, epochCount, receiver, stage, stature
         case firmware, antennaMethod, groundHeightMeters, hdop, vdop
-        case tiltMedianDegrees, tiltMeanDegrees, tiltMaxDegrees
+        case tiltMedianDegrees, tiltMeanDegrees, tiltMaxDegrees, calibrationUsedAt
     }
 
     public static func snapshot(

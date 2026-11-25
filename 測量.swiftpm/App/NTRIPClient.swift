@@ -52,6 +52,7 @@ public final class NTRIPClient: @unchecked Sendable {
     private var pathMonitor: NWPathMonitor?
     private var lastPathKey: String?
     private var lastGGAAt: TimeInterval?
+    private var cachedGGA: String?
 
     public var onStatus: ((String) -> Void)?
     public var onHealth: ((LinkHealth) -> Void)?
@@ -358,13 +359,20 @@ public final class NTRIPClient: @unchecked Sendable {
     }
 
     private func currentGGA() -> String? {
-        if let sentence = sink?.lastGGA, sentence.contains("GGA") { return sentence }
-        guard let place = roughPosition?() else { return nil }
-        return NTRIPExchange.gpgga(
-            latitudeDegrees: place.latitudeDegrees,
-            longitudeDegrees: place.longitudeDegrees,
-            ellipsoidalHeightMeters: place.ellipsoidalHeightMeters
-        )
+        if let sentence = sink?.lastGGA, sentence.contains("GGA") {
+            cachedGGA = sentence
+            return sentence
+        }
+        if let place = roughPosition?() {
+            let made = NTRIPExchange.gpgga(
+                latitudeDegrees: place.latitudeDegrees,
+                longitudeDegrees: place.longitudeDegrees,
+                ellipsoidalHeightMeters: place.ellipsoidalHeightMeters
+            )
+            cachedGGA = made
+            return made
+        }
+        return cachedGGA
     }
 
     private func ggaAgeText() -> String {

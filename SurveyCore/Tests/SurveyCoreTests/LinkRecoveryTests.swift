@@ -2,10 +2,10 @@ import XCTest
 @testable import SurveyCore
 
 final class LinkRecoveryTests: XCTestCase {
-    func testBackoffSequenceCapsAt15() {
+    func testBackoffSequenceCapsAt60() {
         var backoff = LinkBackoff()
-        let delays = (0..<6).map { _ in backoff.take() }
-        XCTAssertEqual(delays, [1, 2, 4, 8, 15, 15])
+        let delays = (0..<7).map { _ in backoff.take() }
+        XCTAssertEqual(delays, [2, 4, 8, 16, 32, 60, 60])
     }
 
     func testStallNeedsConnectedSilenceOverFiveSeconds() {
@@ -22,7 +22,7 @@ final class LinkRecoveryTests: XCTestCase {
     func testNTRIPKeepsOneSocketAndRestartsBackoffAfterAStream() {
         var plan = NTRIPReconnect()
         XCTAssertEqual(plan.start(), 1)
-        XCTAssertEqual(plan.lost(reason: "Casterが切断しました", at: 0, dialectHint: true), 1)
+        XCTAssertEqual(plan.lost(reason: "Casterが切断しました", at: 0, dialectHint: true), 2)
         XCTAssertEqual(plan.dialect, .v1)
         XCTAssertEqual(plan.health.reconnectingText(time: "03:58:01"), "再接続中 (1回目) NTRIP Casterが切断しました 03:58:01")
         XCTAssertNil(plan.readyToOpen())
@@ -36,7 +36,7 @@ final class LinkRecoveryTests: XCTestCase {
         plan.bytes(at: 12)
         XCTAssertFalse(plan.stalled(at: 17))
         XCTAssertTrue(plan.stalled(at: 17.1))
-        XCTAssertEqual(plan.lost(reason: "RTCMが止まった", at: 17.1, dialectHint: false), 1)
+        XCTAssertEqual(plan.lost(reason: "RTCMが止まった", at: 17.1, dialectHint: false), 2)
         XCTAssertEqual(plan.dialect, .v1)
         XCTAssertEqual(plan.health.drops, 2)
         plan.noteClosed(2)
@@ -45,13 +45,13 @@ final class LinkRecoveryTests: XCTestCase {
         var delays: [TimeInterval] = []
         var again = NTRIPReconnect()
         _ = again.start()
-        for index in 0..<6 {
+        for index in 0..<7 {
             let delay = again.lost(reason: "切断", at: Double(index), dialectHint: false)
             delays.append(delay ?? -1)
             if let id = again.socket.closingID { again.noteClosed(id) }
             _ = again.readyToOpen()
         }
-        XCTAssertEqual(delays, [1, 2, 4, 8, 15, 15])
+        XCTAssertEqual(delays, [2, 4, 8, 16, 32, 60, 60])
         again.correctionsEnabled = false
         XCTAssertNil(again.lost(reason: "オフ", at: 20, dialectHint: false))
     }

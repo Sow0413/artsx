@@ -17,11 +17,15 @@ struct InstrumentSetupForm: View {
     @State private var customX = ""
     @State private var customY = ""
     @State private var customZ = ""
+    @State private var showingCalib = false
 
     private var customOnly: Bool { CameraOffset.customOnly(machine: DeviceIdentity.machine) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+        if showingCalib {
+            IMUCalibFlow(field: field) { showingCalib = false }
+        } else {
         Text("カメラ位置とアンテナ高と現場高さ補正を残す。")
             .font(SurveyType(18, .heavy))
             .lineLimit(2)
@@ -83,6 +87,26 @@ struct InstrumentSetupForm: View {
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("laser-measure")
             }
+            HStack(spacing: 12) {
+                Button(action: field.lightFrontLaser) {
+                    Text("前 点灯")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 72)
+                        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .foregroundStyle(SurveyColor.text)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("laser-front-light")
+                Button(action: field.measureFrontLaser) {
+                    Text("前 測る")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 72)
+                        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .foregroundStyle(SurveyColor.text)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("laser-front-measure")
+            }
         } else {
             TextField("ポール高 m", text: $poleText)
                 .textFieldStyle(.roundedBorder)
@@ -123,6 +147,34 @@ struct InstrumentSetupForm: View {
             .font(SurveyType(16, .heavy))
             .lineLimit(1)
             .accessibilityIdentifier("firmware-readout")
+        Button { showingCalib = true } label: {
+            Text("校正")
+                .font(SurveyType(18, .heavy))
+                .frame(maxWidth: .infinity, minHeight: 72)
+                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(SurveyColor.text)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("open-calib")
+        Button(action: field.togglePPK) {
+            Text(field.ppkStatus == "記録中" ? "測位ログを止める" : "測位ログを残す")
+                .font(SurveyType(18, .heavy))
+                .frame(maxWidth: .infinity, minHeight: 72)
+                .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .foregroundStyle(SurveyColor.text)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("ppk-toggle")
+        Text(field.ppkStatus)
+            .font(SurveyType(18, .heavy))
+            .accessibilityIdentifier("ppk-status")
+        if let share = field.ppkShare {
+            ShareLink(item: share) {
+                Text("測位ログを渡す")
+                    .font(SurveyType(18, .heavy))
+            }
+            .accessibilityIdentifier("ppk-share")
+        }
         Text(ViDocLaser.heldReason)
             .font(SurveyType(15, .semibold))
             .foregroundStyle(SurveyColor.muted)
@@ -149,6 +201,7 @@ struct InstrumentSetupForm: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("setup-next")
+        }
         }
         .onAppear {
             field.refreshInstrument()

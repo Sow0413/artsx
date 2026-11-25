@@ -181,6 +181,16 @@ final class ViDocProtocolTests: XCTestCase {
         let angle = modern.receive(.version(label: "3.0.0 build 0 hw 1.5"), at: 0.4)
         XCTAssertEqual(angle, [ViDocProtocol.imu(.angle)!])
         XCTAssertEqual(modern.firmwareLabel, "3.0.0 build 0 hw 1.5")
+        modern.observing = true
+        XCTAssertEqual(
+            modern.receive(.angle(pitchDegrees: 0.1, rollDegrees: 0), at: 1).first,
+            ViDocProtocol.imu(.angle)
+        )
+        modern.observing = false
+        _ = modern.lightFront(at: 2)
+        let front = modern.measureFront(seconds: 5, at: 2.5)
+        let trailer = Data([0x3C, 0x3B, 0x3D, 0x01, 0x03, 0x02])
+        XCTAssertEqual(front, [Data([0x55, 0x13, 0x05, 0x6D]) + trailer])
 
         let stats = TiltMath.stats([0.20, 0.22, 0.21, 0.19, 0.90])
         XCTAssertEqual(stats?.median ?? 0, 0.21, accuracy: 1e-9)

@@ -98,6 +98,11 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     }
 
     // MARK: PositionSource
+    public func setObserving(_ on: Bool) { vidoc.setObserving(on) }
+    public func setPPKBase(_ url: URL?) { vidoc.setPPKBase(url) }
+    public func lightFrontLaser() { vidoc.lightFrontLaser() }
+    public func measureFrontLaser() { vidoc.measureFrontLaser() }
+
     public func lightLowerLaser() {
         vidoc.lightLowerLaser()
     }

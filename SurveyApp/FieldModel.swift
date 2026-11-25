@@ -102,6 +102,9 @@ final class FieldModel: ObservableObject {
     @Published var deviceTiltLive = false
     @Published var laserReadingMeters: Double?
     @Published var laserLamp: ViDocCommandPlan.Lamp = .off
+    @Published var ppkStatus = "停止"
+    @Published var ppkShare: URL?
+    private var ppkBase: URL?
     private var tiltWindow: [(TimeInterval, Double)] = []
     @Published var receiverFirmware: String?
     @Published var operation = OperationDesk.load()
@@ -1283,6 +1286,8 @@ final class FieldModel: ObservableObject {
     }
 
     private func stageCurrentPoint(asGCP: Bool) -> Bool {
+        rtkSession?.setObserving(true)
+        defer { rtkSession?.setObserving(false) }
         guard basicProjectReady() else { return false }
         guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
             captureMessage = "位置が無いので残せません。"
@@ -1318,6 +1323,7 @@ final class FieldModel: ObservableObject {
             condition: condition
         )
         store(observation)
+        if let base = ppkBase { PPKLog.noteObservation(observation.name, base: base) }
         let accuracy = CoordinateText.accuracyMeters(position.horizontalAccuracyMeters)
         captureMessage = asGCP
             ? "\(name)を仮置きしました。GCP \(position.solutionLabel) \(accuracy)。"
@@ -2755,6 +2761,42 @@ final class FieldModel: ObservableObject {
         tiltMaxDegrees = stats.maximum
     }
 
+    func togglePPK() {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let base = ppkBase {
+            PPKLog.finish(base: base, observationIDs: [])
+            ppkShare = base.appendingPathExtension("json")
+            ppkBase = nil
+            ppkStatus = "停止"
+            rtkSession?.setPPKBase(nil)
+            return
+        }
+        guard let base = try? PPKLog.begin(
+            deviceName: "ViDoc",
+            antennaHeightMeters: instrument.antennaToGroundMeters,
+            in: documents
+        ) else {
+            ppkStatus = "記録を始められません"
+            return
+        }
+        ppkBase = base
+        ppkStatus = "記録中"
+        ppkShare = nil
+        rtkSession?.setPPKBase(base)
+    }
+
+    func lightFrontLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.lightFrontLaser()
+        #endif
+    }
+
+    func measureFrontLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.measureFrontLaser()
+        #endif
+    }
+
     func lightLowerLaser() {
         #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
         rtkSession?.lightLowerLaser()
@@ -2786,6 +2828,10 @@ final class FieldModel: ObservableObject {
         condition.tiltMedianDegrees = tiltDegrees
         condition.tiltMeanDegrees = tiltMeanDegrees
         condition.tiltMaxDegrees = tiltMaxDegrees
+        if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+           let record = IMUCalibrationStore.latest(hardwareID: DeviceIdentity.machine, bleName: "ViDoc", in: documents) {
+            condition.calibrationUsedAt = record.recordedAt
+        }
     }
 
     func recordKBMSample(ellipsoidal: Double) {
