@@ -16,6 +16,16 @@ struct MapTabView: View {
     var body: some View {
         GeometryReader { geo in
             VStack(spacing: 0) {
+                if let status = field.uiTestDrawingStatus {
+                    Text(status)
+                        .font(SurveyType(14, .heavy))
+                        .foregroundStyle(SurveyColor.amber)
+                        .lineLimit(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(SurveyColor.card)
+                        .accessibilityIdentifier("draw-overlay-status")
+                }
                 if !SurveyBuild.basicMode {
                     WorkBar(field: field)
                 }
@@ -257,25 +267,6 @@ struct MapTabView: View {
 
     private var pinnedMapChrome: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if ProcessInfo.processInfo.arguments.contains("-surveyUITestDrawings") {
-                Button(action: { field.showNextUITestDrawing() }) {
-                    Text("試験図面")
-                        .font(SurveyType(16, .heavy))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(SurveyColor.blue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .foregroundStyle(SurveyColor.onAccent)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("uitest-next-drawing")
-                if let status = field.uiTestDrawingStatus {
-                    Text(status)
-                        .font(SurveyType(14, .heavy))
-                        .foregroundStyle(SurveyColor.amber)
-                        .lineLimit(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("draw-overlay-status")
-                }
-            }
             HStack(alignment: .top) {
                 AttributionLabel()
                 Spacer(minLength: 8)

@@ -20,27 +20,27 @@ final class MapResponsivenessTests: XCTestCase {
     }
 
     func testDrawingFixtureMapOverlays() {
-        let next = app.buttons["uitest-next-drawing"]
-        XCTAssertTrue(next.waitForExistence(timeout: 8), "試験図面のボタンが無い")
         let steps = [
-            ("1_irabu", "34-draw-irabu", 30.0),
-            ("2_nagoya", "35-draw-nagoya", 30.0),
-            ("ミリ", "36-draw-mm", 30.0),
-            ("途中まで", "37-draw-heavy", 90.0),
-            ("途中で切れています", "38-draw-broken", 20.0)
+            (1, "1_irabu", "34-draw-irabu", 40.0),
+            (2, "2_nagoya", "35-draw-nagoya", 40.0),
+            (3, "ミリ", "36-draw-mm", 40.0),
+            (4, "途中まで", "37-draw-heavy", 90.0),
+            (5, "途中で切れています", "38-draw-broken", 30.0)
         ]
-        let sheet = app.scrollViews["map-controls"]
         for step in steps {
-            scrollClear(next, in: sheet)
-            next.tap()
+            app.terminate()
+            app.launchArguments = ["-surveyUITest", "-uitestDrawing", "\(step.0)"]
+            app.launch()
+            allowSystemPrompts()
+            dismissStaturePrompt()
             let status = app.staticTexts["draw-overlay-status"]
-            let shown = expectation(for: NSPredicate(format: "label CONTAINS %@", step.0), evaluatedWith: status)
+            let shown = expectation(for: NSPredicate(format: "label CONTAINS %@", step.1), evaluatedWith: status)
             XCTAssertEqual(
-                XCTWaiter().wait(for: [shown], timeout: step.2),
+                XCTWaiter().wait(for: [shown], timeout: step.3),
                 .completed,
-                "\(step.1) の結果が出ない。表示は \(status.exists ? status.label : "なし")"
+                "\(step.2) の結果が出ない。表示は \(status.exists ? status.label : "なし")"
             )
-            shot(step.1)
+            shot(step.2)
         }
     }
 

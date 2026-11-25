@@ -1831,6 +1831,7 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
+        loadUITestDrawingIfRequested()
         if !SurveyBuild.basicMode,
            stature.statureMeters == nil,
            !ProcessInfo.processInfo.arguments.contains("-skipStatureAsk") {
@@ -2686,6 +2687,20 @@ final class FieldModel: ObservableObject {
         } else {
             importBasic(data: data, filename: url.lastPathComponent)
         }
+    }
+
+    private var didLoadUITestDrawing = false
+
+    /// `-uitestDrawing n` のとき、その番号の試験図面を1回だけ読む。
+    private func loadUITestDrawingIfRequested() {
+        guard !didLoadUITestDrawing else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uitestDrawing"),
+              args.indices.contains(flag + 1),
+              let step = Int(args[flag + 1]) else { return }
+        didLoadUITestDrawing = true
+        uiTestDrawingStep = step - 1
+        showNextUITestDrawing()
     }
 
     /// 試験の図面を順に読む。1、2、3、生成した 5、壊れた 6。
