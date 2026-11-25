@@ -207,6 +207,13 @@ public enum SiteDXF {
     public static let epsg = 6684
     public static let controlLayer = "測設_基準点"
 
+    /// JGD2011 の平面直角。EPSG:6669 が 1 系、6684 が 16 系。
+    public static func zone(forEPSG epsg: Int) -> Int? {
+        let number = epsg - 6668
+        guard (1...19).contains(number) else { return nil }
+        return number
+    }
+
     public static func prefersUTF8(acadVersion: String?) -> Bool {
         guard let acadVersion else { return false }
         let digits = acadVersion.filter(\.isNumber)
@@ -228,6 +235,33 @@ public enum SiteDXF {
     public static func mismatches(drawing names: [String], ledger: [String]) -> [String] {
         let known = Set(ledger)
         return names.filter { !$0.hasPrefix("IRB-") || !known.contains($0) }
+    }
+}
+
+/// 図面の隣に置く `.meta.json`。epsg 6684 は 16 系。
+public struct DrawingSidecar: Equatable, Decodable, Sendable {
+    public var epsg: Int
+    public var axis: String
+    public var unit: String
+
+    public init(epsg: Int, axis: String, unit: String) {
+        self.epsg = epsg
+        self.axis = axis
+        self.unit = unit
+    }
+
+    public static func load(_ data: Data) -> DrawingSidecar? {
+        try? JSONDecoder().decode(DrawingSidecar.self, from: data)
+    }
+
+    public var zone: Int? { SiteDXF.zone(forEPSG: epsg) }
+
+    public var drawingAxis: DrawingAxis? {
+        switch axis {
+        case "EN": return .cadEastNorth
+        case "NE": return .surveyNorthEast
+        default: return nil
+        }
     }
 }
 

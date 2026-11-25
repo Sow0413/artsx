@@ -435,12 +435,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
 
     private func captureRaw(_ frame: Data) {
         if let base = rawBase {
-            let url = base.appendingPathExtension("ubx")
-            if let handle = try? FileHandle(forWritingTo: url) {
-                defer { try? handle.close() }
-                _ = try? handle.seekToEnd()
-                try? handle.write(contentsOf: frame)
-            }
+            RawObsFile.append(frame, base: base)
         }
         guard var session = rawSession else { return }
         if let next = session.onFrame(frame) {

@@ -249,6 +249,8 @@ public struct DrawingDocument: Sendable, Equatable {
     public var unsupportedCounts: [String: Int]
     public var codePage: String
     public var unitWarning: String?
+    /// $INSUNITS。0 は無指定、4 はミリ、6 はメートル。
+    public var unitCode: Int
     public internal(set) var index: DrawingSpatialIndex
 
     public init(
@@ -258,7 +260,8 @@ public struct DrawingDocument: Sendable, Equatable {
         unsupportedCounts: [String: Int],
         codePage: String,
         unitWarning: String?,
-        index: DrawingSpatialIndex
+        index: DrawingSpatialIndex,
+        unitCode: Int = 0
     ) {
         self.layers = layers
         self.entities = entities
@@ -266,7 +269,19 @@ public struct DrawingDocument: Sendable, Equatable {
         self.unsupportedCounts = unsupportedCounts
         self.codePage = codePage
         self.unitWarning = unitWarning
+        self.unitCode = unitCode
         self.index = index
+    }
+
+    /// ファイルの 1 単位をメートルにする倍率。ミリは 0.001。数値そのものは変えない。
+    public var metersPerUnit: Double {
+        switch unitCode {
+        case 1: return 0.0254
+        case 2: return 0.3048
+        case 4: return 0.001
+        case 5: return 0.01
+        default: return 1
+        }
     }
 
     public var unsupportedSummary: String {
@@ -389,12 +404,14 @@ public enum DXFError: Error, Equatable, CustomStringConvertible {
     case binary
     case undecodable
     case notDXF
+    case truncated
 
     public var description: String {
         switch self {
         case .binary: return "バイナリ DXF は読めません。ASCII で書き出してください。"
         case .undecodable: return "文字コードを判定できませんでした。"
         case .notDXF: return "DXF の形になっていません。"
+        case .truncated: return "DXF が途中で切れています。"
         }
     }
 }
@@ -404,6 +421,7 @@ public enum DXFParser {
 
     public static func parse(_ data: Data) throws -> DrawingDocument {
         if data.starts(with: Data("AutoCAD Binary DXF".utf8)) { throw DXFError.binary }
+        if data.contains(0) { throw DXFError.truncated }
         let decoded = try decode(data)
         guard decoded.text.contains("SECTION") else { throw DXFError.notDXF }
         let pairs = pairLines(decoded.text)
@@ -457,7 +475,10 @@ public enum DXFParser {
     }
 
     private static func pairLines(_ text: String) -> [(Int, String)] {
-        let lines = text.components(separatedBy: .newlines)
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.components(separatedBy: "\n")
         var pairs: [(Int, String)] = []
         var index = 0
         while index + 1 < lines.count {
@@ -473,11 +494,12 @@ public enum DXFParser {
     private static func assemble(_ pairs: [(Int, String)], codePage: String) -> DrawingDocument {
         var section = ""
         var table = ""
-        var layers: [String: DrawingLayer] = ["0": DrawingLayer(name: "0", color: .white, isVisible: true)]
+        var layers: [String: DrawingLayer] = [:]
         var blocks: [String: BlockDefinition] = [:]
         var entities: [RawEntity] = []
         var unsupported: [String: Int] = [:]
         var unitWarning: String?
+        var unitCode = 0
         var index = 0
         while index < pairs.count {
             let (code, value) = pairs[index]
@@ -503,6 +525,7 @@ public enum DXFParser {
             }
             if code == 9, value == "$INSUNITS" {
                 if let units = int(pairs, after: index, code: 70) {
+                    unitCode = units
                     unitWarning = unitWarningText(units)
                 }
                 index += 1
@@ -568,7 +591,8 @@ public enum DXFParser {
             unsupportedCounts: unsupported,
             codePage: codePage,
             unitWarning: unitWarning,
-            index: DrawingSpatialIndex(entities: expanded)
+            index: DrawingSpatialIndex(entities: expanded),
+            unitCode: unitCode
         )
     }
 }

@@ -263,7 +263,8 @@ public struct ViDocStreamParser {
         guard buffer.count >= total else { return .wait }
         let frame = Data(buffer.prefix(total))
         guard Self.ubxChecksum(frame) else {
-            buffer.removeFirst()
+            // 同期語ごと捨てて、次の B5 62 を探す。1 バイトだけ戻すと 0x62 が文字として後続を飲む。
+            buffer.removeFirst(min(2, buffer.count))
             return .again
         }
         rememberUBX(frame, payloadLength: length)

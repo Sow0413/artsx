@@ -154,6 +154,9 @@ public struct RawCaptureSession: Equatable, Sendable {
         if klass == 0x05 && id == 0x01 {
             return onAck()
         }
+        if klass == 0x05 && id == 0x00 {
+            return onNak()
+        }
         return nil
     }
 
@@ -197,6 +200,12 @@ public struct RawCaptureSession: Equatable, Sendable {
         guard case .restoring(let attempt) = phase else { return nil }
         phase = .verifying(attempt)
         return UBXConfig.valgetRAM()
+    }
+
+    /// VALSET が拒否された。戻しの回数に数え、3 回で打ち切る。
+    private mutating func onNak() -> Data? {
+        guard case .restoring(let attempt) = phase else { return nil }
+        return failRestore(after: attempt)
     }
 
     private mutating func failRestore(after attempt: Int) -> Data? {
@@ -258,6 +267,18 @@ public struct RawObsSidecar: Codable, Equatable, Sendable {
 
 public enum RawObsFile {
     public static let restoreUnverified = "戻し未確認"
+
+    /// チェックサムが通った UBX を、拡張子 ubx のファイルの末尾へ足す。
+    public static func append(_ frame: Data, base: URL) {
+        let url = base.appendingPathExtension("ubx")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            _ = FileManager.default.createFile(atPath: url.path, contents: Data())
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: frame)
+    }
 
     public static func baseName(point: String, started: Date) -> String {
         let safe = point.map { character -> Character in

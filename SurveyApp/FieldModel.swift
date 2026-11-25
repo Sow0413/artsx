@@ -82,6 +82,9 @@ final class FieldModel: ObservableObject {
     /// 出すの1段目。現場の下敷きに置いた図面。
     @Published private(set) var projectSheet: ProjectSheet?
     @Published private(set) var sheetMessage: String?
+    /// 図面フィクスチャを地図へ重ねた結果。`-surveyUITestDrawings` のときだけ書く。
+    @Published var uiTestDrawingStatus: String?
+    private var uiTestDrawingStep = 0
     @Published var scaleMessage: String?
     @Published var localizeMessage: String?
     @Published var cadMessage: String?
@@ -2683,6 +2686,90 @@ final class FieldModel: ObservableObject {
         } else {
             importBasic(data: data, filename: url.lastPathComponent)
         }
+    }
+
+    /// 試験の図面を順に読む。1、2、3、生成した 5、壊れた 6。
+    func showNextUITestDrawing() {
+        guard ProcessInfo.processInfo.arguments.contains("-surveyUITestDrawings") else { return }
+        if drawing.project == nil {
+            drawing.createProject(named: "図面試験")
+        }
+        drawing.onImportFailed = { [weak self] text in
+            self?.uiTestDrawingStatus = text
+        }
+        drawing.onMapPaths = { [weak self] in
+            guard let self else { return }
+            self.frameMapToDrawing()
+            let cap = self.drawing.overlayCapped ? "途中まで" : ""
+            self.uiTestDrawingStatus = [self.drawing.fileName, self.drawing.message, cap]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
+        uiTestDrawingStep += 1
+        switch uiTestDrawingStep {
+        case 1:
+            loadUITestDrawing(resource: "1_irabu_xvi_utf8", metaResource: "1_irabu_xvi_utf8.dxf.meta")
+        case 2:
+            loadUITestDrawing(resource: "2_nagoya_vii_ac1021_ansi932", zone: 7)
+        case 3:
+            loadUITestDrawing(resource: "3_site_local_mm")
+        case 4:
+            DispatchQueue.global(qos: .userInitiated).async {
+                let data = HeavyDrawingFixture.makeDXF()
+                DispatchQueue.main.async {
+                    self.drawing.zone = HeavyDrawingFixture.zone
+                    self.drawing.axis = .cadEastNorth
+                    self.drawing.importFile(data: data, fileName: "5_heavy_vii_150k_lines.dxf")
+                }
+            }
+        default:
+            loadUITestDrawing(resource: "6_broken")
+        }
+    }
+
+    private func loadUITestDrawing(resource: String, metaResource: String? = nil, zone: Int? = nil) {
+        guard let url = Bundle.main.url(forResource: resource, withExtension: "dxf"),
+              let data = try? Data(contentsOf: url) else {
+            uiTestDrawingStatus = "試験図面を読めません"
+            return
+        }
+        if let metaResource,
+           let metaURL = Bundle.main.url(forResource: metaResource, withExtension: "json"),
+           let metaData = try? Data(contentsOf: metaURL),
+           let sidecar = DrawingSidecar.load(metaData) {
+            if let zone = sidecar.zone { drawing.zone = zone }
+            if let axis = sidecar.drawingAxis { drawing.axis = axis }
+        } else if let zone {
+            drawing.zone = zone
+            drawing.axis = .cadEastNorth
+        }
+        drawing.importFile(data: data, fileName: url.lastPathComponent)
+    }
+
+    private func frameMapToDrawing() {
+        var south = Double.greatestFiniteMagnitude
+        var north = -Double.greatestFiniteMagnitude
+        var west = Double.greatestFiniteMagnitude
+        var east = -Double.greatestFiniteMagnitude
+        var any = false
+        for path in drawing.mapPaths {
+            for coordinate in path.coordinates {
+                any = true
+                south = min(south, coordinate.latitudeDegrees)
+                north = max(north, coordinate.latitudeDegrees)
+                west = min(west, coordinate.longitudeDegrees)
+                east = max(east, coordinate.longitudeDegrees)
+            }
+        }
+        guard any else { return }
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: (south + north) / 2,
+            centerLongitude: (west + east) / 2,
+            latitudeDelta: max(north - south, 0.002) * 1.8,
+            longitudeDelta: max(east - west, 0.002) * 1.8
+        )
     }
 
     func refreshProjectSheet() {

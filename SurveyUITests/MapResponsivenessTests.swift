@@ -10,10 +10,32 @@ final class MapResponsivenessTests: XCTestCase {
         try FileManager.default.createDirectory(at: shotDirectory, withIntermediateDirectories: true)
         app = XCUIApplication()
         app.launchArguments = ["-surveyUITest"]
+        if name.contains("DrawingFixture") {
+            app.launchArguments.append("-surveyUITestDrawings")
+        }
         app.launch()
         allowSystemPrompts()
         dismissStaturePrompt()
         allowSystemPrompts()
+    }
+
+    func testDrawingFixtureMapOverlays() {
+        let next = app.buttons["uitest-next-drawing"]
+        XCTAssertTrue(next.waitForExistence(timeout: 8), "試験図面のボタンが無い")
+        let steps = [
+            ("1_irabu", "34-draw-irabu", 30.0),
+            ("2_nagoya", "35-draw-nagoya", 30.0),
+            ("ミリ", "36-draw-mm", 30.0),
+            ("途中まで", "37-draw-heavy", 90.0),
+            ("途中で切れています", "38-draw-broken", 20.0)
+        ]
+        for step in steps {
+            next.tap()
+            let status = app.staticTexts["draw-overlay-status"]
+            let shown = expectation(for: NSPredicate(format: "label CONTAINS %@", step.0), evaluatedWith: status)
+            XCTAssertEqual(XCTWaiter().wait(for: [shown], timeout: step.2), .completed, "\(step.1) の結果が出ない")
+            shot(step.1)
+        }
     }
 
     func testBasicMapMeasureExportAndRTK() {

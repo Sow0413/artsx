@@ -79,6 +79,10 @@ final class DrawingSession: ObservableObject {
     private var referenceStamp: (latitude: Double, longitude: Double)?
     private var loadGeneration = 0
     private var mapGeneration = 0
+    /// 地図への重ねが更新されたとき。試験の画面合わせだけが使う。
+    var onMapPaths: (() -> Void)?
+    /// 読めなかったとき。渡す文は、利用者に出す一文。
+    var onImportFailed: ((String) -> Void)?
 
     init(projectsRoot: URL) {
         self.projectsRoot = projectsRoot
@@ -1128,6 +1132,7 @@ final class DrawingSession: ObservableObject {
             guard generation == self.loadGeneration else { return }
             self.importProgress = nil
             self.message = text
+            self.onImportFailed?(text)
         }
     }
 
@@ -1196,6 +1201,7 @@ final class DrawingSession: ObservableObject {
                 self.mapPaths = built.paths
                 self.overlayCapped = built.capped
                 self.mapRevision += 1
+                self.onMapPaths?()
             }
         }
     }

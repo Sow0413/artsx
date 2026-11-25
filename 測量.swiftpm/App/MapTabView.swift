@@ -205,6 +205,32 @@ struct MapTabView: View {
             .background(SurveyColor.mapBackdrop)
         }
         .clipped()
+        .overlay(alignment: .topLeading) {
+            if ProcessInfo.processInfo.arguments.contains("-surveyUITestDrawings") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Button(action: { field.showNextUITestDrawing() }) {
+                        Text("試験図面")
+                            .font(SurveyType(16, .heavy))
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 44)
+                            .background(SurveyColor.blue, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .foregroundStyle(SurveyColor.onAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("uitest-next-drawing")
+                    if let status = field.uiTestDrawingStatus {
+                        Text(status)
+                            .font(SurveyType(13, .heavy))
+                            .foregroundStyle(SurveyColor.amber)
+                            .lineLimit(4)
+                            .frame(maxWidth: 280, alignment: .leading)
+                            .accessibilityIdentifier("draw-overlay-status")
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.leading, 8)
+            }
+        }
         .overlay {
             ZStack {
                 if !SurveyBuild.basicMode, field.extras.proximity {

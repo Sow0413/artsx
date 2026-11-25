@@ -1,0 +1,9 @@
+{
+ "epsg": 6684,
+ "axis": "EN",
+ "unit": "m",
+ "transform": {
+  "status": "試験用（架空）",
+  "version": 1
+ }
+}
