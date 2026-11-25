@@ -59,6 +59,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private var publishedLamp: ViDocCommandPlan.Lamp = .off
     private var ppkBase: URL?
     private var rawSession: RawCaptureSession?
+    private var rawTimeout: DispatchWorkItem?
     private var rawBase: URL?
     private var nmea = NMEAParser()
     private var running = false
@@ -267,6 +268,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         recovery.linkUp(at: now)
         reportState("接続しました（\(deviceName)）")
         enqueueBoot(boot.onConnect(at: now))
+        resumePendingRestore()
         bootGeneration += 1
         armBootTick()
     }
@@ -397,6 +399,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
             FileManager.default.createFile(atPath: base.appendingPathExtension("ubx").path, contents: nil)
             self.outbound.enqueueCommand(command)
             self.drainRTCM()
+            self.armRawTimeout()
             self.onRawStatus?("記録中")
         }
     }
@@ -407,8 +410,12 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
 
     public func abandonRawCapture() {
         queue.async {
+            self.rawTimeout?.cancel()
             guard let session = self.rawSession else { return }
-            let dirty = session.phase == .recording || session.originals != nil && session.phase != .finished && session.phase != .reading
+            if let pending = session.valuesToPersist() {
+                try? RawPendingRestore.save(pending, in: self.pendingFolder())
+            }
+            let dirty = session.needsRestore
             self.rawSession = nil
             self.rawBase = nil
             if dirty {
@@ -434,22 +441,75 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     }
 
     private func captureRaw(_ frame: Data) {
-        if let base = rawBase {
+        guard var session = rawSession else { return }
+        let next = session.onFrame(frame)
+        if session.isRecording, let base = rawBase {
             RawObsFile.append(frame, base: base)
         }
-        guard var session = rawSession else { return }
-        if let next = session.onFrame(frame) {
-            outbound.enqueueCommand(next)
-            drainRTCM()
+        if let next {
+            if RawCommandAudit.violation(in: next) == nil {
+                outbound.enqueueCommand(next)
+                drainRTCM()
+            }
+            if session.needsRestore, let pending = session.valuesToPersist() {
+                try? RawPendingRestore.save(pending, in: pendingFolder())
+            }
+            armRawTimeout()
+        }
+        if session.isRecording {
+            rawTimeout?.cancel()
         }
         rawSession = session
         if session.phase == .finished {
+            if !session.needsRestore { RawPendingRestore.clear(in: pendingFolder()) }
             let unverified = session.restoreUnverified
             rawSession = nil
-            rawBase = nil
+            if !session.needsRestore { rawBase = nil }
             onRawFinished?(unverified)
             onRawStatus?(unverified ? RawObsFile.restoreUnverified : "停止")
         }
+    }
+
+    private func pendingFolder() -> URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("raw", isDirectory: true)
+    }
+
+    private func armRawTimeout() {
+        rawTimeout?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.rawTimedOut() }
+        rawTimeout = work
+        queue.asyncAfter(deadline: .now() + 3, execute: work)
+    }
+
+    private func rawTimedOut() {
+        guard var session = rawSession else { return }
+        guard session.phase == .reading || session.phase == .arming else { return }
+        if let command = session.timedOut(), RawCommandAudit.violation(in: command) == nil {
+            rawSession = session
+            outbound.enqueueCommand(command)
+            drainRTCM()
+            if let pending = session.valuesToPersist() {
+                try? RawPendingRestore.save(pending, in: pendingFolder())
+            }
+            return
+        }
+        rawSession = session
+        if session.phase == .finished {
+            RawPendingRestore.clear(in: pendingFolder())
+            rawBase = nil
+            onRawStatus?("停止")
+        }
+    }
+
+    private func resumePendingRestore() {
+        guard rawSession == nil, let pending = RawPendingRestore.load(in: pendingFolder()) else { return }
+        var session = RawCaptureSession()
+        let command = session.resume(pending: pending)
+        rawSession = session
+        outbound.enqueueCommand(command)
+        drainRTCM()
+        armRawTimeout()
     }
 
     public func lightFrontLaser() {

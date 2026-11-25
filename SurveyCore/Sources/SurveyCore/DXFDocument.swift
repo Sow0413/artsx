@@ -416,6 +416,23 @@ public enum DXFError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+public enum DrawingReadiness {
+    /// 落ちずに伝える文。問題がなければ nil。
+    public static func notice(_ document: DrawingDocument) -> String? {
+        if document.entities.isEmpty {
+            return "図形がありません。"
+        }
+        let bounds = document.bounds
+        if bounds.isEmpty {
+            return "座標が読めません。"
+        }
+        if bounds.minX == 0, bounds.minY == 0, bounds.maxX == 0, bounds.maxY == 0 {
+            return "座標がすべて原点です。位置を決められません。"
+        }
+        return nil
+    }
+}
+
 public enum DXFParser {
     public static let supportedTypes: Set<String> = ["LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ARC", "TEXT", "MTEXT", "POINT", "INSERT"]
 

@@ -25,7 +25,9 @@ final class MapResponsivenessTests: XCTestCase {
             (2, "2_nagoya", "35-draw-nagoya", 40.0),
             (3, "ミリ", "36-draw-mm", 40.0),
             (4, "途中まで", "37-draw-heavy", 90.0),
-            (5, "途中で切れています", "38-draw-broken", 30.0)
+            (5, "途中で切れています", "38-draw-broken", 30.0),
+            (6, "DXF の形になっていません", "39-draw-empty", 30.0),
+            (7, "1系", "40-draw-wrong-zone", 30.0)
         ]
         for step in steps {
             app.terminate()

@@ -222,6 +222,8 @@ public struct ViDocStreamParser {
     public private(set) var gnss = ViDocGNSS()
     public var expect: ViDocBinaryExpect = .none
     public var onUBX: ((Data, UInt8, UInt8) -> Void)?
+    /// まだフレームになっていない残り。長い観測でも、ここが伸び続けないことを見る。
+    public var pendingByteCount: Int { buffer.count }
     private var buffer = Data()
 
     public init() {}
@@ -252,7 +254,9 @@ public struct ViDocStreamParser {
     }
 
     private mutating func takeUBX() -> Move? {
-        guard buffer.count >= 2, buffer[buffer.startIndex] == 0xB5, buffer[buffer.startIndex + 1] == 0x62 else { return nil }
+        guard !buffer.isEmpty, buffer[buffer.startIndex] == 0xB5 else { return nil }
+        guard buffer.count >= 2 else { return .wait }
+        guard buffer[buffer.startIndex + 1] == 0x62 else { return nil }
         guard buffer.count >= 6 else { return .wait }
         let length = Int(buffer[buffer.startIndex + 4]) | (Int(buffer[buffer.startIndex + 5]) << 8)
         guard length <= 2048 else {

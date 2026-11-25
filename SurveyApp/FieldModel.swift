@@ -2530,6 +2530,7 @@ final class FieldModel: ObservableObject {
 
     @discardableResult
     func recordStake() -> Bool {
+        if rawCaptureStatus == "記録中" { rawCaptureStatus = "停止" }
         endRawCapture()
         guard basicProjectReady() else { return false }
         guard let target = basicTarget else {
@@ -2704,6 +2705,44 @@ final class FieldModel: ObservableObject {
         showNextUITestDrawing()
     }
 
+    /// 東京付近の座標を、わざと 1 系で開く試験図面。
+    private static let wrongZoneSample = """
+    0
+    SECTION
+    2
+    HEADER
+    9
+    $ACADVER
+    1
+    AC1021
+    9
+    $INSUNITS
+    70
+    6
+    0
+    ENDSEC
+    0
+    SECTION
+    2
+    ENTITIES
+    0
+    LINE
+    8
+    図
+    10
+    -5992.920
+    20
+    -35363.238
+    11
+    -5982.920
+    21
+    -35363.238
+    0
+    ENDSEC
+    0
+    EOF
+    """
+
     /// 試験の図面を順に読む。1、2、3、生成した 5、壊れた 6。
     func showNextUITestDrawing() {
         if drawing.project == nil {
@@ -2741,6 +2780,16 @@ final class FieldModel: ObservableObject {
             fileName = "5_heavy_vii_150k_lines.dxf"
             zone = HeavyDrawingFixture.zone
             axis = .cadEastNorth
+        case 6:
+            data = Data()
+            fileName = "empty.dxf"
+            zone = nil
+            axis = nil
+        case 7:
+            data = Data(Self.wrongZoneSample.utf8)
+            fileName = "wrong-zone.dxf"
+            zone = 1
+            axis = .cadEastNorth
         default:
             data = UITestDrawingBytes.broken
             fileName = "6_broken.dxf"
@@ -2754,13 +2803,25 @@ final class FieldModel: ObservableObject {
                 self.tab = .map
                 switch parsed {
                 case let .success(document):
-                    let note = self.drawing.installParsed(
+                    var note = self.drawing.installParsed(
                         document,
                         data: bytes,
                         fileName: fileName,
                         zone: zone,
                         axis: axis
                     )
+                    if step == 7 {
+                        let warning = ZoneAdvisor.placement(
+                            drawingX: -5992.920,
+                            drawingY: -35363.238,
+                            zone: 1,
+                            axis: .cadEastNorth,
+                            referenceLatitude: 35.681236,
+                            referenceLongitude: 139.767125,
+                            referenceName: "現在地"
+                        )
+                        if let message = warning.message { note += message }
+                    }
                     self.uiTestDrawingStatus = note
                     self.frameMapToDrawing()
                 case let .failure(error):

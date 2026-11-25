@@ -120,15 +120,22 @@ public struct RawCaptureSession: Equatable, Sendable {
     public enum Phase: Equatable, Sendable {
         case idle
         case reading
+        /// 開始の VALSET を出したが、ACK はまだ。
+        case arming
         case recording
         case restoring(Int)
         case verifying(Int)
+        /// 再接続後、今の RAM が保留中の元値か確かめる。
+        case comparing
         case finished
     }
 
     public private(set) var phase: Phase = .idle
     public private(set) var originals: UBXConfig.Values?
     public private(set) var restoreUnverified = false
+    /// 開始の VALSET を出したあと、戻したと確認できるまで true。
+    public private(set) var needsRestore = false
+    public var isRecording: Bool { phase == .recording }
     public let maxTries = 3
 
     public init() {}
@@ -136,7 +143,17 @@ public struct RawCaptureSession: Equatable, Sendable {
     public mutating func begin() -> Data {
         originals = nil
         restoreUnverified = false
+        needsRestore = false
         phase = .reading
+        return UBXConfig.valgetRAM()
+    }
+
+    /// 切れたあと、保存してあった元値と比べる VALGET。
+    public mutating func resume(pending: UBXConfig.Values) -> Data {
+        originals = pending
+        needsRestore = true
+        restoreUnverified = false
+        phase = .comparing
         return UBXConfig.valgetRAM()
     }
 
@@ -160,14 +177,40 @@ public struct RawCaptureSession: Equatable, Sendable {
         return nil
     }
 
-    /// 観測の終わり。元の値が分かっていれば戻す VALSET。
+    /// 観測の終わり、または測設への切り替え。記録はすぐ止めて、変えていれば戻す。
     public mutating func end() -> Data? {
-        guard let originals, phase == .recording || phase == .reading else {
+        switch phase {
+        case .arming, .recording, .comparing:
+            return beginRestore()
+        default:
             phase = .finished
             return nil
         }
-        phase = .restoring(1)
-        return UBXConfig.valsetRAM(rateMeas: originals.rateMeas, rawx: originals.rawx, sfrbx: originals.sfrbx)
+    }
+
+    /// 測設に入ったとき。記録を止め、元の値へ戻す VALSET があればそれを返す。
+    public mutating func stopForStakeout() -> Data? {
+        end()
+    }
+
+    /// ACK が来ない。まだ書いていなければ何も足さない。書いていたら元へ戻す。
+    public mutating func timedOut() -> Data? {
+        switch phase {
+        case .reading:
+            phase = .finished
+            needsRestore = false
+            return nil
+        case .arming, .recording:
+            return beginRestore()
+        default:
+            return nil
+        }
+    }
+
+    /// 切断中にディスクへ残す元値。開始の VALSET を出していなければ nil。
+    public func valuesToPersist() -> UBXConfig.Values? {
+        guard needsRestore else { return nil }
+        return originals
     }
 
     private mutating func onGet(_ payload: Data) -> Data? {
@@ -175,10 +218,20 @@ public struct RawCaptureSession: Equatable, Sendable {
         switch phase {
         case .reading:
             originals = values
-            phase = .recording
+            needsRestore = true
+            phase = .arming
             return UBXConfig.enableRecording()
+        case .comparing:
+            if values == originals {
+                needsRestore = false
+                restoreUnverified = false
+                phase = .finished
+                return nil
+            }
+            return beginRestore()
         case .verifying(let attempt):
             if values == originals {
+                needsRestore = false
                 restoreUnverified = false
                 phase = .finished
                 return nil
@@ -186,6 +239,7 @@ public struct RawCaptureSession: Equatable, Sendable {
             return failRestore(after: attempt)
         case .restoring(let attempt):
             if values == originals {
+                needsRestore = false
                 restoreUnverified = false
                 phase = .finished
                 return nil
@@ -197,20 +251,46 @@ public struct RawCaptureSession: Equatable, Sendable {
     }
 
     private mutating func onAck() -> Data? {
-        guard case .restoring(let attempt) = phase else { return nil }
-        phase = .verifying(attempt)
-        return UBXConfig.valgetRAM()
+        switch phase {
+        case .arming:
+            phase = .recording
+            return nil
+        case .restoring(let attempt):
+            phase = .verifying(attempt)
+            return UBXConfig.valgetRAM()
+        default:
+            return nil
+        }
     }
 
-    /// VALSET が拒否された。戻しの回数に数え、3 回で打ち切る。
+    /// VALSET が拒否された。開始時は設定を変えていないので、それ以上書かない。
     private mutating func onNak() -> Data? {
-        guard case .restoring(let attempt) = phase else { return nil }
-        return failRestore(after: attempt)
+        switch phase {
+        case .reading, .arming:
+            needsRestore = false
+            phase = .finished
+            return nil
+        case .restoring(let attempt):
+            return failRestore(after: attempt)
+        default:
+            return nil
+        }
+    }
+
+    private mutating func beginRestore() -> Data? {
+        guard let originals else {
+            phase = .finished
+            return nil
+        }
+        phase = .restoring(1)
+        needsRestore = true
+        return UBXConfig.valsetRAM(rateMeas: originals.rateMeas, rawx: originals.rawx, sfrbx: originals.sfrbx)
     }
 
     private mutating func failRestore(after attempt: Int) -> Data? {
         guard attempt < maxTries, let originals else {
             restoreUnverified = true
+            needsRestore = true
             phase = .finished
             return nil
         }
@@ -262,6 +342,66 @@ public struct RawObsSidecar: Codable, Equatable, Sendable {
         self.latitudeDegrees = latitudeDegrees
         self.longitudeDegrees = longitudeDegrees
         self.restoreNote = restoreNote
+    }
+}
+
+/// セッションが出す書き込みは、RAM の CFG-VALSET と、読むだけの CFG-VALGET だけ。
+public enum RawCommandAudit {
+    public static func violation(in command: Data) -> String? {
+        if command.isEmpty { return nil }
+        if command.first == 0x55 {
+            let cmd = command.count > 1 ? Int(command[1]) : -1
+            if [7, 8, 10, 12].contains(cmd) || (13...15).contains(cmd) || cmd >= 23 {
+                return "ViDoc cmd \(cmd) は送りません。"
+            }
+            return "観測の生データで ViDoc コマンドは送りません。"
+        }
+        guard command.count >= 8, command[0] == 0xB5, command[1] == 0x62 else {
+            return "UBX でも ViDoc でもない書き込みです。"
+        }
+        let klass = command[2]
+        let id = command[3]
+        if klass == 0x06 && id == 0x04 { return "CFG-RST は送りません。" }
+        if klass == 0x06 && id == 0x09 { return "CFG-CFG は送りません。" }
+        if klass == 0x06 && id == 0x8B { return nil }
+        if klass == 0x06 && id == 0x8A {
+            let layer = command[7]
+            if layer != UBXConfig.ramLayerSet {
+                return "VALSET の層は RAM（01）だけです。受け取ったのは \(String(format: "%02x", layer))。"
+            }
+            return nil
+        }
+        return "CFG-VALSET と CFG-VALGET 以外の UBX は送りません。"
+    }
+}
+
+/// アプリが落ちても、次の接続で戻せる元値。
+public enum RawPendingRestore {
+    public static let fileName = "pending-restore.json"
+
+    public static func save(_ values: UBXConfig.Values, in directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let payload: [String: Int] = [
+            "rateMeas": Int(values.rateMeas),
+            "rawx": Int(values.rawx),
+            "sfrbx": Int(values.sfrbx)
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        try data.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+    }
+
+    public static func load(in directory: URL) -> UBXConfig.Values? {
+        let url = directory.appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Int],
+              let rate = object["rateMeas"],
+              let rawx = object["rawx"],
+              let sfrbx = object["sfrbx"] else { return nil }
+        return UBXConfig.Values(rateMeas: UInt16(rate), rawx: UInt8(rawx), sfrbx: UInt8(sfrbx))
+    }
+
+    public static func clear(in directory: URL) {
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(fileName))
     }
 }
 

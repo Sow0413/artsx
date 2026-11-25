@@ -47,7 +47,7 @@ final class RawCaptureTests: XCTestCase {
         let originals = valget(rate: 143, rawx: 0, sfrbx: 0)
         XCTAssertEqual(session.onFrame(originals), UBXConfig.enableRecording())
         XCTAssertEqual(session.originals, UBXConfig.Values(rateMeas: 143, rawx: 0, sfrbx: 0))
-        XCTAssertEqual(session.phase, .recording)
+        XCTAssertEqual(session.phase, .arming)
 
         let restore = UBXConfig.valsetRAM(rateMeas: 143, rawx: 0, sfrbx: 0)
         XCTAssertEqual(session.end(), restore)
