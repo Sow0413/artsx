@@ -20,7 +20,7 @@ struct MapTabView: View {
                     Text(status)
                         .font(SurveyType(14, .heavy))
                         .foregroundStyle(SurveyColor.amber)
-                        .lineLimit(4)
+                        .lineLimit(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
                         .background(SurveyColor.card)
