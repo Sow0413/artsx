@@ -2694,43 +2694,63 @@ final class FieldModel: ObservableObject {
         if drawing.project == nil {
             drawing.createProject(named: "図面試験")
         }
-        drawing.onImportFailed = { [weak self] text in
-            self?.uiTestDrawingStatus = text
-        }
-        drawing.onMapPaths = { [weak self] in
-            guard let self else { return }
-            self.frameMapToDrawing()
-            let cap = self.drawing.overlayCapped ? "途中まで" : ""
-            self.uiTestDrawingStatus = [self.drawing.fileName, self.drawing.message, cap]
-                .compactMap { $0 }
-                .filter { !$0.isEmpty }
-                .joined(separator: " ")
+        guard drawing.project != nil else {
+            uiTestDrawingStatus = drawing.message ?? "現場を作れません"
+            return
         }
         uiTestDrawingStep += 1
-        switch uiTestDrawingStep {
+        let step = uiTestDrawingStep
+        let data: Data
+        let fileName: String
+        let zone: Int?
+        let axis: DrawingAxis?
+        switch step {
         case 1:
-            if let sidecar = DrawingSidecar.load(UITestDrawingBytes.irabuMeta) {
-                if let zone = sidecar.zone { drawing.zone = zone }
-                if let axis = sidecar.drawingAxis { drawing.axis = axis }
-            }
-            drawing.importFile(data: UITestDrawingBytes.irabu, fileName: "1_irabu_xvi_utf8.dxf")
+            let sidecar = DrawingSidecar.load(UITestDrawingBytes.irabuMeta)
+            data = UITestDrawingBytes.irabu
+            fileName = "1_irabu_xvi_utf8.dxf"
+            zone = sidecar?.zone
+            axis = sidecar?.drawingAxis
         case 2:
-            drawing.zone = 7
-            drawing.axis = .cadEastNorth
-            drawing.importFile(data: UITestDrawingBytes.nagoya, fileName: "2_nagoya_vii_ac1021_ansi932.dxf")
+            data = UITestDrawingBytes.nagoya
+            fileName = "2_nagoya_vii_ac1021_ansi932.dxf"
+            zone = 7
+            axis = .cadEastNorth
         case 3:
-            drawing.importFile(data: UITestDrawingBytes.millimetres, fileName: "3_site_local_mm.dxf")
+            data = UITestDrawingBytes.millimetres
+            fileName = "3_site_local_mm.dxf"
+            zone = nil
+            axis = nil
         case 4:
-            DispatchQueue.global(qos: .userInitiated).async {
-                let data = HeavyDrawingFixture.makeDXF()
-                DispatchQueue.main.async {
-                    self.drawing.zone = HeavyDrawingFixture.zone
-                    self.drawing.axis = .cadEastNorth
-                    self.drawing.importFile(data: data, fileName: "5_heavy_vii_150k_lines.dxf")
+            data = Data()
+            fileName = "5_heavy_vii_150k_lines.dxf"
+            zone = HeavyDrawingFixture.zone
+            axis = .cadEastNorth
+        default:
+            data = UITestDrawingBytes.broken
+            fileName = "6_broken.dxf"
+            zone = nil
+            axis = nil
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let bytes = step == 4 ? HeavyDrawingFixture.makeDXF() : data
+            let parsed = Result { try DrawingImport.load(bytes, fileName: fileName) }
+            DispatchQueue.main.async {
+                switch parsed {
+                case let .success(document):
+                    let note = self.drawing.installParsed(
+                        document,
+                        data: bytes,
+                        fileName: fileName,
+                        zone: zone,
+                        axis: axis
+                    )
+                    self.uiTestDrawingStatus = note
+                    self.frameMapToDrawing()
+                case let .failure(error):
+                    self.uiTestDrawingStatus = (error as? DXFError)?.description ?? "図面を読めませんでした。"
                 }
             }
-        default:
-            drawing.importFile(data: UITestDrawingBytes.broken, fileName: "6_broken.dxf")
         }
     }
 

@@ -280,6 +280,54 @@ final class DrawingSession: ObservableObject {
         }
     }
 
+    /// 試験で、解析済みの図面をその場で地図へ載せる。
+    func installParsed(
+        _ parsed: DrawingDocument,
+        data: Data,
+        fileName rawName: String,
+        zone nextZone: Int?,
+        axis nextAxis: DrawingAxis?
+    ) -> String {
+        guard var current = project else { return "先に現場を作ってください。" }
+        if let nextZone { zone = nextZone }
+        if let nextAxis { axis = nextAxis }
+        do {
+            let stored = try ProjectStore.importDXF(
+                data: data,
+                fileName: rawName,
+                into: &current,
+                at: projectsRoot,
+                codePage: parsed.codePage,
+                unsupported: parsed.unsupportedCounts
+            )
+            project = current
+            onProjectCommitted?()
+            reload()
+            if let nextZone { zone = nextZone }
+            if let nextAxis { axis = nextAxis }
+            adopt(parsed, fileName: stored)
+            let built = DrawingPlacement.overlay(
+                document: parsed,
+                zone: zone,
+                axis: axis,
+                transform: activeTransform,
+                composesAxis: activeComposesAxis
+            )
+            mapPaths = built.paths
+            overlayCapped = built.capped
+            mapRevision += 1
+            var note = "設計に \(stored) を置きました。"
+            if let unit = parsed.unitWarning { note += unit }
+            if built.capped { note += "途中まで" }
+            message = note
+            return note
+        } catch {
+            let text = "図面を置けませんでした。"
+            message = text
+            return text
+        }
+    }
+
     func setPrefecture(_ raw: String?, latitude: Double?, longitude: Double?) {
         let name = raw.flatMap { PlaneZoneCatalog.named($0)?.name }
         project?.prefecture = name
