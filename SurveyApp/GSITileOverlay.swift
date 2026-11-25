@@ -11,7 +11,7 @@ final class GSITileOverlay: MKTileOverlay {
         self.store = store
         super.init(urlTemplate: GSITileCatalog.urlTemplate(for: .gsiStandard))
         minimumZ = GSITileCatalog.standardZoomRange.lowerBound
-        maximumZ = MapTileOverzoom.appMaxZoom
+        maximumZ = MapTileOverzoom.overlayMaximumZoom
         tileSize = CGSize(width: 256, height: 256)
         canReplaceMapContent = true
     }
@@ -30,7 +30,7 @@ final class GSITileOverlay: MKTileOverlay {
             }
             do {
                 let data = try await self.store.fetch(resolved.source)
-                let shown = Self.overzoom(data, crop: resolved) ?? data
+                let shown = await MainActor.run { Self.overzoom(data, crop: resolved) ?? data }
                 await MainActor.run { result(shown, nil) }
             } catch {
                 await MainActor.run { result(nil, error) }

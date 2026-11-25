@@ -138,10 +138,12 @@ public struct OverzoomedTile: Equatable, Sendable {
 public enum MapTileOverzoom {
     public static let providerMaxZoom = 18
     public static let appMaxZoom = 22
+    /// MapKit は画面の倍率分だけ、表示ズームより深いタイルを要求する。
+    public static let overlayMaximumZoom = 30
     public static let tilePixels = 256
 
     public static func resolve(z: Int, x: Int, y: Int, style: BaseMapStyle = .gsiStandard) -> OverzoomedTile {
-        let zoom = min(max(z, 0), appMaxZoom)
+        let zoom = min(max(z, 0), overlayMaximumZoom)
         let safeX = max(0, x)
         let safeY = max(0, y)
         if zoom <= providerMaxZoom {
@@ -159,10 +161,12 @@ public enum MapTileOverzoom {
         let subX = safeX & (cell - 1)
         let subY = safeY & (cell - 1)
         let size = max(1, tilePixels / cell)
+        let cropX = min(subX * tilePixels / cell, tilePixels - size)
+        let cropY = min(subY * tilePixels / cell, tilePixels - size)
         return OverzoomedTile(
             source: TileID(style: style, z: providerMaxZoom, x: parentX, y: parentY),
-            cropX: subX * size,
-            cropY: subY * size,
+            cropX: cropX,
+            cropY: cropY,
             cropSize: size
         )
     }

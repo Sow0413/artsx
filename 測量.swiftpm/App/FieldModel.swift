@@ -2848,7 +2848,7 @@ final class FieldModel: ObservableObject {
     private static func previewZoom(_ step: Int) -> Int? {
         switch step {
         case 10: return 5
-        case 11: return 12
+        case 11: return 14
         case 12: return 18
         case 13: return MapTileOverzoom.appMaxZoom
         default: return nil
@@ -2857,12 +2857,19 @@ final class FieldModel: ObservableObject {
 
     private func applyPreviewZoom(_ zoom: Int) {
         let longitude = MapZoom.longitudeDelta(forZoom: zoom, screenWidthPoints: 390)
-        let cosine = max(0.2, abs(cos(viewport.centerLatitude * .pi / 180)))
+        var latitude = viewport.centerLatitude
+        var centerLongitude = viewport.centerLongitude
+        if zoom >= MapTileOverzoom.providerMaxZoom, let corner = drawing.mapPaths.first?.coordinates.first {
+            latitude = corner.latitudeDegrees
+            centerLongitude = corner.longitudeDegrees
+        }
+        let cosine = max(0.2, abs(cos(latitude * .pi / 180)))
+        let latitudeDelta = longitude * cosine
         followUser = false
         viewport = MapViewport(
-            centerLatitude: viewport.centerLatitude,
-            centerLongitude: viewport.centerLongitude,
-            latitudeDelta: longitude * cosine,
+            centerLatitude: latitude - latitudeDelta * 0.15,
+            centerLongitude: centerLongitude,
+            latitudeDelta: latitudeDelta,
             longitudeDelta: longitude
         )
     }

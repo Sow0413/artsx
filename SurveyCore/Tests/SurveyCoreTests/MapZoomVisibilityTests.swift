@@ -23,6 +23,13 @@ final class MapZoomVisibilityTests: XCTestCase {
         XCTAssertEqual(maxed.cropSize, 16)
         XCTAssertLessThanOrEqual(maxed.cropX + maxed.cropSize, 256)
         XCTAssertLessThanOrEqual(maxed.cropY + maxed.cropSize, 256)
+
+        let pastTheCamera = MapTileOverzoom.resolve(z: 24, x: 255, y: 63)
+        XCTAssertEqual(pastTheCamera.source.z, MapTileOverzoom.providerMaxZoom)
+        XCTAssertEqual(pastTheCamera.source.x, 255 >> 6)
+        XCTAssertEqual(pastTheCamera.source.y, 63 >> 6)
+        XCTAssertGreaterThan(pastTheCamera.cropSize, 0)
+        XCTAssertLessThanOrEqual(pastTheCamera.cropX + pastTheCamera.cropSize, 256)
     }
 
     func testAlignedDrawingAndTilesStayVisibleFromZoom5Through22() throws {
