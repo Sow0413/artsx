@@ -2705,7 +2705,6 @@ final class FieldModel: ObservableObject {
 
     /// 試験の図面を順に読む。1、2、3、生成した 5、壊れた 6。
     func showNextUITestDrawing() {
-        guard ProcessInfo.processInfo.arguments.contains("-surveyUITestDrawings") else { return }
         if drawing.project == nil {
             drawing.createProject(named: "図面試験")
         }

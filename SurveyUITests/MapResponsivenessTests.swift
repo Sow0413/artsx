@@ -29,7 +29,7 @@ final class MapResponsivenessTests: XCTestCase {
         ]
         for step in steps {
             app.terminate()
-            app.launchArguments = ["-surveyUITest", "-uitestDrawing", "\(step.0)"]
+            app.launchArguments = ["-surveyUITest", "-surveyUITestDrawings", "-uitestDrawing", "\(step.0)"]
             app.launch()
             allowSystemPrompts()
             dismissStaturePrompt()
