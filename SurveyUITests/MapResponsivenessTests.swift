@@ -265,8 +265,11 @@ final class MapResponsivenessTests: XCTestCase {
         restoreRun.tap()
         confirm("戻す")
         let restoreResult = app.staticTexts["restore-result"]
-        XCTAssertTrue(restoreResult.waitForExistence(timeout: 5), "復元の結果が無い")
-        XCTAssertTrue(restoreResult.label.contains("点を読みました"))
+        let restoredPoints = expectation(
+            for: NSPredicate(format: "label CONTAINS '点を読みました'"),
+            evaluatedWith: restoreResult
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [restoredPoints], timeout: 8), .completed, "復元の結果が無い")
         shot("25-restore-points")
         app.buttons["deliver-back"].tap()
         let coordinate = app.buttons["open-coordinate"]

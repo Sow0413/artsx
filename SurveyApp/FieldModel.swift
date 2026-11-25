@@ -2627,11 +2627,28 @@ final class FieldModel: ObservableObject {
     }
 
     func restoreExportedBook() {
+        guard let project = drawing.project else {
+            exportMessage = "先に現場を作ってください。"
+            return
+        }
+        if let folder = try? ProjectStore.exportDirectory(projectName: project.name, at: drawing.projectsRoot),
+           let file = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter({ ["csv", "sima"].contains($0.pathExtension.lowercased()) })
+            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+            .last,
+           let data = try? Data(contentsOf: file) {
+            importBasic(data: data, filename: file.lastPathComponent)
+            return
+        }
         guard let url = exportURL, let data = try? Data(contentsOf: url) else {
             exportMessage = "先にデータを書き出してください。"
             return
         }
-        importBasic(data: data, filename: url.lastPathComponent)
+        if url.pathExtension.lowercased() == "json" {
+            restoreBasicBackup(data: data)
+        } else {
+            importBasic(data: data, filename: url.lastPathComponent)
+        }
     }
 
     func refreshProjectSheet() {
