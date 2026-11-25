@@ -251,6 +251,8 @@ public struct DrawingDocument: Sendable, Equatable {
     public var unitWarning: String?
     /// $INSUNITS。0 は無指定、4 はミリ、6 はメートル。
     public var unitCode: Int
+    /// 部分図の一覧や、位置合わせが要るときの一文。
+    public var readNotice: String?
     public internal(set) var index: DrawingSpatialIndex
 
     public init(
@@ -261,7 +263,8 @@ public struct DrawingDocument: Sendable, Equatable {
         codePage: String,
         unitWarning: String?,
         index: DrawingSpatialIndex,
-        unitCode: Int = 0
+        unitCode: Int = 0,
+        readNotice: String? = nil
     ) {
         self.layers = layers
         self.entities = entities
@@ -270,6 +273,7 @@ public struct DrawingDocument: Sendable, Equatable {
         self.codePage = codePage
         self.unitWarning = unitWarning
         self.unitCode = unitCode
+        self.readNotice = readNotice
         self.index = index
     }
 

@@ -2790,6 +2790,11 @@ final class FieldModel: ObservableObject {
             fileName = "wrong-zone.dxf"
             zone = 1
             axis = .cadEastNorth
+        case 8, 9:
+            data = UITestDrawingBytes.sfig
+            fileName = "7_local_origin_mm_sfig.sfc"
+            zone = 2
+            axis = .cadEastNorth
         default:
             data = UITestDrawingBytes.broken
             fileName = "6_broken.dxf"
@@ -2810,6 +2815,10 @@ final class FieldModel: ObservableObject {
                         zone: zone,
                         axis: axis
                     )
+                    if step == 9, let survey = try? SFCParser.open(bytes),
+                       let fit = SFCPointFit.align(document: survey.document, book: survey.book) {
+                        note += "点名で合わせました。残差 \(String(format: "%.3f", fit.rmsMeters)) m。"
+                    }
                     if step == 7 {
                         let warning = ZoneAdvisor.placement(
                             drawingX: -5992.920,

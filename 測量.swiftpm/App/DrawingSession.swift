@@ -249,10 +249,10 @@ final class DrawingSession: ObservableObject {
                     codePage: parsed.codePage,
                     unsupported: parsed.unsupportedCounts
                 )
-                var note = ext == "sfc"
-                    ? "設計に \(stored) を置きました。公共座標として読みました。系を選ぶと地図に載ります。元の SFC は変えていません。"
-                    : "設計に \(stored) を置きました。元の DXF は変えていません。"
-                if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
+                var note = "設計に \(stored) を置きました。"
+                if ext != "sfc" { note += "元の DXF は変えていません。" }
+                if let unit = parsed.unitWarning { note += unit }
+                if let notice = parsed.readNotice { note += notice }
                 if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
                 let draft = current
                 let base = note
@@ -318,6 +318,7 @@ final class DrawingSession: ObservableObject {
             mapRevision += 1
             var note = "設計に \(stored) を置きました。"
             if let unit = parsed.unitWarning { note += unit }
+            if let notice = parsed.readNotice { note += notice }
             if built.capped { note += "途中まで" }
             message = note
             return note
