@@ -107,7 +107,7 @@ final class ViDocProtocolTests: XCTestCase {
         _ = modern.nmeaWasSent(at: 0)
         _ = modern.receive(.switched, at: 0.1)
         _ = modern.lightDown(at: 0.4)
-        XCTAssertEqual(modern.lamp, .aiming)
+        XCTAssertEqual(modern.lamp, .lower)
         let frame = modern.measureDown(seconds: 5, at: 1)
         XCTAssertEqual(modern.lamp, .ranging)
         let trailer = Data([0x3C, 0x3B, 0x3D, 0x01, 0x03, 0x02])
@@ -125,6 +125,43 @@ final class ViDocProtocolTests: XCTestCase {
         }
         XCTAssertEqual(modern.takeLaserReading(), .meters(1.2))
         XCTAssertEqual(modern.lamp, .off)
+    }
+
+    func testZeroDistanceAfterLightOnIsUnreadAndStatusNamesTheBeam() {
+        let shifted = Data([0x01, 0x00, 0x6f, 0x02, 0x6f, 0x00, 0x00, 0x03, 0xde, 0xc2])
+        let normal = Data([0x01, 0x00, 0x70, 0x02, 0x6d, 0x03, 0xde, 0x01, 0x66, 0x28])
+        guard case let .range(_, _, zeroDistance, zeroQuality) = ViDocReply.decode(shifted, expect: .range) else {
+            return XCTFail("点灯直後の測距を読めない")
+        }
+        XCTAssertEqual(zeroDistance, 0)
+        XCTAssertEqual(zeroQuality, 990)
+        XCTAssertFalse(LaserRangeBatch.usable(distanceMillimetres: zeroDistance, quality: zeroQuality, down: true))
+        guard case let .range(_, _, distance, quality) = ViDocReply.decode(normal, expect: .range) else {
+            return XCTFail("通常の測距を読めない")
+        }
+        XCTAssertEqual(distance, 990)
+        XCTAssertEqual(quality, 358)
+        XCTAssertTrue(LaserRangeBatch.usable(distanceMillimetres: distance, quality: quality, down: true))
+        XCTAssertEqual(
+            LaserRangeBatch.medianMeters(
+                [(distanceMillimetres: zeroDistance, quality: zeroQuality), (distanceMillimetres: distance, quality: quality)],
+                down: true
+            ) ?? 0,
+            0.990,
+            accuracy: 1e-9
+        )
+        XCTAssertNil(LaserRangeBatch.medianMeters([(distanceMillimetres: 0, quality: 990)], down: true))
+
+        XCTAssertEqual(ViDocReply.decode(Data([0x09, 0x00, 0x09]), expect: .none), .laserStatus(raw: 0))
+        XCTAssertEqual(ViDocReply.decode(Data([0x09, 0x01, 0x0A]), expect: .none), .laserStatus(raw: 1))
+        XCTAssertEqual(ViDocReply.decode(Data([0x09, 0x02, 0x0B]), expect: .none), .laserStatus(raw: 2))
+        var plan = ViDocCommandPlan()
+        XCTAssertEqual(plan.receive(.laserStatus(raw: 0), at: 0), [])
+        XCTAssertEqual(plan.lamp, .off)
+        XCTAssertEqual(plan.receive(.laserStatus(raw: 1), at: 1), [])
+        XCTAssertEqual(plan.lamp, .lower)
+        XCTAssertEqual(plan.receive(.laserStatus(raw: 2), at: 2), [])
+        XCTAssertEqual(plan.lamp, .front)
     }
 
     func testLegacyOffFollowsTheBeamAndRangeLimitsReject() {
@@ -159,9 +196,9 @@ final class ViDocProtocolTests: XCTestCase {
         XCTAssertEqual(plan.measureDown(seconds: 5, at: 3), [])
         XCTAssertEqual(plan.lamp, .off)
         XCTAssertEqual(plan.lightDown(at: 10), [Data([0x55, 0x04, 0x00, 0x59])])
-        XCTAssertEqual(plan.lamp, .aiming)
+        XCTAssertEqual(plan.lamp, .lower)
         XCTAssertEqual(plan.measureDown(seconds: 5, at: 10.49), [])
-        XCTAssertEqual(plan.lamp, .aiming)
+        XCTAssertEqual(plan.lamp, .lower)
         XCTAssertEqual(plan.tick(at: 10.49), [])
         let ranged = plan.tick(at: 10.5)
         XCTAssertEqual(ranged, [Data([0x55, 0x03, 0x05, 0x5D])])
@@ -174,7 +211,7 @@ final class ViDocProtocolTests: XCTestCase {
         _ = idle.tick(at: 2)
         _ = idle.lightDown(at: 10)
         XCTAssertEqual(idle.tick(at: 39.9), [])
-        XCTAssertEqual(idle.lamp, .aiming)
+        XCTAssertEqual(idle.lamp, .lower)
         XCTAssertEqual(idle.tick(at: 40), [Data([0x55, 0x05, 0x00, 0x5A])])
         XCTAssertEqual(idle.lamp, .off)
         XCTAssertEqual(idle.tick(at: 41), [])

@@ -234,7 +234,8 @@ struct InstrumentSetupForm: View {
     private var laserLampLabel: String {
         switch field.laserLamp {
         case .ranging: return "測定中（点滅）"
-        case .aiming: return "点灯中"
+        case .lower: return "下 点灯中"
+        case .front: return "前 点灯中"
         case .off: return "消灯"
         }
     }

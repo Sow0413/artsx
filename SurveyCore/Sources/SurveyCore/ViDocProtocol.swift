@@ -182,9 +182,9 @@ public enum ViDocReply: Equatable, Sendable {
 public enum LaserRangeBatch {
     public static let replyLimit = 7
 
-    /// 0〜600 は良好、601〜1000 は可。0xFFFF、品質 1000 超、下 40 m 以上、前 20 m 以上は使わない。
+    /// 0〜600 は良好、601〜1000 は可。距離 0 と 0xFFFF、品質 1000 超、下 40 m 以上、前 20 m 以上は使わない。
     public static func usable(distanceMillimetres: Int, quality: Int, down: Bool) -> Bool {
-        if distanceMillimetres == 0xFFFF || quality > 1000 { return false }
+        if distanceMillimetres == 0 || distanceMillimetres == 0xFFFF || quality > 1000 { return false }
         let meters = Double(distanceMillimetres) / 1000
         if down, meters >= 40 { return false }
         if !down, meters >= 20 { return false }
@@ -381,10 +381,19 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     public var observing = false
     /// true は下、false は前。点灯した側だけ測る。
     public private(set) var beamIsDown = true
-    public enum Lamp: Equatable, Sendable { case off, aiming, ranging }
+    /// cmd 9 の応答。0 消灯、1 下、2 前。未受信は nil。
+    public private(set) var reportedBeam: UInt8?
+    public enum Lamp: Equatable, Sendable { case off, lower, front, ranging }
     public var lamp: Lamp {
         if phase == .range { return .ranging }
-        if lightIsOn { return .aiming }
+        if let reportedBeam {
+            switch reportedBeam {
+            case 1: return .lower
+            case 2: return .front
+            default: return .off
+            }
+        }
+        if lightIsOn { return beamIsDown ? .lower : .front }
         return .off
     }
     public enum LaserReading: Equatable, Sendable {
@@ -457,6 +466,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
         guard mode != .probing, let frame = ViDocProtocol.lightOn(down: down, trailed: mode == .modern) else { return [] }
         lightIsOn = true
         beamIsDown = down
+        reportedBeam = down ? 1 : 2
         lightOnAt = now
         return [frame]
     }
@@ -478,6 +488,9 @@ public struct ViDocCommandPlan: Equatable, Sendable {
             return sendTemp(at: now)
         case .temperature where mode == .modern && phase != .range:
             return sendAngle(at: now)
+        case .laserStatus(let raw):
+            if raw <= 2 { reportedBeam = raw }
+            return []
         case .range(_, _, let distance, let quality):
             guard phase == .range, laserOffArmed, rangeSamples.count < LaserRangeBatch.replyLimit else { return [] }
             rangeSamples.append(RangeSample(distanceMillimetres: distance, quality: quality))
@@ -592,6 +605,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
     private mutating func extinguish() -> [Data] {
         lightIsOn = false
         lightOnAt = nil
+        reportedBeam = 0
         rangeHoldUntil = nil
         heldRangeSeconds = nil
         guard let off = ViDocProtocol.lightOff(down: beamIsDown, trailed: mode == .modern) else { return [] }
@@ -629,6 +643,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
         laserOffArmed = false
         lightIsOn = false
         lightOnAt = nil
+        reportedBeam = 0
         phase = .idle
         expect = .none
         deadline = nil
