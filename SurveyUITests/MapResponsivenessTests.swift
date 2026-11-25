@@ -40,6 +40,8 @@ final class MapResponsivenessTests: XCTestCase {
                 .completed,
                 "\(step.2) の結果が出ない。表示は \(status.exists ? status.label : "なし")"
             )
+            let map = app.buttons["tab-map"]
+            if map.waitForExistence(timeout: 5) { map.tap() }
             shot(step.2)
         }
     }

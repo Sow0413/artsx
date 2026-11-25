@@ -385,7 +385,7 @@ struct SurveyMapView: UIViewRepresentable {
                 appliedViewport = nil
             }
             wasFollowing = followUser
-            guard followUser, appliedViewport != viewport else { return }
+            guard appliedViewport != viewport else { return }
             appliedViewport = viewport
             let region = MKCoordinateRegion(
                 center: CLLocationCoordinate2D(latitude: viewport.centerLatitude, longitude: viewport.centerLongitude),

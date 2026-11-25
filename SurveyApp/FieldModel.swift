@@ -2700,6 +2700,7 @@ final class FieldModel: ObservableObject {
               let step = Int(args[flag + 1]) else { return }
         didLoadUITestDrawing = true
         uiTestDrawingStep = step - 1
+        tab = .map
         showNextUITestDrawing()
     }
 
@@ -2750,6 +2751,7 @@ final class FieldModel: ObservableObject {
             let bytes = step == 4 ? HeavyDrawingFixture.makeDXF() : data
             let parsed = Result { try DrawingImport.load(bytes, fileName: fileName) }
             DispatchQueue.main.async {
+                self.tab = .map
                 switch parsed {
                 case let .success(document):
                     let note = self.drawing.installParsed(
