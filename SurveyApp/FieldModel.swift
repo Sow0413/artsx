@@ -82,6 +82,18 @@ final class FieldModel: ObservableObject {
     /// 出すの1段目。現場の下敷きに置いた図面。
     @Published private(set) var projectSheet: ProjectSheet?
     @Published private(set) var sheetMessage: String?
+    @Published var scaleMessage: String?
+    @Published var localizeMessage: String?
+    @Published var cadMessage: String?
+    struct LocalizeDraft: Identifiable, Equatable {
+        var id = UUID()
+        var name: String
+        var designEast: Double
+        var designNorth: Double
+        var measuredEast: Double
+        var measuredNorth: Double
+    }
+    @Published var localizeDrafts: [LocalizeDraft] = []
     @Published var instrument = SiteInstrument()
     @Published var instrumentMessage: String?
     @Published var tiltDegrees: Double?
@@ -2533,6 +2545,93 @@ final class FieldModel: ObservableObject {
         stakeResult = result
         captureMessage = result
         return true
+    }
+
+    func compareScale(drawingMeters: Double?, measuredMeters: Double?) {
+        guard let drawingMeters, let measuredMeters,
+              let result = ScaleCheck.compare(drawingMeters: drawingMeters, measuredMeters: measuredMeters) else {
+            scaleMessage = "2つの距離を、0より大きい数で入れてください。"
+            return
+        }
+        let millimetres = result.differenceMeters * 1000
+        let ratio = result.ratio > 0 ? Int((1 / result.ratio).rounded()) : 0
+        scaleMessage = String(
+            format: "%@。差 %+.1f mm。1/%d。",
+            result.passed ? "合格" : "不合格",
+            millimetres,
+            ratio
+        )
+    }
+
+    func addLocalizeDraft(name: String, designEast: Double?, designNorth: Double?, measuredEast: Double?, measuredNorth: Double?) {
+        guard let designEast, let designNorth, let measuredEast, let measuredNorth else {
+            localizeMessage = "設計と測定の東西南北を数で入れてください。"
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        localizeDrafts.append(LocalizeDraft(
+            name: trimmed.isEmpty ? "点\(localizeDrafts.count + 1)" : trimmed,
+            designEast: designEast,
+            designNorth: designNorth,
+            measuredEast: measuredEast,
+            measuredNorth: measuredNorth
+        ))
+        localizeMessage = "\(localizeDrafts.count)点たまりました。3点以上で合わせます。"
+    }
+
+    func runLocalize() {
+        guard localizeDrafts.count >= PrecisionGate.minimumKnownPoints else {
+            localizeMessage = "既知点が3点に足りません。いま \(localizeDrafts.count) 点。"
+            return
+        }
+        let pairs = localizeDrafts.map {
+            (source: PlanarPoint(x: $0.measuredEast, y: $0.measuredNorth), target: PlanarPoint(x: $0.designEast, y: $0.designNorth))
+        }
+        guard let fit = SiteLocalize.fit(pairs) else {
+            localizeMessage = "点が重なっているので、合わせられません。"
+            return
+        }
+        localizeMessage = String(format: "合わせました。残差 %.1f mm。縮尺は1のまま。", fit.rmsMeters * 1000)
+    }
+
+    func refreshCadPoints() -> [(name: String, east: Double, north: Double)] {
+        guard projectSheet?.kind == "dxf", let data = projectSheetData(),
+              let document = try? DrawingImport.load(data, fileName: projectSheet?.fileName ?? "図面.dxf") else {
+            cadMessage = "この図面に点名がありません。DXFの文字を使います。"
+            return []
+        }
+        let points: [(name: String, east: Double, north: Double)] = document.entities.compactMap { entity in
+            guard case let .text(origin, string, _, _) = entity.primitive else { return nil }
+            let name = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return nil }
+            let plane = drawing.axis.plane(drawingX: origin.x, drawingY: origin.y)
+            return (name, plane.easting, plane.northing)
+        }
+        cadMessage = points.isEmpty ? "この図面に点名がありません。DXFの文字を使います。" : "\(points.count)点あります。選ぶと測設します。"
+        return points
+    }
+
+    func aimCadPoint(name: String, east: Double, north: Double) {
+        guard let geo = PlaneRectangular.inverse(northingMeters: north, eastingMeters: east, zone: drawing.zone) else {
+            cadMessage = "この座標を緯度経度に戻せません。"
+            return
+        }
+        aimBasic(
+            name: name,
+            latitude: String(geo.latitudeDegrees),
+            longitude: String(geo.longitudeDegrees),
+            height: ""
+        )
+        cadMessage = "\(name) へ測設します。"
+        tab = .map
+    }
+
+    func restoreExportedBook() {
+        guard let url = exportURL, let data = try? Data(contentsOf: url) else {
+            exportMessage = "先にデータを書き出してください。"
+            return
+        }
+        importBasic(data: data, filename: url.lastPathComponent)
     }
 
     func refreshProjectSheet() {

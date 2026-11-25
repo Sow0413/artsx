@@ -198,7 +198,7 @@ final class MapResponsivenessTests: XCTestCase {
         let exportSheet = app.scrollViews["screen-export"]
         XCTAssertTrue(app.buttons["open-draw"].waitForExistence(timeout: 5), "出すに図面の入口が無い")
         XCTAssertTrue(app.buttons["open-scale"].label.contains("図面の縮尺設定／2点割り付け"))
-        XCTAssertTrue(app.buttons["open-scale"].label.contains("次の版"), "未実装の入口に次の版が無い")
+        XCTAssertFalse(app.buttons["open-scale"].label.contains("次の版"), "縮尺設定が次の版のまま")
         XCTAssertTrue(app.buttons["open-localize"].label.contains("GNSSローカライズ"))
         XCTAssertTrue(app.buttons["open-cad"].label.contains("CAD測設"))
         XCTAssertTrue(app.buttons["open-restore-points"].label.contains("データから点の復元"))
@@ -226,16 +226,49 @@ final class MapResponsivenessTests: XCTestCase {
         scrollClear(nextScale, in: drawSheet)
         shot("21-draw-loaded")
         nextScale.tap()
-        XCTAssertTrue(app.scrollViews["screen-scale"].waitForExistence(timeout: 5), "縮尺設定が開かない")
-        XCTAssertTrue(app.staticTexts["次の版"].waitForExistence(timeout: 5), "縮尺設定に次の版が無い")
+        let scaleSheet = app.scrollViews["screen-scale"]
+        XCTAssertTrue(scaleSheet.waitForExistence(timeout: 5), "縮尺設定が開かない")
+        let scaleDrawing = app.textFields["scale-drawing"]
+        scrollClear(scaleDrawing, in: scaleSheet)
+        replace(scaleDrawing, with: "100")
+        let scaleMeasured = app.textFields["scale-measured"]
+        replace(scaleMeasured, with: "100.001")
+        let scaleRun = app.buttons["scale-run"]
+        scrollClear(scaleRun, in: scaleSheet)
+        scaleRun.tap()
+        let scaleResult = app.staticTexts["scale-result"]
+        XCTAssertTrue(scaleResult.waitForExistence(timeout: 5), "縮尺の合否が無い")
+        XCTAssertTrue(scaleResult.label.contains("合格"))
         shot("22-scale")
         app.buttons["deliver-back"].tap()
         XCTAssertTrue(drawSheet.waitForExistence(timeout: 5))
         app.buttons["deliver-back"].tap()
         XCTAssertTrue(app.scrollViews["screen-export"].waitForExistence(timeout: 5), "出すトップに戻らない")
-        visitDeliver("open-localize", screen: "screen-localize", shotName: "23-localize")
-        visitDeliver("open-cad", screen: "screen-cad", shotName: "24-cad")
-        visitDeliver("open-restore-points", screen: "screen-restore-points", shotName: "25-restore-points")
+        openWork("open-localize", screen: "screen-localize")
+        let localizeRun = app.buttons["localize-run"]
+        scrollClear(localizeRun, in: app.scrollViews["screen-localize"])
+        localizeRun.tap()
+        let localizeResult = app.staticTexts["localize-result"]
+        XCTAssertTrue(localizeResult.waitForExistence(timeout: 5), "ローカライズの結果が無い")
+        XCTAssertTrue(localizeResult.label.contains("3点"))
+        shot("23-localize")
+        app.buttons["deliver-back"].tap()
+        openWork("open-cad", screen: "screen-cad")
+        let cadResult = app.staticTexts["cad-result"]
+        XCTAssertTrue(cadResult.waitForExistence(timeout: 5), "CAD測設の結果が無い")
+        XCTAssertTrue(cadResult.label.contains("点名"))
+        shot("24-cad")
+        app.buttons["deliver-back"].tap()
+        openWork("open-restore-points", screen: "screen-restore-points")
+        let restoreRun = app.buttons["restore-run"]
+        scrollClear(restoreRun, in: app.scrollViews["screen-restore-points"])
+        restoreRun.tap()
+        confirm("戻す")
+        let restoreResult = app.staticTexts["restore-result"]
+        XCTAssertTrue(restoreResult.waitForExistence(timeout: 5), "復元の結果が無い")
+        XCTAssertTrue(restoreResult.label.contains("点を読みました"))
+        shot("25-restore-points")
+        app.buttons["deliver-back"].tap()
         let coordinate = app.buttons["open-coordinate"]
         scrollClear(coordinate, in: exportSheet)
         shot("17-deliver")
@@ -264,6 +297,13 @@ final class MapResponsivenessTests: XCTestCase {
         }
         shot("15-gcp")
         shot("06-map-return")
+    }
+
+    private func openWork(_ button: String, screen: String) {
+        let control = app.buttons[button]
+        scrollClear(control, in: app.scrollViews["screen-export"])
+        control.tap()
+        XCTAssertTrue(app.scrollViews[screen].waitForExistence(timeout: 5), "\(screen) が開かない")
     }
 
     private func visitDeliver(_ button: String, screen: String, shotName: String) {

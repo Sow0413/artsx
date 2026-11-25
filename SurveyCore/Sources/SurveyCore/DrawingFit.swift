@@ -109,6 +109,33 @@ public struct SimilarityFit: Sendable, Equatable {
     }
 }
 
+public enum ScaleCheck {
+    public static let absoluteLimitMeters = 0.02
+    public static let ratioLimit = 1.0 / 10_000
+
+    public struct Result: Equatable, Sendable {
+        public var differenceMeters: Double
+        public var ratio: Double
+        public var passed: Bool
+    }
+
+    /// 図面の距離と測った距離。差が 2cm 以内、かつ 1/10000 以内のときだけ合格。
+    public static func compare(drawingMeters: Double, measuredMeters: Double) -> Result? {
+        guard drawingMeters.isFinite, measuredMeters.isFinite, drawingMeters > 0, measuredMeters > 0 else { return nil }
+        let difference = measuredMeters - drawingMeters
+        let ratio = abs(difference) / drawingMeters
+        let passed = abs(difference) <= absoluteLimitMeters + 1e-12 && ratio <= ratioLimit + 1e-15
+        return Result(differenceMeters: difference, ratio: ratio, passed: passed)
+    }
+}
+
+public enum SiteLocalize {
+    public static func fit(_ pairs: [(source: PlanarPoint, target: PlanarPoint)]) -> SimilarityFit? {
+        guard pairs.count >= PrecisionGate.minimumKnownPoints else { return nil }
+        return SimilaritySolver.fit(pairs, lockScale: true)
+    }
+}
+
 public enum SimilaritySolver {
     /// 2点以上。点が重なると nil。縮尺を固定するときは 1（図面の 1 が 1 m）。
     public static func fit(_ pairs: [(source: PlanarPoint, target: PlanarPoint)], lockScale: Bool) -> SimilarityFit? {

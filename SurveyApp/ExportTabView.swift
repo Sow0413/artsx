@@ -46,13 +46,13 @@ struct ExportTabView: View {
                         .lineLimit(1)
                         .accessibilityIdentifier("purpose-deliver")
                     stepTile(order: 1, title: "図面を読み込む", systemImage: "doc", page: .drawing, status: field.projectSheet == nil ? "未着手" : "済", locked: false, later: false)
-                    stepTile(order: 2, title: "図面の縮尺設定／2点割り付け", systemImage: "ruler", page: .scale, status: "未着手", locked: field.projectSheet == nil, later: true)
-                    stepTile(order: 3, title: "GNSSローカライズ", systemImage: "location.north.line", page: .localize, status: "未着手", locked: true, later: true)
-                    stepTile(order: 4, title: "CAD測設", systemImage: "square.and.pencil", page: .cad, status: "未着手", locked: true, later: true)
+                    stepTile(order: 2, title: "図面の縮尺設定／2点割り付け", systemImage: "ruler", page: .scale, status: "2cm・1/10000", locked: field.projectSheet == nil, later: false)
+                    stepTile(order: 3, title: "GNSSローカライズ", systemImage: "location.north.line", page: .localize, status: "3点以上", locked: false, later: false)
+                    stepTile(order: 4, title: "CAD測設", systemImage: "square.and.pencil", page: .cad, status: field.projectSheet == nil ? "図面のあと" : "図面の点", locked: field.projectSheet == nil, later: false)
                     Text("別の入口")
                         .font(SurveyType(18, .heavy))
                         .padding(.top, 8)
-                    stepTile(order: nil, title: "データから点の復元", systemImage: "arrow.uturn.backward", page: .restore, status: "未着手", locked: true, later: true)
+                    stepTile(order: nil, title: "データから点の復元", systemImage: "arrow.uturn.backward", page: .restore, status: "書き出しから", locked: false, later: false)
                     Text("測設")
                         .font(SurveyType(18, .heavy))
                         .padding(.top, 8)
@@ -128,43 +128,26 @@ struct ExportTabView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .deliverBack { deliverPath.removeLast() }
         case .scale:
-            laterPage(title: "図面の縮尺設定／2点割り付け", purpose: "2点の距離差で合否を見る。2cmと1/10000。", identifier: "screen-scale")
+            ScaleCheckPage(field: field)
+                .navigationTitle("縮尺設定")
+                .navigationBarTitleDisplayMode(.inline)
+                .deliverBack { deliverPath.removeLast() }
         case .localize:
-            laterPage(title: "GNSSローカライズ", purpose: "既知点3点以上。計算は次の版。", identifier: "screen-localize")
+            LocalizePage(field: field)
+                .navigationTitle("GNSSローカライズ")
+                .navigationBarTitleDisplayMode(.inline)
+                .deliverBack { deliverPath.removeLast() }
         case .cad:
-            laterPage(title: "CAD測設", purpose: "図面の点を選んで誘導し、測設を残す。", identifier: "screen-cad")
+            CadStakePage(field: field)
+                .navigationTitle("CAD測設")
+                .navigationBarTitleDisplayMode(.inline)
+                .deliverBack { deliverPath.removeLast() }
         case .restore:
-            laterPage(title: "データから点の復元", purpose: "書き出したデータから点を戻す。", identifier: "screen-restore-points")
+            RestorePointsPage(field: field)
+                .navigationTitle("点の復元")
+                .navigationBarTitleDisplayMode(.inline)
+                .deliverBack { deliverPath.removeLast() }
         }
-    }
-
-    private func laterPage(title: String, purpose: String, identifier: String) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(title)
-                    .font(SurveyType(22, .heavy))
-                Text(purpose)
-                    .font(SurveyType(18, .heavy))
-                    .lineLimit(2)
-                Text("未着手")
-                    .font(SurveyType(20, .heavy))
-                    .foregroundStyle(SurveyColor.amber)
-                Text("次の版")
-                    .font(SurveyType(18, .heavy))
-                    .foregroundStyle(SurveyColor.muted)
-                Text("前の段の計算は、次の版で入ります。")
-                    .font(SurveyType(16, .semibold))
-                    .foregroundStyle(SurveyColor.muted)
-                    .lineLimit(1)
-            }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .accessibilityIdentifier(identifier)
-        .background(SurveyColor.background)
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .deliverBack { deliverPath.removeLast() }
     }
 
     private var legacyExport: some View {
