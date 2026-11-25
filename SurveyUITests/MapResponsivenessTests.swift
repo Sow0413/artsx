@@ -33,7 +33,11 @@ final class MapResponsivenessTests: XCTestCase {
             next.tap()
             let status = app.staticTexts["draw-overlay-status"]
             let shown = expectation(for: NSPredicate(format: "label CONTAINS %@", step.0), evaluatedWith: status)
-            XCTAssertEqual(XCTWaiter().wait(for: [shown], timeout: step.2), .completed, "\(step.1) の結果が出ない")
+            XCTAssertEqual(
+                XCTWaiter().wait(for: [shown], timeout: step.2),
+                .completed,
+                "\(step.1) の結果が出ない。表示は \(status.exists ? status.label : "なし")"
+            )
             shot(step.1)
         }
     }

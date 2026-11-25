@@ -2709,11 +2709,17 @@ final class FieldModel: ObservableObject {
         uiTestDrawingStep += 1
         switch uiTestDrawingStep {
         case 1:
-            loadUITestDrawing(resource: "1_irabu_xvi_utf8", metaResource: "1_irabu_xvi_utf8.dxf.meta")
+            if let sidecar = DrawingSidecar.load(UITestDrawingBytes.irabuMeta) {
+                if let zone = sidecar.zone { drawing.zone = zone }
+                if let axis = sidecar.drawingAxis { drawing.axis = axis }
+            }
+            drawing.importFile(data: UITestDrawingBytes.irabu, fileName: "1_irabu_xvi_utf8.dxf")
         case 2:
-            loadUITestDrawing(resource: "2_nagoya_vii_ac1021_ansi932", zone: 7)
+            drawing.zone = 7
+            drawing.axis = .cadEastNorth
+            drawing.importFile(data: UITestDrawingBytes.nagoya, fileName: "2_nagoya_vii_ac1021_ansi932.dxf")
         case 3:
-            loadUITestDrawing(resource: "3_site_local_mm")
+            drawing.importFile(data: UITestDrawingBytes.millimetres, fileName: "3_site_local_mm.dxf")
         case 4:
             DispatchQueue.global(qos: .userInitiated).async {
                 let data = HeavyDrawingFixture.makeDXF()
@@ -2724,27 +2730,8 @@ final class FieldModel: ObservableObject {
                 }
             }
         default:
-            loadUITestDrawing(resource: "6_broken")
+            drawing.importFile(data: UITestDrawingBytes.broken, fileName: "6_broken.dxf")
         }
-    }
-
-    private func loadUITestDrawing(resource: String, metaResource: String? = nil, zone: Int? = nil) {
-        guard let url = Bundle.main.url(forResource: resource, withExtension: "dxf"),
-              let data = try? Data(contentsOf: url) else {
-            uiTestDrawingStatus = "試験図面を読めません"
-            return
-        }
-        if let metaResource,
-           let metaURL = Bundle.main.url(forResource: metaResource, withExtension: "json"),
-           let metaData = try? Data(contentsOf: metaURL),
-           let sidecar = DrawingSidecar.load(metaData) {
-            if let zone = sidecar.zone { drawing.zone = zone }
-            if let axis = sidecar.drawingAxis { drawing.axis = axis }
-        } else if let zone {
-            drawing.zone = zone
-            drawing.axis = .cadEastNorth
-        }
-        drawing.importFile(data: data, fileName: url.lastPathComponent)
     }
 
     private func frameMapToDrawing() {
