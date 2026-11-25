@@ -79,6 +79,8 @@ final class DrawingSession: ObservableObject {
     private var referenceStamp: (latitude: Double, longitude: Double)?
     private var loadGeneration = 0
     private var mapGeneration = 0
+    /// 点名合わせのあと、図面の XY を公共座標へ写す。無いあいだは現場座標を地図に載せない。
+    private var heldAlignment: Similarity2D?
     /// 地図への重ねが更新されたとき。試験の画面合わせだけが使う。
     var onMapPaths: (() -> Void)?
     /// 読めなかったとき。渡す文は、利用者に出す一文。
@@ -306,20 +308,28 @@ final class DrawingSession: ObservableObject {
             if let nextZone { zone = nextZone }
             if let nextAxis { axis = nextAxis }
             adopt(parsed, fileName: stored)
-            let built = DrawingPlacement.overlay(
-                document: parsed,
-                zone: zone,
-                axis: axis,
-                transform: activeTransform,
-                composesAxis: activeComposesAxis
-            )
-            mapPaths = built.paths
-            overlayCapped = built.capped
-            mapRevision += 1
+            let waiting = parsed.unitWarning?.contains("位置合わせが必要") == true && heldAlignment == nil && activeTransform == nil
             var note = "設計に \(stored) を置きました。"
             if let unit = parsed.unitWarning { note += unit }
             if let notice = parsed.readNotice { note += notice }
-            if built.capped { note += "途中まで" }
+            if waiting {
+                mapPaths = []
+                overlayCapped = false
+                mapRevision += 1
+                note += "仮置き。"
+            } else {
+                let built = DrawingPlacement.overlay(
+                    document: parsed,
+                    zone: zone,
+                    axis: axis,
+                    transform: heldAlignment ?? activeTransform,
+                    composesAxis: activeComposesAxis && heldAlignment == nil
+                )
+                mapPaths = built.paths
+                overlayCapped = built.capped
+                mapRevision += 1
+                if built.capped { note += "途中まで" }
+            }
             message = note
             return note
         } catch {
@@ -327,6 +337,24 @@ final class DrawingSession: ObservableObject {
             message = text
             return text
         }
+    }
+
+    /// 合わせた図面を、選んだ系の経緯度で地図に載せる。
+    func placeAligned(_ document: DrawingDocument, transform: Similarity2D, zone number: Int) {
+        heldAlignment = transform
+        zone = number
+        axis = .cadEastNorth
+        mapGeneration += 1
+        let built = DrawingPlacement.overlay(
+            document: document,
+            zone: number,
+            axis: .cadEastNorth,
+            transform: transform,
+            composesAxis: false
+        )
+        mapPaths = built.paths
+        overlayCapped = built.capped
+        mapRevision += 1
     }
 
     func setPrefecture(_ raw: String?, latitude: Double?, longitude: Double?) {
@@ -1235,8 +1263,18 @@ final class DrawingSession: ObservableObject {
         }
         let zone = zone
         let axis = axis
-        let transform = activeTransform
-        let composes = activeComposesAxis
+        let transform = heldAlignment ?? activeTransform
+        let composes = heldAlignment == nil && activeComposesAxis
+        let provisional = document.unitWarning?.contains("位置合わせが必要") == true && transform == nil
+        if provisional {
+            DispatchQueue.main.async {
+                guard generation == self.mapGeneration else { return }
+                self.mapPaths = []
+                self.overlayCapped = false
+                self.mapRevision += 1
+            }
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let built = DrawingPlacement.overlay(
                 document: document,

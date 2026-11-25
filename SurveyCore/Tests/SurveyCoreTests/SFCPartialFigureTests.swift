@@ -67,5 +67,80 @@ final class SFCPartialFigureTests: XCTestCase {
         XCTAssertEqual(loaded.enabled, ["G0"])
         XCTAssertEqual(loaded.eastingOrigin ?? 0, -40900, accuracy: 1e-4)
         try? FileManager.default.removeItem(at: folder)
+
+        let unaligned = DrawingPlacement.overlay(
+            document: survey.document,
+            zone: 2,
+            axis: .cadEastNorth,
+            transform: nil
+        )
+        let aligned = DrawingPlacement.overlay(
+            document: survey.document,
+            zone: 2,
+            axis: .cadEastNorth,
+            transform: fit.transform
+        )
+        XCTAssertFalse(aligned.paths.isEmpty)
+        for line in csv.split(separator: "\n").dropFirst() {
+            let columns = line.split(separator: ",").map(String.init)
+            let name = columns[0]
+            let north = Double(columns[1])!
+            let east = Double(columns[2])!
+            let marker = try XCTUnwrap(marker(named: name, in: survey.document))
+            let placed = try XCTUnwrap(DrawingPlacement.geographic(
+                marker,
+                zone: 2,
+                axis: .cadEastNorth,
+                transform: fit.transform
+            ))
+            let raw = try XCTUnwrap(DrawingPlacement.geographic(
+                marker,
+                zone: 2,
+                axis: .cadEastNorth,
+                transform: nil
+            ))
+            let back = try XCTUnwrap(PlaneRectangular.forward(
+                latitudeDegrees: placed.latitudeDegrees,
+                longitudeDegrees: placed.longitudeDegrees,
+                zone: 2
+            ))
+            XCTAssertEqual(back.eastingMeters, east, accuracy: 0.01, name)
+            XCTAssertEqual(back.northingMeters, north, accuracy: 0.01, name)
+            let shifted = try XCTUnwrap(PlaneRectangular.forward(
+                latitudeDegrees: raw.latitudeDegrees,
+                longitudeDegrees: raw.longitudeDegrees,
+                zone: 2
+            ))
+            let gap = hypot(shifted.eastingMeters - back.eastingMeters, shifted.northingMeters - back.northingMeters)
+            XCTAssertGreaterThan(gap, 1_000, name)
+            let nearest = aligned.paths.flatMap(\.coordinates).map { coordinate in
+                hypot(
+                    (PlaneRectangular.forward(
+                        latitudeDegrees: coordinate.latitudeDegrees,
+                        longitudeDegrees: coordinate.longitudeDegrees,
+                        zone: 2
+                    )?.eastingMeters ?? 0) - east,
+                    (PlaneRectangular.forward(
+                        latitudeDegrees: coordinate.latitudeDegrees,
+                        longitudeDegrees: coordinate.longitudeDegrees,
+                        zone: 2
+                    )?.northingMeters ?? 0) - north
+                )
+            }.min() ?? 999
+            XCTAssertLessThan(nearest, 0.01, name)
+        }
+        _ = unaligned
+    }
+
+    private func marker(named name: String, in document: DrawingDocument) -> PlanarPoint? {
+        guard let label = document.entities.first(where: { entity in
+            if case let .text(_, string, _, _) = entity.primitive { return string == name }
+            return false
+        }), case let .text(origin, _, _, _) = label.primitive else { return nil }
+        let points = document.entities.compactMap { entity -> PlanarPoint? in
+            if case let .point(point) = entity.primitive { return point }
+            return nil
+        }
+        return points.min { origin.distance(to: $0) < origin.distance(to: $1) }
     }
 }
