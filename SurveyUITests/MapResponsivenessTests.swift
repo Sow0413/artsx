@@ -29,7 +29,9 @@ final class MapResponsivenessTests: XCTestCase {
             ("途中まで", "37-draw-heavy", 90.0),
             ("途中で切れています", "38-draw-broken", 20.0)
         ]
+        let sheet = app.scrollViews["map-controls"]
         for step in steps {
+            scrollClear(next, in: sheet)
             next.tap()
             let status = app.staticTexts["draw-overlay-status"]
             let shown = expectation(for: NSPredicate(format: "label CONTAINS %@", step.0), evaluatedWith: status)
