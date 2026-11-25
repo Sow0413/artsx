@@ -2818,6 +2818,7 @@ final class FieldModel: ObservableObject {
                     if step == 9, let survey = try? SFCParser.open(bytes),
                        let fit = SFCPointFit.align(document: survey.document, book: survey.book) {
                         self.drawing.placeAligned(survey.document, transform: fit.transform, zone: 2)
+                        note = note.replacingOccurrences(of: "仮置き。", with: "")
                         note += "点名で合わせました。残差 \(String(format: "%.3f", fit.rmsMeters)) m。"
                     }
                     if step == 7 {

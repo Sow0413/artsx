@@ -46,6 +46,12 @@ final class MapResponsivenessTests: XCTestCase {
             )
             let map = app.buttons["tab-map"]
             if map.waitForExistence(timeout: 5) { map.tap() }
+            if step.2 == "42-sfig-aligned" {
+                XCTAssertFalse(status.label.contains("仮置き"), "合わせたあとも仮置きが残っている")
+                let tiles = expectation(description: "九州の地理院タイル")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 8) { tiles.fulfill() }
+                wait(for: [tiles], timeout: 10)
+            }
             shot(step.2)
         }
     }
