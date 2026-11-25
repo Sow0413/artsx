@@ -309,7 +309,8 @@ struct MapTabView: View {
                         levelTilt: field.sightTiltRadians,
                         onRecord: { field.stageMapObservation() },
                         onGCP: { field.stageMapGCP() },
-                        gcpEnabled: field.canStageGCP
+                        gcpEnabled: field.canStageGCP,
+                        rawStatus: field.rawCaptureStatus == "記録中" ? "記録中" : nil
                     )
                         .frame(maxWidth: 560)
                         .frame(maxWidth: .infinity, alignment: .leading)

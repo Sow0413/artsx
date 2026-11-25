@@ -148,6 +148,7 @@ struct LocationPanel: View {
     var onRecord: (() -> Void)? = nil
     var onGCP: (() -> Void)? = nil
     var gcpEnabled = false
+    var rawStatus: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -193,6 +194,12 @@ struct LocationPanel: View {
                     Text(warning)
                         .font(SurveyType(15, .bold))
                         .foregroundStyle(SurveyColor.amber)
+                }
+                if let rawStatus {
+                    Text(rawStatus)
+                        .font(SurveyType(22, .heavy))
+                        .foregroundStyle(SurveyColor.amber)
+                        .accessibilityIdentifier("raw-status")
                 }
                 recordButtons
             } else {

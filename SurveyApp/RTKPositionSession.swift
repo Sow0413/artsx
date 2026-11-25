@@ -100,6 +100,17 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     // MARK: PositionSource
     public func setObserving(_ on: Bool) { vidoc.setObserving(on) }
     public func setPPKBase(_ url: URL?) { vidoc.setPPKBase(url) }
+    public var onRawStatus: ((String) -> Void)? {
+        get { vidoc.onRawStatus }
+        set { vidoc.onRawStatus = newValue }
+    }
+    public var onRawFinished: ((Bool) -> Void)? {
+        get { vidoc.onRawFinished }
+        set { vidoc.onRawFinished = newValue }
+    }
+    public func beginRawCapture(at base: URL) { vidoc.beginRawCapture(at: base) }
+    public func endRawCapture() { vidoc.endRawCapture() }
+    public func abandonRawCapture() { vidoc.abandonRawCapture() }
     public func lightFrontLaser() { vidoc.lightFrontLaser() }
     public func measureFrontLaser() { vidoc.measureFrontLaser() }
 

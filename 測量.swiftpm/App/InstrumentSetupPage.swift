@@ -147,6 +147,12 @@ struct InstrumentSetupForm: View {
             .font(SurveyType(16, .heavy))
             .lineLimit(1)
             .accessibilityIdentifier("firmware-readout")
+        Toggle("観測モードで生データを取る", isOn: Binding(
+            get: { field.rawCaptureEnabled },
+            set: { field.setRawCapture($0) }
+        ))
+        .font(SurveyType(16, .heavy))
+        .accessibilityIdentifier("raw-capture")
         Button { showingCalib = true } label: {
             Text("校正")
                 .font(SurveyType(18, .heavy))

@@ -102,6 +102,10 @@ final class FieldModel: ObservableObject {
     @Published var deviceTiltLive = false
     @Published var laserReadingMeters: Double?
     @Published var laserLamp: ViDocCommandPlan.Lamp = .off
+    @Published var rawCaptureEnabled = true
+    @Published var rawCaptureStatus = "停止"
+    private var rawObservationID: UUID?
+    private let rawCaptureKey = "arts.raw-capture"
     @Published var ppkStatus = "停止"
     @Published var ppkShare: URL?
     private var ppkBase: URL?
@@ -380,6 +384,17 @@ final class FieldModel: ObservableObject {
         }
         rtkSession?.onLaserNeedAim = { [weak self] in
             self?.instrumentMessage = "先に点灯してください。"
+        }
+        if UserDefaults.standard.object(forKey: rawCaptureKey) == nil {
+            rawCaptureEnabled = true
+        } else {
+            rawCaptureEnabled = UserDefaults.standard.bool(forKey: rawCaptureKey)
+        }
+        rtkSession?.onRawStatus = { [weak self] text in
+            self?.rawCaptureStatus = text
+        }
+        rtkSession?.onRawFinished = { [weak self] unverified in
+            self?.noteRawRestore(unverified: unverified)
         }
         #endif
         gnss.onDiscover = { [weak self] choice in
@@ -1324,6 +1339,9 @@ final class FieldModel: ObservableObject {
         )
         store(observation)
         if let base = ppkBase { PPKLog.noteObservation(observation.name, base: base) }
+        if rawCaptureEnabled {
+            startRawCapture(observation)
+        }
         let accuracy = CoordinateText.accuracyMeters(position.horizontalAccuracyMeters)
         captureMessage = asGCP
             ? "\(name)を仮置きしました。GCP \(position.solutionLabel) \(accuracy)。"
@@ -2380,6 +2398,15 @@ final class FieldModel: ObservableObject {
                 let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
                 let url = folder.appendingPathComponent(format.filename)
                 try bytes.write(to: url, options: .atomic)
+                let rawFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("raw", isDirectory: true)
+                if let files = try? FileManager.default.contentsOfDirectory(at: rawFolder, includingPropertiesForKeys: nil) {
+                    for file in files where ["ubx", "json"].contains(file.pathExtension.lowercased()) {
+                        let dest = folder.appendingPathComponent(file.lastPathComponent)
+                        try? FileManager.default.removeItem(at: dest)
+                        try? FileManager.default.copyItem(at: file, to: dest)
+                    }
+                }
                 DispatchQueue.main.async {
                     self.exportURL = url
                     self.exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
@@ -2499,6 +2526,7 @@ final class FieldModel: ObservableObject {
 
     @discardableResult
     func recordStake() -> Bool {
+        endRawCapture()
         guard basicProjectReady() else { return false }
         guard let target = basicTarget else {
             captureMessage = "先に測設する座標を選んでください。"
@@ -2759,6 +2787,78 @@ final class FieldModel: ObservableObject {
         tiltDegrees = stats.median
         tiltMeanDegrees = stats.mean
         tiltMaxDegrees = stats.maximum
+    }
+
+    func setRawCapture(_ on: Bool) {
+        rawCaptureEnabled = on
+        UserDefaults.standard.set(on, forKey: rawCaptureKey)
+        if !on { endRawCapture() }
+    }
+
+    func endRawCapture() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.endRawCapture()
+        #endif
+    }
+
+    private func startRawCapture(_ observation: FieldObservation) {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        guard rawCaptureStatus != "記録中" else { return }
+        let started = observation.captured.timestamp
+        let name = RawObsFile.baseName(point: observation.name, started: started)
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("raw", isDirectory: true)
+        let base = folder.appendingPathComponent(name)
+        let formatter = ISO8601DateFormatter()
+        let sidecar = RawObsSidecar(
+            pointName: observation.name,
+            fileName: name + ".ubx",
+            startedAt: formatter.string(from: started),
+            solution: observation.captured.solutionLabel,
+            pdop: observation.captured.pdop,
+            hdop: observation.captured.hdop,
+            vdop: observation.captured.vdop,
+            tiltMedianDegrees: observation.condition?.tiltMedianDegrees,
+            tiltMeanDegrees: observation.condition?.tiltMeanDegrees,
+            tiltMaxDegrees: observation.condition?.tiltMaxDegrees,
+            latitudeDegrees: observation.captured.latitudeDegrees,
+            longitudeDegrees: observation.captured.longitudeDegrees,
+            restoreNote: nil
+        )
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(sidecar) {
+            try? data.write(to: base.appendingPathExtension("json"), options: .atomic)
+        }
+        rawObservationID = observation.id
+        var stored = observation
+        stored.condition?.rawFileName = name + ".ubx"
+        observations = observations.replacing(stored)
+        try? journal.commit(stored)
+        rawCaptureStatus = "記録中"
+        rtkSession?.beginRawCapture(at: base)
+        #endif
+    }
+
+    private func noteRawRestore(unverified: Bool) {
+        guard let id = rawObservationID,
+              var stored = observations.observations.first(where: { $0.id == id }) else { return }
+        if unverified {
+            stored.condition?.rawRestoreNote = RawObsFile.restoreUnverified
+        }
+        observations = observations.replacing(stored)
+        try? journal.commit(stored)
+        if let file = stored.condition?.rawFileName {
+            let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("raw", isDirectory: true)
+                .appendingPathComponent(file.replacingOccurrences(of: ".ubx", with: ""))
+            if var sidecar = try? JSONDecoder().decode(RawObsSidecar.self, from: Data(contentsOf: base.appendingPathExtension("json"))) {
+                sidecar.restoreNote = unverified ? RawObsFile.restoreUnverified : nil
+                if let data = try? JSONEncoder().encode(sidecar) {
+                    try? data.write(to: base.appendingPathExtension("json"), options: .atomic)
+                }
+            }
+        }
+        rawObservationID = nil
     }
 
     func togglePPK() {

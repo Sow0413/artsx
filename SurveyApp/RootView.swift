@@ -122,6 +122,7 @@ struct RootView: View {
                 field.resumeGNSS()
             } else {
                 field.pauseGNSS()
+                field.endRawCapture()
             }
             field.setSightForeground(phase == .active)
             syncVolume()

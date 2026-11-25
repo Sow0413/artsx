@@ -148,6 +148,10 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["screen-calib-live"].waitForExistence(timeout: 5), "確かめが開かない")
         shot("31-calib-live")
         app.buttons["calib-close"].tap()
+        let rawToggle = app.switches["raw-capture"]
+        scrollClear(rawToggle, in: setupSheet)
+        XCTAssertEqual(rawToggle.value as? String, "1", "観測モードが既定でオンでない")
+        shot("32-raw-setting")
         let ppk = app.buttons["ppk-toggle"]
         scrollClear(ppk, in: setupSheet)
         ppk.tap()
@@ -169,6 +173,10 @@ final class MapResponsivenessTests: XCTestCase {
         record.tap()
         let stagedNote = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'を仮置きしました'")).firstMatch
         XCTAssertTrue(stagedNote.waitForExistence(timeout: 12), "地図の記録で仮置きできない")
+        let rawLive = app.staticTexts["raw-status"]
+        XCTAssertTrue(rawLive.waitForExistence(timeout: 5), "観測中の記録中が無い")
+        XCTAssertTrue(rawLive.label.contains("記録中"))
+        shot("33-raw-recording")
         openTab("tab-measure", showing: "screen-measure")
         let ledgerHome = app.buttons["open-ledger"]
         scrollClear(ledgerHome, in: app.scrollViews["screen-measure"])

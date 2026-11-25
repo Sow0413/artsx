@@ -28,6 +28,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     public var onLaserFailed: (() -> Void)?
     public var onLaserLamp: ((ViDocCommandPlan.Lamp) -> Void)?
     public var onLaserNeedAim: (() -> Void)?
+    public var onRawStatus: ((String) -> Void)?
+    public var onRawFinished: ((Bool) -> Void)?
     public let readings: AsyncStream<PositionReading>
     private let continuation: AsyncStream<PositionReading>.Continuation
 
@@ -56,6 +58,8 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     private var sawDeviceAngle = false
     private var publishedLamp: ViDocCommandPlan.Lamp = .off
     private var ppkBase: URL?
+    private var rawSession: RawCaptureSession?
+    private var rawBase: URL?
     private var nmea = NMEAParser()
     private var running = false
 
@@ -210,6 +214,7 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        abandonRawCapture()
         writeChar = nil
         notifyChar = nil
         stage = .iphone
@@ -293,8 +298,11 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
         let now = Date().timeIntervalSinceReferenceDate
         stream.expect = plan.expect
         stream.onUBX = { [weak self] frame, klass, message in
-            guard let base = self?.ppkBase else { return }
-            PPKLog.appendUBX(frame, classID: klass, messageID: message, base: base)
+            guard let self else { return }
+            if let base = self.ppkBase {
+                PPKLog.appendUBX(frame, classID: klass, messageID: message, base: base)
+            }
+            self.captureRaw(frame)
         }
         for event in stream.feed(data) {
             switch event {
@@ -376,6 +384,77 @@ public final class ViDocPositionSource: NSObject, PositionSource, CBCentralManag
 
     public func setPPKBase(_ url: URL?) {
         queue.async { self.ppkBase = url }
+    }
+
+    public func beginRawCapture(at base: URL) {
+        queue.async {
+            var session = RawCaptureSession()
+            let command = session.begin()
+            self.rawSession = session
+            self.rawBase = base
+            let folder = base.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: base.appendingPathExtension("ubx").path, contents: nil)
+            self.outbound.enqueueCommand(command)
+            self.drainRTCM()
+            self.onRawStatus?("記録中")
+        }
+    }
+
+    public func endRawCapture() {
+        queue.async { self.endRawOnQueue() }
+    }
+
+    public func abandonRawCapture() {
+        queue.async {
+            guard let session = self.rawSession else { return }
+            let dirty = session.phase == .recording || session.originals != nil && session.phase != .finished && session.phase != .reading
+            self.rawSession = nil
+            self.rawBase = nil
+            if dirty {
+                self.onRawFinished?(true)
+                self.onRawStatus?("戻し未確認")
+            } else {
+                self.onRawStatus?("停止")
+            }
+        }
+    }
+
+    private func endRawOnQueue() {
+        guard var session = rawSession else { return }
+        if let command = session.end() {
+            rawSession = session
+            outbound.enqueueCommand(command)
+            drainRTCM()
+            return
+        }
+        rawSession = nil
+        rawBase = nil
+        onRawStatus?("停止")
+    }
+
+    private func captureRaw(_ frame: Data) {
+        if let base = rawBase {
+            let url = base.appendingPathExtension("ubx")
+            if let handle = try? FileHandle(forWritingTo: url) {
+                defer { try? handle.close() }
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: frame)
+            }
+        }
+        guard var session = rawSession else { return }
+        if let next = session.onFrame(frame) {
+            outbound.enqueueCommand(next)
+            drainRTCM()
+        }
+        rawSession = session
+        if session.phase == .finished {
+            let unverified = session.restoreUnverified
+            rawSession = nil
+            rawBase = nil
+            onRawFinished?(unverified)
+            onRawStatus?(unverified ? RawObsFile.restoreUnverified : "停止")
+        }
     }
 
     public func lightFrontLaser() {

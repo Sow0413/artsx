@@ -32,6 +32,10 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
     public var tiltMaxDegrees: Double?
     /// この点に使った IMU 校正を保存した時刻。無い記録は nil。
     public var calibrationUsedAt: Date?
+    /// 観測モードの生データファイル。測設では nil。
+    public var rawFileName: String?
+    /// 戻しを確かめられなかったとき「戻し未確認」。
+    public var rawRestoreNote: String?
 
     public init(
         solution: FixQuality,
@@ -57,7 +61,9 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         tiltMedianDegrees: Double? = nil,
         tiltMeanDegrees: Double? = nil,
         tiltMaxDegrees: Double? = nil,
-        calibrationUsedAt: Date? = nil
+        calibrationUsedAt: Date? = nil,
+        rawFileName: String? = nil,
+        rawRestoreNote: String? = nil
     ) {
         self.solution = solution
         self.solutionLabel = solutionLabel
@@ -83,6 +89,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         self.tiltMeanDegrees = tiltMeanDegrees
         self.tiltMaxDegrees = tiltMaxDegrees
         self.calibrationUsedAt = calibrationUsedAt
+        self.rawFileName = rawFileName
+        self.rawRestoreNote = rawRestoreNote
     }
 
     public init(from decoder: Decoder) throws {
@@ -111,6 +119,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         tiltMeanDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMeanDegrees)
         tiltMaxDegrees = try container.decodeIfPresent(Double.self, forKey: .tiltMaxDegrees)
         calibrationUsedAt = try container.decodeIfPresent(Date.self, forKey: .calibrationUsedAt)
+        rawFileName = try container.decodeIfPresent(String.self, forKey: .rawFileName)
+        rawRestoreNote = try container.decodeIfPresent(String.self, forKey: .rawRestoreNote)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -139,6 +149,8 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         try container.encodeIfPresent(tiltMeanDegrees, forKey: .tiltMeanDegrees)
         try container.encodeIfPresent(tiltMaxDegrees, forKey: .tiltMaxDegrees)
         try container.encodeIfPresent(calibrationUsedAt, forKey: .calibrationUsedAt)
+        try container.encodeIfPresent(rawFileName, forKey: .rawFileName)
+        try container.encodeIfPresent(rawRestoreNote, forKey: .rawRestoreNote)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -147,6 +159,7 @@ public struct ObservationCondition: Codable, Sendable, Equatable {
         case observedAt, durationSeconds, epochCount, receiver, stage, stature
         case firmware, antennaMethod, groundHeightMeters, hdop, vdop
         case tiltMedianDegrees, tiltMeanDegrees, tiltMaxDegrees, calibrationUsedAt
+        case rawFileName, rawRestoreNote
     }
 
     public static func snapshot(
