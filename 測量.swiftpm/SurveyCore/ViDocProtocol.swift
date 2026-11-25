@@ -49,8 +49,11 @@ public enum ViDocProtocol {
         frame(command: down ? 4 : 20, payload: 0, trailed: trailed)
     }
 
-    public static func lightOff(trailed: Bool) -> Data? {
-        frame(command: 5, payload: 0, trailed: trailed)
+    /// 新しい手順は cmd 5 にトレーラを足して、下も前も消す。
+    /// 従来はトレーラなしの 4 バイト。下は 5、前は 16+5。
+    public static func lightOff(down: Bool = true, trailed: Bool) -> Data? {
+        let command: UInt8 = trailed ? 5 : (down ? 5 : 21)
+        return frame(command: command, payload: 0, trailed: trailed)
     }
 
     public static func laserStatus(trailed: Bool) -> Data? {
@@ -70,7 +73,7 @@ public enum ViDocProtocol {
         switch command {
         case 0x00: return payload == 0x01
         case 1, 2, 3, 17, 18, 19: return (1...30).contains(payload)
-        case 4, 5, 9, 20: return payload == 0
+        case 4, 5, 9, 20, 21: return payload == 0
         case 0x0B: return IMU(rawValue: payload) != nil
         case 0x16: return payload == 0x01
         default: return false
@@ -591,7 +594,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
         lightOnAt = nil
         rangeHoldUntil = nil
         heldRangeSeconds = nil
-        guard let off = ViDocProtocol.lightOff(trailed: mode == .modern) else { return [] }
+        guard let off = ViDocProtocol.lightOff(down: beamIsDown, trailed: mode == .modern) else { return [] }
         return [off]
     }
 
@@ -629,7 +632,7 @@ public struct ViDocCommandPlan: Equatable, Sendable {
         phase = .idle
         expect = .none
         deadline = nil
-        let off = ViDocProtocol.lightOff(trailed: mode == .modern)
+        let off = ViDocProtocol.lightOff(down: beamIsDown, trailed: mode == .modern)
         var frames = off.map { [$0] } ?? []
         if mode == .modern { frames.append(contentsOf: sendAngle(at: now)) }
         return frames

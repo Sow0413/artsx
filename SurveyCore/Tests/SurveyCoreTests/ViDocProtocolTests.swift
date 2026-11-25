@@ -19,7 +19,7 @@ final class ViDocProtocolTests: XCTestCase {
             Data([0x55, 0x03, 0x05, 0x5D])
         )
         XCTAssertEqual(ViDocProtocol.lightOn(down: true, trailed: true)?.count, 10)
-        XCTAssertEqual(ViDocProtocol.lightOff(trailed: false)?.count, 4)
+        XCTAssertEqual(ViDocProtocol.lightOff(trailed: false), Data([0x55, 0x05, 0x00, 0x5A]))
         for command: UInt8 in [7, 8, 10, 12, 13, 14, 15, 23, 0x0C] {
             XCTAssertNil(ViDocProtocol.frame(command: command, payload: 0, trailed: true))
             XCTAssertNil(ViDocProtocol.frame(command: command, payload: 1, trailed: false))
@@ -125,6 +125,29 @@ final class ViDocProtocolTests: XCTestCase {
         }
         XCTAssertEqual(modern.takeLaserReading(), .meters(1.2))
         XCTAssertEqual(modern.lamp, .off)
+    }
+
+    func testLegacyOffFollowsTheBeamAndRangeLimitsReject() {
+        let trailer = Data([0x3C, 0x3B, 0x3D, 0x01, 0x03, 0x02])
+        XCTAssertEqual(ViDocProtocol.lightOn(down: false, trailed: false), Data([0x55, 0x14, 0x00, 0x69]))
+        XCTAssertEqual(ViDocProtocol.lightOn(down: false, trailed: true), Data([0x55, 0x14, 0x00, 0x69]) + trailer)
+        XCTAssertEqual(ViDocProtocol.lightOff(down: true, trailed: false), Data([0x55, 0x05, 0x00, 0x5A]))
+        XCTAssertEqual(ViDocProtocol.lightOff(down: false, trailed: false), Data([0x55, 0x15, 0x00, 0x6A]))
+        XCTAssertEqual(ViDocProtocol.lightOff(down: true, trailed: true), Data([0x55, 0x05, 0x00, 0x5A]) + trailer)
+        XCTAssertEqual(ViDocProtocol.lightOff(down: false, trailed: true), Data([0x55, 0x05, 0x00, 0x5A]) + trailer)
+        XCTAssertFalse(LaserRangeBatch.usable(distanceMillimetres: 20_000, quality: 100, down: false))
+        XCTAssertFalse(LaserRangeBatch.usable(distanceMillimetres: 40_000, quality: 100, down: true))
+        XCTAssertTrue(LaserRangeBatch.usable(distanceMillimetres: 19_999, quality: 100, down: false))
+        XCTAssertTrue(LaserRangeBatch.usable(distanceMillimetres: 39_999, quality: 100, down: true))
+        XCTAssertNil(LaserRangeBatch.medianMeters([(distanceMillimetres: 20_000, quality: 100)], down: false))
+        XCTAssertNil(LaserRangeBatch.medianMeters([(distanceMillimetres: 40_000, quality: 100)], down: true))
+
+        var legacy = ViDocCommandPlan()
+        _ = legacy.nmeaWasSent(at: 0)
+        _ = legacy.tick(at: 1)
+        _ = legacy.tick(at: 2)
+        _ = legacy.lightFront(at: 10)
+        XCTAssertEqual(legacy.tick(at: 40), [Data([0x55, 0x15, 0x00, 0x6A])])
     }
 
     func testLaserWaitsHalfASecondThenBlinksAndTurnsOffAfterThirty() {
