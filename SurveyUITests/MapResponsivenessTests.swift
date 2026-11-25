@@ -29,7 +29,11 @@ final class MapResponsivenessTests: XCTestCase {
             (6, "DXF の形になっていません", "39-draw-empty", 30.0),
             (7, "1系", "40-draw-wrong-zone", 30.0),
             (8, "位置合わせが必要", "41-sfig-list", 40.0),
-            (9, "点名で合わせました", "42-sfig-aligned", 40.0)
+            (9, "点名で合わせました", "42-sfig-aligned", 40.0),
+            (10, "点名で合わせました", "43-zoom-low", 40.0),
+            (11, "点名で合わせました", "44-zoom-mid", 40.0),
+            (12, "点名で合わせました", "45-zoom-near-max", 40.0),
+            (13, "点名で合わせました", "46-zoom-max", 40.0)
         ]
         for step in steps {
             app.terminate()
@@ -46,11 +50,11 @@ final class MapResponsivenessTests: XCTestCase {
             )
             let map = app.buttons["tab-map"]
             if map.waitForExistence(timeout: 5) { map.tap() }
-            if step.2 == "42-sfig-aligned" {
+            if step.2 == "42-sfig-aligned" || step.2.hasPrefix("4") && step.2.contains("zoom") {
                 XCTAssertFalse(status.label.contains("仮置き"), "合わせたあとも仮置きが残っている")
-                let tiles = expectation(description: "九州の地理院タイル")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 8) { tiles.fulfill() }
-                wait(for: [tiles], timeout: 10)
+                let tiles = expectation(description: "地理院タイル")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) { tiles.fulfill() }
+                wait(for: [tiles], timeout: 8)
             }
             shot(step.2)
         }

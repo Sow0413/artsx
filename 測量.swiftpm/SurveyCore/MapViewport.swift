@@ -82,7 +82,14 @@ public enum MapZoom {
         let raw = GeoMath.log2(360 * screenWidthPoints / (tileSize * longitudeDelta))
         guard raw.isFinite else { return 0 }
         let zoom = Int((raw + 1e-6).rounded(.down))
-        return min(max(zoom, 0), 22)
+        return min(max(zoom, 0), MapTileOverzoom.appMaxZoom)
+    }
+
+    /// 画面幅がこのズームになる経度の幅。z19 以上も、最後のタイルを拡大して出す。
+    public static func longitudeDelta(forZoom zoom: Int, screenWidthPoints: Double, tileSize: Double = 256) -> Double {
+        let z = min(max(zoom, 0), MapTileOverzoom.appMaxZoom)
+        guard screenWidthPoints > 0, tileSize > 0 else { return 360 }
+        return 360 * screenWidthPoints / (tileSize * pow(2, Double(z)))
     }
 }
 

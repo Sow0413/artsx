@@ -379,6 +379,11 @@ public struct DrawingSpatialIndex: Sendable, Equatable {
         let x1 = Int(floor(query.maxX / cell))
         let y0 = Int(floor(query.minY / cell))
         let y1 = Int(floor(query.maxY / cell))
+        let spanX = x1 >= x0 ? x1 - x0 + 1 : 0
+        let spanY = y1 >= y0 ? y1 - y0 + 1 : 0
+        if spanX > 64 || spanY > 64 {
+            return everyID()
+        }
         var seen = Set<Int>()
         var result: [Int] = []
         for ix in x0...x1 {
@@ -390,6 +395,20 @@ public struct DrawingSpatialIndex: Sendable, Equatable {
             }
         }
         for item in wide where item.bounds.intersects(query) && seen.insert(item.id).inserted {
+            result.append(item.id)
+        }
+        return result
+    }
+
+    private func everyID() -> [Int] {
+        var seen = Set<Int>()
+        var result: [Int] = []
+        for ids in buckets.values {
+            for id in ids where seen.insert(id).inserted {
+                result.append(id)
+            }
+        }
+        for item in wide where seen.insert(item.id).inserted {
             result.append(item.id)
         }
         return result

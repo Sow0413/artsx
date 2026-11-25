@@ -2790,7 +2790,7 @@ final class FieldModel: ObservableObject {
             fileName = "wrong-zone.dxf"
             zone = 1
             axis = .cadEastNorth
-        case 8, 9:
+        case 8, 9, 10, 11, 12, 13:
             data = UITestDrawingBytes.sfig
             fileName = "7_local_origin_mm_sfig.sfc"
             zone = 2
@@ -2815,7 +2815,7 @@ final class FieldModel: ObservableObject {
                         zone: zone,
                         axis: axis
                     )
-                    if step == 9, let survey = try? SFCParser.open(bytes),
+                    if step == 9 || (10...13).contains(step), let survey = try? SFCParser.open(bytes),
                        let fit = SFCPointFit.align(document: survey.document, book: survey.book) {
                         self.drawing.placeAligned(survey.document, transform: fit.transform, zone: 2)
                         note = note.replacingOccurrences(of: "仮置き。", with: "")
@@ -2835,11 +2835,36 @@ final class FieldModel: ObservableObject {
                     }
                     self.uiTestDrawingStatus = note
                     self.frameMapToDrawing()
+                    if let zoom = Self.previewZoom(step) {
+                        self.applyPreviewZoom(zoom)
+                    }
                 case let .failure(error):
                     self.uiTestDrawingStatus = (error as? DXFError)?.description ?? "図面を読めませんでした。"
                 }
             }
         }
+    }
+
+    private static func previewZoom(_ step: Int) -> Int? {
+        switch step {
+        case 10: return 5
+        case 11: return 12
+        case 12: return 18
+        case 13: return MapTileOverzoom.appMaxZoom
+        default: return nil
+        }
+    }
+
+    private func applyPreviewZoom(_ zoom: Int) {
+        let longitude = MapZoom.longitudeDelta(forZoom: zoom, screenWidthPoints: 390)
+        let cosine = max(0.2, abs(cos(viewport.centerLatitude * .pi / 180)))
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: viewport.centerLatitude,
+            centerLongitude: viewport.centerLongitude,
+            latitudeDelta: longitude * cosine,
+            longitudeDelta: longitude
+        )
     }
 
     private func frameMapToDrawing() {
