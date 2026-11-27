@@ -32,6 +32,9 @@ struct SheetImportPage: View {
                         field.failSheet(reason)
                     })
                 }
+                DeskTile(title: "座標を読み込む", systemImage: "mappin.and.ellipse", identifier: "import-coordinates-sheet", prominent: true) {
+                    CoordinateImport.start(field: field)
+                }
                 DeskTile(title: "図面を読む", systemImage: "doc.badge.plus", identifier: "draw-import", prominent: true) {
                     if Self.uiTest, !Self.forcePicker {
                         field.importProjectSheet(data: Self.uiTestPNG, fileName: "図面.png")
@@ -186,6 +189,36 @@ struct SheetImportPage: View {
         list.append(UTType(filenameExtension: "csv") ?? .commaSeparatedText)
         list.append(UTType(filenameExtension: "json") ?? .json)
         return list
+    }
+}
+
+enum CoordinateImport {
+    static func start(field: FieldModel) {
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-surveyUITest"), !arguments.contains("-surveyUITestPicker") {
+            field.importCoordinateFile(data: VIPack.csv, filename: "control-points.csv")
+            return
+        }
+        var types: [UTType] = [.commaSeparatedText, .plainText, .json, .data]
+        types.append(UTType(filenameExtension: "csv") ?? .commaSeparatedText)
+        types.append(UTType(filenameExtension: "sima") ?? .data)
+        SheetFilePicker.present(types: types, onPick: { urls in
+            var opened = false
+            for url in urls {
+                switch PickedFileBytes.read(url) {
+                case let .success(data):
+                    field.importCoordinateFile(data: data, filename: url.lastPathComponent)
+                    opened = true
+                case let .failure(reason):
+                    field.failSheet(reason)
+                }
+            }
+            if !opened {
+                field.failSheet("座標ファイルを選べませんでした。CSV か SIMA を選んでください。")
+            }
+        }, onFail: { reason in
+            field.failSheet(reason)
+        })
     }
 }
 

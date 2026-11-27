@@ -94,7 +94,7 @@ final class FieldPackTests: XCTestCase {
         let here = samplePosition(latitude: 34.6, longitude: 135.8, height: 80, quality: .rtkFix, receiver: .rtk)
         let guide = try XCTUnwrap(BasicStakeout.guide(from: here, to: entries[0], zone: 6))
         XCTAssertNil(guide.heightMeters)
-        XCTAssertTrue(guide.line.contains("高さは比較しません"))
+        XCTAssertTrue(guide.line.contains("高さは未確認"))
     }
 
     func testControlCSVKeepsThirtyFourPointsAndOrthometricHeight() throws {

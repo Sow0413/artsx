@@ -169,6 +169,9 @@ struct MapTabView: View {
                     mapPickBanner
                 }
                 // 操作の列は上に残す。空いたところは地図で、下のカードだけスクロールする。
+                if SurveyBuild.basicMode {
+                    coordinateBar
+                }
                 if let line = field.basicStakeoutLine {
                     Text(line)
                         .font(SurveyType(22, .heavy))
@@ -263,6 +266,49 @@ struct MapTabView: View {
             return "作業半径 \(meters)m（\(preset.label)・目安）"
         }
         return "作業半径 \(meters)m"
+    }
+
+    private var coordinateBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                CoordinateImport.start(field: field)
+            } label: {
+                Text("座標を読み込む")
+                    .font(SurveyType(18, .heavy))
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(SurveyColor.blue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .foregroundStyle(SurveyColor.onAccent)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("import-coordinates")
+            if let point = field.visibleControlPoints.first {
+                Button {
+                    field.selectControlPoint(point.id)
+                } label: {
+                    Text(point.name)
+                        .font(SurveyType(16, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(SurveyColor.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("pick-imported-point")
+            }
+            if field.selectedControlPoint != nil {
+                Button {
+                    field.stakeSelectedControlPoint()
+                } label: {
+                    Text("測設")
+                        .font(SurveyType(18, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(SurveyColor.blue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .foregroundStyle(SurveyColor.onAccent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("stake-selected")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
     }
 
     private var pinnedMapChrome: some View {

@@ -195,7 +195,7 @@ public struct BasicStakeoutGuide: Equatable, Sendable {
         if let heightMeters {
             height = String(format: " 高 %+.2fm", heightMeters)
         } else {
-            height = " 高さは比較しません"
+            height = " 高さは未確認"
         }
         let quality: String
         switch solution {

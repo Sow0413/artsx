@@ -2533,8 +2533,67 @@ final class FieldModel: ObservableObject {
     }
 
     func aimBasic(_ entry: CoordinateBookEntry) {
-        basicTarget = entry
-        captureMessage = "\(entry.name) へ測設します。"
+        var horizontal = entry
+        horizontal.ellipsoidalHeightMeters = nil
+        basicTarget = horizontal
+        captureMessage = "\(entry.name) へ測設します。高さは未確認。"
+    }
+
+    func importCoordinateFile(data: Data, filename: String) {
+        if drawing.project == nil {
+            drawing.createProject(named: "座標")
+        }
+        if drawing.project == nil, let existing = drawing.projects.first {
+            drawing.select(existing)
+        }
+        guard drawing.project != nil else {
+            failSheet("先に現場を作ってください。")
+            return
+        }
+        importBasic(data: data, filename: filename)
+        focusImportedPoints()
+    }
+
+    func stakeSelectedControlPoint() {
+        guard let point = selectedControlPoint else {
+            captureMessage = "先に点を選んでください。"
+            return
+        }
+        if let entry = basicPoints().first(where: { $0.name == point.name }) {
+            aimBasic(entry)
+        } else {
+            aimBasic(
+                name: point.name,
+                latitude: String(point.latitudeDegrees),
+                longitude: String(point.longitudeDegrees),
+                height: ""
+            )
+        }
+        tab = .map
+    }
+
+    private func focusImportedPoints() {
+        guard !controlPoints.isEmpty else { return }
+        var south = controlPoints.map(\.latitudeDegrees).min() ?? 0
+        var north = controlPoints.map(\.latitudeDegrees).max() ?? 0
+        var west = controlPoints.map(\.longitudeDegrees).min() ?? 0
+        var east = controlPoints.map(\.longitudeDegrees).max() ?? 0
+        let padLatitude = max((north - south) * 0.35, 0.0012)
+        let padLongitude = max((east - west) * 0.35, 0.0012)
+        south -= padLatitude
+        north += padLatitude
+        west -= padLongitude
+        east += padLongitude
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: (south + north) / 2,
+            centerLongitude: (west + east) / 2,
+            latitudeDelta: max(north - south, 0.002),
+            longitudeDelta: max(east - west, 0.002)
+        )
+        visibleBounds = GeoBounds(south: south, west: west, north: north, east: east)
+        refreshVisibleControlPoints()
+        tab = .map
     }
 
     var basicStakeoutLine: String? {

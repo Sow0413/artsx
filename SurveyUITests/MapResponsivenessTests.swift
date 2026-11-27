@@ -91,6 +91,32 @@ final class MapResponsivenessTests: XCTestCase {
         }
     }
 
+    func testCoordinateImportAndStakeout() {
+        let map = app.buttons["tab-map"]
+        XCTAssertTrue(map.waitForExistence(timeout: 8), "地図タブが無い")
+        map.tap()
+        let load = app.buttons["import-coordinates"]
+        XCTAssertTrue(load.waitForExistence(timeout: 8), "座標を読み込むが無い")
+        shot("53-coord-button")
+        load.tap()
+        let marks = app.staticTexts["survey-points"]
+        XCTAssertTrue(marks.waitForExistence(timeout: 10), "測点が出ない")
+        XCTAssertGreaterThanOrEqual(Int(marks.label.replacingOccurrences(of: "測点 ", with: "")) ?? 0, 34)
+        shot("54-coord-loaded")
+        let pick = app.buttons["pick-imported-point"]
+        XCTAssertTrue(pick.waitForExistence(timeout: 5), "点を選べない")
+        pick.tap()
+        let stake = app.buttons["stake-selected"]
+        XCTAssertTrue(stake.waitForExistence(timeout: 5), "測設が無い")
+        shot("55-point-select")
+        stake.tap()
+        let guide = app.staticTexts["stakeout-guide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 20), "測設の案内が無い")
+        let ready = expectation(for: NSPredicate(format: "label CONTAINS '未確認' AND label CONTAINS '北'"), evaluatedWith: guide)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 25), .completed, "水平の測設が出ない。表示は \(guide.label)")
+        shot("56-stakeout")
+    }
+
     func testVIDrawingAndSurveyPoints() {
         app.terminate()
         app.launchArguments = ["-surveyUITest", "-uitestField", "vi"]
