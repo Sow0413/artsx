@@ -43,10 +43,12 @@ struct SurveyMapView: UIViewRepresentable {
             points: field.visibleControlPoints,
             selectedID: field.selectedControlPointID
         )
+        context.coordinator.syncTiles(on: map, shown: field.showMapTiles)
         context.coordinator.syncDrawing(
             on: map,
             paths: field.drawing.mapPaths,
-            revision: field.drawing.mapRevision
+            revision: field.drawing.mapRevision,
+            shown: field.showDrawing
         )
         context.coordinator.syncReach(on: map, field: field)
         context.coordinator.syncCrew(on: map, field: field)
@@ -56,6 +58,15 @@ struct SurveyMapView: UIViewRepresentable {
         context.coordinator.setMapPick(field.drawing.pick == .mapPoint) { latitude, longitude in
             field.completeDrawingMapPick(latitude: latitude, longitude: longitude)
         }
+        context.coordinator.setCadTap { latitude, longitude, free in
+            field.handleMapTap(latitude: latitude, longitude: longitude, free: free)
+        }
+        context.coordinator.syncCad(
+            on: map,
+            target: field.cadPick,
+            user: field.cadStaking ? field.navigationReading.position : nil,
+            close: field.cadStaking && (field.cadDistanceMeters ?? 10) < 1
+        )
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
@@ -77,6 +88,9 @@ struct SurveyMapView: UIViewRepresentable {
         private var wasFollowing = true
         private var drawingLines: [MKPolyline] = []
         private var drawingRevision = -1
+        private var drawingShown = true
+        private var drawingZoom = -1
+        private var lastDrawingPaths: [GeographicPath] = []
         private var reachOverlays: [MKOverlay] = []
         private var reachKey = ""
         private var crewOverlays: [MKOverlay] = []
@@ -91,6 +105,12 @@ struct SurveyMapView: UIViewRepresentable {
         private var heatKey = ""
         private var mapPick = false
         private var onMapTap: (Double, Double) -> Void = { _, _ in }
+        private var onCadTap: ((Double, Double, Bool) -> Void)?
+        private var cadLine: MKPolyline?
+        private var cadCircle: MKCircle?
+        private var cadInner: MKCircle?
+        private var cadCross: CadCrosshairAnnotation?
+        private var cadArrow: CadArrowAnnotation?
 
         func attach(field: FieldModel, map: MKMapView) {
             store = field.tiles
@@ -108,7 +128,14 @@ struct SurveyMapView: UIViewRepresentable {
                 let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
                 tap.cancelsTouchesInView = false
                 map.addGestureRecognizer(tap)
+                let press = UILongPressGestureRecognizer(target: self, action: #selector(handlePress(_:)))
+                press.minimumPressDuration = 0.45
+                map.addGestureRecognizer(press)
             }
+        }
+
+        func setCadTap(_ handler: @escaping (Double, Double, Bool) -> Void) {
+            onCadTap = handler
         }
 
         func setMapPick(_ enabled: Bool, handler: @escaping (Double, Double) -> Void) {
@@ -342,28 +369,126 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }
 
-        func syncDrawing(on map: MKMapView, paths: [GeographicPath], revision: Int) {
-            guard revision != drawingRevision else { return }
+        func syncTiles(on map: MKMapView, shown: Bool) {
+            if !shown {
+                if let tileOverlay {
+                    map.removeOverlay(tileOverlay)
+                    self.tileOverlay = nil
+                }
+                return
+            }
+            if tileOverlay == nil {
+                installTiles(on: map)
+            }
+        }
+
+        func syncDrawing(on map: MKMapView, paths: [GeographicPath], revision: Int, shown: Bool) {
+            let zoom = MapZoom.level(
+                longitudeDelta: map.region.span.longitudeDelta,
+                screenWidthPoints: Double(max(map.bounds.width, 1))
+            )
+            lastDrawingPaths = paths
+            guard revision != drawingRevision || shown != drawingShown || zoom != drawingZoom else { return }
             drawingRevision = revision
+            drawingShown = shown
+            drawingZoom = zoom
             if !drawingLines.isEmpty {
                 map.removeOverlays(drawingLines)
             }
+            drawingLines = []
+            guard shown else { return }
+            let latitude = map.region.center.latitude * .pi / 180
+            let metersPerPixel = map.region.span.longitudeDelta * 111_320 * max(0.2, abs(cos(latitude))) / Double(max(map.bounds.width, 1))
             drawingLines = paths.compactMap { path in
-                var coordinates = path.coordinates.map {
+                let coordinates = path.coordinates.map {
                     CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
                 }
                 guard coordinates.count >= 2 else { return nil }
-                return MKPolyline(coordinates: &coordinates, count: coordinates.count)
+                let length = Self.meters(coordinates)
+                if length < metersPerPixel * 1.5 { return nil }
+                var copy = coordinates
+                return MKPolyline(coordinates: &copy, count: copy.count)
             }
             if !drawingLines.isEmpty {
                 map.addOverlays(drawingLines, level: .aboveLabels)
             }
         }
 
+        private static func meters(_ coordinates: [CLLocationCoordinate2D]) -> Double {
+            guard coordinates.count >= 2 else { return 0 }
+            var total = 0.0
+            for index in 1..<coordinates.count {
+                let previous = coordinates[index - 1]
+                let next = coordinates[index]
+                let north = (next.latitude - previous.latitude) * 111_320
+                let east = (next.longitude - previous.longitude) * 111_320 * max(0.2, abs(cos(previous.latitude * .pi / 180)))
+                total += (north * north + east * east).squareRoot()
+            }
+            return total
+        }
+
         @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard mapPick, let map = gesture.view as? MKMapView else { return }
+            guard let map = gesture.view as? MKMapView else { return }
             let coordinate = map.convert(gesture.location(in: map), toCoordinateFrom: map)
-            onMapTap(coordinate.latitude, coordinate.longitude)
+            if mapPick { onMapTap(coordinate.latitude, coordinate.longitude) }
+            onCadTap?(coordinate.latitude, coordinate.longitude, false)
+        }
+
+        @objc func handlePress(_ gesture: UILongPressGestureRecognizer) {
+            guard gesture.state == .began, let map = gesture.view as? MKMapView else { return }
+            let coordinate = map.convert(gesture.location(in: map), toCoordinateFrom: map)
+            onCadTap?(coordinate.latitude, coordinate.longitude, true)
+        }
+
+        func syncCad(on map: MKMapView, target: CadPick?, user: GeodeticPosition?, close: Bool) {
+            if let cadLine { map.removeOverlay(cadLine); self.cadLine = nil }
+            if let cadCircle { map.removeOverlay(cadCircle); self.cadCircle = nil }
+            if let cadInner { map.removeOverlay(cadInner); self.cadInner = nil }
+            if let cadArrow { map.removeAnnotation(cadArrow); self.cadArrow = nil }
+            let spot = target.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+            if let target, let user, user.isPlottable, let spot {
+                let north = (target.latitude - user.latitudeDegrees) * 111_320
+                let east = (target.longitude - user.longitudeDegrees) * 111_320 * max(0.2, abs(cos(user.latitudeDegrees * .pi / 180)))
+                let meters = (north * north + east * east).squareRoot()
+                if meters > 0.05 {
+                    var coords = [
+                        CLLocationCoordinate2D(latitude: user.latitudeDegrees, longitude: user.longitudeDegrees),
+                        spot
+                    ]
+                    let line = MKPolyline(coordinates: &coords, count: 2)
+                    cadLine = line
+                    map.addOverlay(line, level: .aboveLabels)
+                    let fraction = 0.82
+                    let arrow = CadArrowAnnotation()
+                    arrow.coordinate = CLLocationCoordinate2D(
+                        latitude: user.latitudeDegrees + (target.latitude - user.latitudeDegrees) * fraction,
+                        longitude: user.longitudeDegrees + (target.longitude - user.longitudeDegrees) * fraction
+                    )
+                    arrow.bearingDegrees = atan2(east, north) * 180 / .pi
+                    cadArrow = arrow
+                    map.addAnnotation(arrow)
+                }
+            }
+            if let spot, close {
+                let outer = MKCircle(center: spot, radius: 12)
+                let inner = MKCircle(center: spot, radius: 4)
+                cadCircle = outer
+                cadInner = inner
+                map.addOverlay(outer, level: .aboveLabels)
+                map.addOverlay(inner, level: .aboveLabels)
+            }
+            if let spot {
+                if cadCross == nil {
+                    let mark = CadCrosshairAnnotation()
+                    mark.title = "目標"
+                    cadCross = mark
+                    map.addAnnotation(mark)
+                }
+                cadCross?.coordinate = spot
+            } else if let cadCross {
+                map.removeAnnotation(cadCross)
+                self.cadCross = nil
+            }
         }
 
         func update(
@@ -406,6 +531,7 @@ struct SurveyMapView: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
             reportVisible(mapView)
+            syncDrawing(on: mapView, paths: lastDrawingPaths, revision: drawingRevision, shown: drawingShown)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -439,10 +565,24 @@ struct SurveyMapView: UIViewRepresentable {
                 renderer.lineWidth = 3
                 return renderer
             }
+            if let line = overlay as? MKPolyline, line === cadLine {
+                let renderer = MKPolylineRenderer(polyline: line)
+                renderer.strokeColor = UIColor(red: 0.85, green: 0.12, blue: 0.1, alpha: 1)
+                renderer.lineWidth = 4
+                renderer.lineCap = .round
+                return renderer
+            }
+            if let circle = overlay as? MKCircle, circle === cadCircle || circle === cadInner {
+                let renderer = MKCircleRenderer(circle: circle)
+                renderer.fillColor = .clear
+                renderer.strokeColor = UIColor(red: 0.85, green: 0.12, blue: 0.1, alpha: 1)
+                renderer.lineWidth = circle === cadInner ? 2 : 4
+                return renderer
+            }
             if let line = overlay as? MKPolyline {
                 let renderer = MKPolylineRenderer(polyline: line)
-                renderer.strokeColor = SurveyUIColor.ink
-                renderer.lineWidth = SurveyColor.stroke
+                renderer.strokeColor = UIColor(red: 0.15, green: 0.45, blue: 0.85, alpha: 0.9)
+                renderer.lineWidth = 1
                 return renderer
             }
             if let circle = overlay as? MKCircle {
@@ -518,6 +658,25 @@ struct SurveyMapView: UIViewRepresentable {
                     marker.glyphText = String(aid.title?.prefix(1) ?? "救")
                 }
                 view.canShowCallout = true
+                return view
+            }
+            if annotation is CadCrosshairAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "cad-cross")
+                    ?? MKAnnotationView(annotation: annotation, reuseIdentifier: "cad-cross")
+                view.annotation = annotation
+                view.image = Self.crosshairImage
+                view.bounds = CGRect(x: 0, y: 0, width: 44, height: 44)
+                view.canShowCallout = false
+                return view
+            }
+            if let arrow = annotation as? CadArrowAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "cad-arrow")
+                    ?? MKAnnotationView(annotation: arrow, reuseIdentifier: "cad-arrow")
+                view.annotation = arrow
+                view.image = Self.arrowImage
+                view.bounds = CGRect(x: 0, y: 0, width: 28, height: 28)
+                view.transform = CGAffineTransform(rotationAngle: arrow.bearingDegrees * .pi / 180)
+                view.canShowCallout = false
                 return view
             }
             if let crew = annotation as? CrewAnnotation {
@@ -716,6 +875,37 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }
 
+        private static let crosshairImage: UIImage = {
+            let size = CGSize(width: 44, height: 44)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                let ink = UIColor(red: 0.85, green: 0.12, blue: 0.1, alpha: 1)
+                ink.setStroke()
+                let line = context.cgContext
+                line.setLineWidth(3)
+                line.move(to: CGPoint(x: 22, y: 2))
+                line.addLine(to: CGPoint(x: 22, y: 42))
+                line.move(to: CGPoint(x: 2, y: 22))
+                line.addLine(to: CGPoint(x: 42, y: 22))
+                line.strokePath()
+                line.strokeEllipse(in: CGRect(x: 12, y: 12, width: 20, height: 20))
+            }
+        }()
+
+        private static let arrowImage: UIImage = {
+            let size = CGSize(width: 28, height: 28)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                let line = context.cgContext
+                line.setFillColor(UIColor(red: 0.85, green: 0.12, blue: 0.1, alpha: 1).cgColor)
+                line.move(to: CGPoint(x: 14, y: 2))
+                line.addLine(to: CGPoint(x: 26, y: 24))
+                line.addLine(to: CGPoint(x: 2, y: 24))
+                line.closePath()
+                line.fillPath()
+            }
+        }()
+
         private static let userDotImage: UIImage = {
             let size = CGSize(width: 28, height: 28)
             let renderer = UIGraphicsImageRenderer(size: size)
@@ -727,6 +917,12 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }()
     }
+}
+
+final class CadCrosshairAnnotation: MKPointAnnotation {}
+
+final class CadArrowAnnotation: MKPointAnnotation {
+    var bearingDegrees: CLLocationDirection = 0
 }
 
 final class ControlPointAnnotation: NSObject, MKAnnotation {

@@ -35,7 +35,7 @@ struct SheetImportPage: View {
                 DeskTile(title: "座標を読み込む", systemImage: "mappin.and.ellipse", identifier: "import-coordinates-sheet", prominent: true) {
                     CoordinateImport.start(field: field)
                 }
-                DeskTile(title: "図面を読む", systemImage: "doc.badge.plus", identifier: "draw-import", prominent: true) {
+                DeskTile(title: "ファイルをまとめて選ぶ", systemImage: "doc.badge.plus", identifier: "draw-import", prominent: true) {
                     if Self.uiTest, !Self.forcePicker {
                         field.importProjectSheet(data: Self.uiTestPNG, fileName: "図面.png")
                     } else {
@@ -199,9 +199,10 @@ enum CoordinateImport {
             field.importCoordinateFile(data: VIPack.csv, filename: "control-points.csv")
             return
         }
-        var types: [UTType] = [.commaSeparatedText, .plainText, .json, .data]
-        types.append(UTType(filenameExtension: "csv") ?? .commaSeparatedText)
+        var types: [UTType] = [.commaSeparatedText, .plainText, .text, .data, .json]
+        types.append(UTType(filenameExtension: "csv") ?? .data)
         types.append(UTType(filenameExtension: "sima") ?? .data)
+        types.append(UTType(filenameExtension: "sim") ?? .data)
         SheetFilePicker.present(types: types, onPick: { urls in
             var opened = false
             for url in urls {

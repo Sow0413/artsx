@@ -73,7 +73,8 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(draw.waitForExistence(timeout: 8), "図面を読み込むが無い")
         draw.tap()
         let read = app.buttons["draw-import"]
-        XCTAssertTrue(read.waitForExistence(timeout: 8), "図面を読むが無い")
+        XCTAssertTrue(read.waitForExistence(timeout: 8), "まとめて選ぶが無い")
+        XCTAssertTrue(read.label.contains("ファイルをまとめて選ぶ"))
         read.tap()
         let labels = ["キャンセル", "Cancel", "ブラウズ", "Browse", "最近使った項目", "Recents"]
         func pickerIsVisible() -> Bool {
@@ -135,7 +136,7 @@ final class MapResponsivenessTests: XCTestCase {
 
     func testVIDrawingAndSurveyPoints() {
         app.terminate()
-        app.launchArguments = ["-surveyUITest", "-uitestField", "vi"]
+        app.launchArguments = ["-surveyUITest", "-uitestField", "vi", "-uitestLatitude", "34.60045", "-uitestLongitude", "135.8"]
         app.launch()
         allowSystemPrompts()
         dismissStaturePrompt()
@@ -158,6 +159,19 @@ final class MapResponsivenessTests: XCTestCase {
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { tiles.fulfill() }
         wait(for: [tiles], timeout: 8)
         shot("48-vi-map")
+        let vertex = app.buttons["cad-tap-vertex"]
+        XCTAssertTrue(vertex.waitForExistence(timeout: 5), "図面の頂点が無い")
+        vertex.tap()
+        let stakeHere = app.buttons["cad-stake"]
+        XCTAssertTrue(stakeHere.waitForExistence(timeout: 5), "ここへ測設が無い")
+        XCTAssertTrue(app.staticTexts["cad-target-name"].waitForExistence(timeout: 5), "図面の点名が無い")
+        shot("57-cad-tap")
+        stakeHere.tap()
+        let distance = app.staticTexts["cad-distance"]
+        let arrived = expectation(for: NSPredicate(format: "label CONTAINS 'あと' OR label CONTAINS '到達'"), evaluatedWith: distance)
+        XCTAssertEqual(XCTWaiter().wait(for: [arrived], timeout: 20), .completed, "距離が出ない。表示は \(distance.label)")
+        shot("58-cad-target")
+        shot("59-cad-guide")
         let data = app.buttons["tab-measure"]
         XCTAssertTrue(data.waitForExistence(timeout: 5))
         data.tap()

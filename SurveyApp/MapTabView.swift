@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import SurveyCore
 
 private struct MapChromeHeight: PreferenceKey {
@@ -172,8 +173,65 @@ struct MapTabView: View {
                 if SurveyBuild.basicMode {
                     coordinateBar
                 }
-                if let lines = field.basicStakeoutLines {
+                if field.cadStaking, let headline = field.cadHeadline {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(headline)
+                            .font(.system(size: 52, weight: .bold, design: .monospaced))
+                            .lineLimit(nil)
+                            .accessibilityIdentifier("cad-distance")
+                        Text(field.cadHint)
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .accessibilityIdentifier("cad-hint")
+                        if let lines = field.basicStakeoutLines {
+                            DisclosureGroup("詳細") {
+                                Text(lines.zone)
+                                Text(lines.north)
+                                Text(lines.east)
+                                Text(lines.height)
+                            }
+                            .font(.system(size: 16, weight: .regular, design: .monospaced))
+                        }
+                    }
+                    .foregroundStyle(SurveyColor.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(SurveyColor.card)
+                    .padding(.horizontal, 12)
+                    .onAppear {
+                        if headline == "到達" {
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                        }
+                    }
+                    .onChange(of: headline) { _, next in
+                        if next == "到達" {
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                        }
+                    }
+                } else if let lines = field.basicStakeoutLines {
                     StakeoutGuideBlock(lines: lines)
+                }
+                if let pick = field.cadPick, !field.cadStaking {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(pick.name)
+                            .font(.system(size: 28, weight: .bold, design: .monospaced))
+                            .accessibilityIdentifier("cad-target-name")
+                        Button {
+                            field.stakeCadPick()
+                        } label: {
+                            Text("ここへ測設")
+                                .font(SurveyType(22, .heavy))
+                                .frame(maxWidth: .infinity, minHeight: 64)
+                                .background(SurveyColor.blue, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .foregroundStyle(SurveyColor.onAccent)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("cad-stake")
+                    }
+                    .padding(.horizontal, 12)
+                }
+                if ProcessInfo.processInfo.arguments.contains("-surveyUITest"), !field.drawing.mapPaths.isEmpty {
+                    Button("図面の頂点") { field.snapDrawingVertex() }
+                        .accessibilityIdentifier("cad-tap-vertex")
                 }
                 if SurveyBuild.basicMode, field.tab == .map, let message = mapCaptureMessage {
                     Text(message)
@@ -305,6 +363,24 @@ struct MapTabView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("import-coordinates")
+            if let message = field.coordinateMessage {
+                Text(message)
+                    .font(SurveyType(16, .heavy))
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("coordinate-result")
+            }
+            HStack(spacing: 8) {
+                Button(field.showDrawing ? "図面を隠す" : "図面を出す") {
+                    field.showDrawing.toggle()
+                }
+                .accessibilityIdentifier("toggle-drawing")
+                Button(field.showMapTiles ? "地図を隠す" : "地図を出す") {
+                    field.showMapTiles.toggle()
+                }
+                .accessibilityIdentifier("toggle-tiles")
+            }
+            .font(SurveyType(15, .heavy))
             if !field.coordinateZoneChoices.isEmpty {
                 Text("系を選んでください。奈良の現場は第VI系です。")
                     .font(SurveyType(16, .heavy))
