@@ -21,7 +21,21 @@ struct SheetImportPage: View {
                     .font(SurveyType(18, .heavy))
                     .lineLimit(1)
                     .accessibilityIdentifier("purpose-draw")
-                DeskTile(title: "フォルダを読む", systemImage: "folder", identifier: "draw-import-folder", prominent: false) {
+                DeskTile(title: "図面を読む", systemImage: "doc.badge.plus", identifier: "draw-import", prominent: true) {
+                    if Self.uiTest, !Self.forcePicker {
+                        field.importProjectSheet(data: Self.uiTestPNG, fileName: "図面.png")
+                    } else {
+                        SheetFilePicker.present(types: Self.types, allowsMultiple: true, onPick: { urls in
+                            Self.importFiles(urls, into: field)
+                        }, onFail: { reason in
+                            field.failSheet(reason)
+                        })
+                    }
+                }
+                DeskTile(title: "座標を読む", systemImage: "mappin.and.ellipse", identifier: "import-coordinates-sheet", prominent: false) {
+                    CoordinateImport.start(field: field)
+                }
+                Button {
                     SheetFilePicker.present(types: [.folder], allowsMultiple: false, onPick: { urls in
                         guard let folder = urls.first else {
                             field.failSheet("フォルダが選ばれませんでした。")
@@ -31,21 +45,14 @@ struct SheetImportPage: View {
                     }, onFail: { reason in
                         field.failSheet(reason)
                     })
+                } label: {
+                    Text("フォルダを読む")
+                        .font(SurveyType(15, .heavy))
+                        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                        .foregroundStyle(SurveyColor.muted)
                 }
-                DeskTile(title: "座標を読み込む", systemImage: "mappin.and.ellipse", identifier: "import-coordinates-sheet", prominent: true) {
-                    CoordinateImport.start(field: field)
-                }
-                DeskTile(title: "ファイルをまとめて選ぶ", systemImage: "doc.badge.plus", identifier: "draw-import", prominent: true) {
-                    if Self.uiTest, !Self.forcePicker {
-                        field.importProjectSheet(data: Self.uiTestPNG, fileName: "図面.png")
-                    } else {
-                        SheetFilePicker.present(types: Self.types, onPick: { urls in
-                            Self.importFiles(urls, into: field)
-                        }, onFail: { reason in
-                            field.failSheet(reason)
-                        })
-                    }
-                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("draw-import-folder")
                 if let message = field.sheetMessage {
                     Text(message)
                         .font(SurveyType(18, .heavy))
@@ -64,7 +71,23 @@ struct SheetImportPage: View {
                     SheetPreview(data: data, sheet: sheet, readyToPlace: field.canPlaceOnSite)
                         .accessibilityIdentifier("sheet-preview")
                 }
-                if field.canPlaceOnSite {
+                if field.sheetUsesCoordinates, field.canPlaceOnSite || field.projectSheet != nil {
+                    Button {
+                        if field.canPlaceOnSite {
+                            field.placeImportedSheet()
+                        } else {
+                            field.tab = .map
+                        }
+                    } label: {
+                        Text("地図で見る")
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: 72)
+                            .background(SurveyColor.blue, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .foregroundStyle(SurveyColor.onAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("view-on-map")
+                } else if field.canPlaceOnSite {
                     Button {
                         field.placeImportedSheet()
                     } label: {
@@ -77,7 +100,7 @@ struct SheetImportPage: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("place-on-site")
                 }
-                if field.projectSheet != nil, !field.canPlaceOnSite {
+                if field.projectSheet != nil, !field.canPlaceOnSite, !field.sheetUsesCoordinates {
                     Button(action: onNext) {
                         Text("縮尺設定へ")
                             .font(SurveyType(18, .heavy))

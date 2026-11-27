@@ -73,8 +73,8 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(draw.waitForExistence(timeout: 8), "図面を読み込むが無い")
         draw.tap()
         let read = app.buttons["draw-import"]
-        XCTAssertTrue(read.waitForExistence(timeout: 8), "まとめて選ぶが無い")
-        XCTAssertTrue(read.label.contains("ファイルをまとめて選ぶ"))
+        XCTAssertTrue(read.waitForExistence(timeout: 8), "図面を読むが無い")
+        XCTAssertTrue(read.label.contains("図面を読む"))
         read.tap()
         let labels = ["キャンセル", "Cancel", "ブラウズ", "Browse", "最近使った項目", "Recents"]
         func pickerIsVisible() -> Bool {
@@ -167,9 +167,11 @@ final class MapResponsivenessTests: XCTestCase {
         openDrawingImport()
         let preview = app.descendants(matching: .any)["sheet-preview"]
         XCTAssertTrue(preview.waitForExistence(timeout: 25), "図面のプレビューが無い")
-        let place = app.buttons["place-on-site"]
-        XCTAssertTrue(place.waitForExistence(timeout: 5), "現場へ置くが無い")
-        XCTAssertTrue(app.staticTexts["draw-result"].label.contains("第VI系（EPSG 6674）"))
+        let place = app.buttons["view-on-map"]
+        XCTAssertTrue(place.waitForExistence(timeout: 5), "地図で見るが無い")
+        XCTAssertTrue(place.label.contains("地図で見る"))
+        XCTAssertFalse(app.buttons["go-scale"].exists, "座標のある図面に縮尺設定が出ている")
+        XCTAssertTrue(app.staticTexts["draw-result"].label.contains("図面を座標で置きました（第VI系）"))
         shot("47-vi-preview")
         place.tap()
         let zone = app.staticTexts["map-zone"]

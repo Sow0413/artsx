@@ -112,6 +112,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var bookNote: String?
     @Published private(set) var bookZoneChoices: [Int] = []
     @Published private(set) var canPlaceOnSite = false
+    /// meta の EPSG か、選んだ系で地図に置ける図面。縮尺設定には進まない。
+    @Published private(set) var sheetUsesCoordinates = false
     @Published private(set) var coordinateZoneChoices: [Int] = []
     @Published var coordinateMessage: String?
     @Published var showDrawing = true
@@ -2607,6 +2609,11 @@ final class FieldModel: ObservableObject {
         coordinateMessage = note
     }
 
+    private static func placedNote(zone: Int) -> String {
+        let name = zone == 6 ? "第VI系" : "第\(zone)系"
+        return "図面を座標で置きました（\(name)）"
+    }
+
     private static func readNote(count: Int, zone: Int) -> String {
         let name = zone == 6 ? "第VI系" : "第\(zone)系"
         return "\(count)点を読みました（\(name)）"
@@ -3338,6 +3345,9 @@ final class FieldModel: ObservableObject {
         placeDrawing(pending, zone: zone, axis: pending.axis)
         importBooks(books)
         frameMapToSurvey()
+        if sheetUsesCoordinates {
+            sheetMessage = Self.placedNote(zone: zone)
+        }
     }
 
     func acceptBookZone(_ zone: Int) {
@@ -3361,6 +3371,7 @@ final class FieldModel: ObservableObject {
             let reason = (error as? DXFError)?.description
                 ?? (error as? SFCError)?.description
                 ?? error.localizedDescription
+            sheetUsesCoordinates = false
             sheetMessage = "\(fileName) を読めませんでした。\(reason)"
         case let .success(document):
             let here = placementSample()
@@ -3384,6 +3395,7 @@ final class FieldModel: ObservableObject {
                 )
                 sheetZoneChoices = PlaneZoneLabel.pickerZones()
                 canPlaceOnSite = false
+                sheetUsesCoordinates = false
                 sheetMessage = "meta.json が読めません。系を選んでください。奈良の現場は第VI系です。"
                 return
             }
@@ -3397,6 +3409,7 @@ final class FieldModel: ObservableObject {
                     books: books
                 )
                 sheetZoneChoices = decision.choices
+                sheetUsesCoordinates = false
                 sheetMessage = "系を選んでください。"
                 return
             }
@@ -3412,6 +3425,7 @@ final class FieldModel: ObservableObject {
         pendingSheet = pending
         applyExplicitZone(zone)
         canPlaceOnSite = true
+        sheetUsesCoordinates = true
         sheetZoneChoices = []
         if let name = drawing.project?.name,
            let record = try? ProjectStore.saveSheet(
@@ -3423,8 +3437,7 @@ final class FieldModel: ObservableObject {
            ) {
             projectSheet = record
         }
-        let zoneName = zone == 6 ? "第VI系" : "第\(zone)系"
-        sheetMessage = "\(pending.fileName) を読みました。\(zoneName)（EPSG \(6668 + zone)）。現場へ置くと地図に出します。"
+        sheetMessage = Self.placedNote(zone: zone)
     }
 
     private func placeDrawing(_ pending: PendingDrawingSheet, zone: Int, axis: DrawingAxis) {
@@ -3477,10 +3490,13 @@ final class FieldModel: ObservableObject {
                 at: drawing.projectsRoot
             )
             projectSheet = record
+            canPlaceOnSite = false
+            sheetUsesCoordinates = false
             var note = "済。\(record.fileName)。\(record.byteCount) バイト。"
             if let extra { note += extra }
             sheetMessage = note
         } catch {
+            sheetUsesCoordinates = false
             sheetMessage = "図面を置けませんでした。"
         }
     }
