@@ -2933,7 +2933,7 @@ final class FieldModel: ObservableObject {
         }
         let kind = Self.sheetKind(fileName: fileName, data: data)
         guard kind != "unknown" else {
-            sheetMessage = "PDF、画像、DXF、SFC を選んでください。"
+            sheetMessage = "\(fileName) は図面として読めません。PDF、画像、DXF、SFC を選んでください。"
             return
         }
         let meta = (sidecar ?? heldSidecarData).flatMap(DrawingSidecar.load)
@@ -3261,6 +3261,7 @@ final class FieldModel: ObservableObject {
             importProjectSheet(data: Data("not-a-dxf".utf8), fileName: "broken.dxf")
             return
         }
+        // 試験は、伊良部の 16 系が残った状態から始める。meta の 6674 が上書きする。
         drawing.zone = 16
         importProjectSheet(
             data: VIPack.dxf,

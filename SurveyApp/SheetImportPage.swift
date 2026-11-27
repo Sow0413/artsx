@@ -162,17 +162,29 @@ enum PickedFileBytes {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
         if (try? url.resourceValues(forKeys: [.isUbiquitousItemKey]))?.isUbiquitousItem == true {
-            do {
-                try FileManager.default.startDownloadingUbiquitousItem(at: url)
-            } catch {
-                return .failure("\(name) のダウンロードを始められませんでした。\(error.localizedDescription)")
-            }
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
         }
         let sandbox = FileManager.default.temporaryDirectory
             .appendingPathComponent("picked-\(UUID().uuidString)-\(name)")
-        var copied: Result<Data, String> = .failure("\(name) をアプリにコピーできませんでした。")
+        var copied = copyIntoSandbox(url, sandbox: sandbox, options: .forUploading)
+        if case .failure = copied {
+            copied = copyIntoSandbox(url, sandbox: sandbox, options: [])
+        }
+        if case let .failure(reason) = copied {
+            return .failure("ファイルを開けませんでした（OneDriveなどは一度ダウンロードしてください）: \(reason)")
+        }
+        return copied
+    }
+
+    private static func copyIntoSandbox(
+        _ url: URL,
+        sandbox: URL,
+        options: NSFileCoordinator.ReadingOptions
+    ) -> Result<Data, String> {
+        let name = url.lastPathComponent.isEmpty ? "ファイル" : url.lastPathComponent
+        var copied: Result<Data, String> = .failure("\(name) をコピーできませんでした。")
         var coordinationError: NSError?
-        NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &coordinationError) { coordinated in
+        NSFileCoordinator().coordinate(readingItemAt: url, options: options, error: &coordinationError) { coordinated in
             do {
                 if FileManager.default.fileExists(atPath: sandbox.path) {
                     try FileManager.default.removeItem(at: sandbox)
@@ -181,11 +193,11 @@ enum PickedFileBytes {
                 let data = try Data(contentsOf: sandbox)
                 copied = data.isEmpty ? .failure("\(name) は空です。") : .success(data)
             } catch {
-                copied = .failure("\(name) をアプリにコピーできませんでした。\(error.localizedDescription)")
+                copied = .failure(error.localizedDescription)
             }
         }
         if let coordinationError, case .failure = copied {
-            return .failure("\(name) を開けませんでした。\(coordinationError.localizedDescription)")
+            return .failure(coordinationError.localizedDescription)
         }
         return copied
     }
