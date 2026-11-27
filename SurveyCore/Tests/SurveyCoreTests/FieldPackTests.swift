@@ -101,11 +101,17 @@ final class FieldPackTests: XCTestCase {
         let text = try XCTUnwrap(String(data: VIPack.csv, encoding: .utf8))
         let points = try ControlPointCatalog.loadCSV(text)
         XCTAssertEqual(points.count, 34)
-        XCTAssertEqual(points[0].name, "P01")
+        XCTAssertEqual(points[0].name, "T4-15'")
+        XCTAssertEqual(points[0].id, "T4-15'")
+        XCTAssertNil(points[0].heightMeters)
+        XCTAssertEqual(points[0].latitudeDegrees, VIPack.latitude, accuracy: 1e-9)
+        XCTAssertEqual(points[0].longitudeDegrees, VIPack.longitude, accuracy: 1e-9)
         XCTAssertEqual(points[0].heightKind, .orthometric)
         XCTAssertNil(points[0].comparableEllipsoidalHeightMeters)
         let document = try DXFParser.parse(VIPack.dxf)
-        XCTAssertEqual(document.entities.count, 1)
+        XCTAssertEqual(document.entities.count, 3)
+        XCTAssertEqual(SiteDXF.controlNames(in: document), ["T4-15'"])
+        XCTAssertTrue(document.layers.contains { $0.name == "測設_基準点" })
         let meta = try XCTUnwrap(DrawingSidecar.load(VIPack.meta))
         XCTAssertEqual(meta.zone, 6)
         let decision = FieldPackPlacement.resolve(
@@ -142,5 +148,16 @@ final class FieldPackTests: XCTestCase {
         let origin = try XCTUnwrap(VIPack.plane())
         XCTAssertEqual(restored.northingMeters, origin.northing + 8, accuracy: 0.05)
         XCTAssertEqual(restored.eastingMeters, origin.easting + 6, accuracy: 0.05)
+        let names = DrawingSidecarNames.candidates(forDXF: VIPack.dxfFileName)
+        XCTAssertEqual(names[0], VIPack.dxfFileName + ".meta.json")
+        XCTAssertEqual(names[1], "20231101市道計画平面図_VI系_軽量.meta.json")
+        XCTAssertEqual(
+            DrawingSidecarNames.match(dxfName: VIPack.dxfFileName, metaNames: [names[1], names[0]]),
+            names[0]
+        )
+        XCTAssertEqual(meta.transform?.status, "合成")
+        XCTAssertEqual(meta.transform?.version, "1")
+        XCTAssertEqual(meta.transform?.pairCount, 4)
+        XCTAssertEqual(meta.transform?.rmsMillimetres ?? -1, 0, accuracy: 1e-9)
     }
 }

@@ -125,10 +125,10 @@ final class MapResponsivenessTests: XCTestCase {
         let book = app.staticTexts["book-count"]
         XCTAssertTrue(book.waitForExistence(timeout: 8))
         XCTAssertTrue(book.label.contains("6系"))
-        let p01 = app.staticTexts["book-ll-P01"]
-        XCTAssertTrue(p01.waitForExistence(timeout: 5), "P01 の経緯度が無い")
-        XCTAssertTrue(p01.label.contains("34.600"))
-        XCTAssertTrue(p01.label.contains("135.800"))
+        let named = app.staticTexts["book-ll-T4-15'"]
+        XCTAssertTrue(named.waitForExistence(timeout: 5), "T4-15' の経緯度が無い")
+        XCTAssertTrue(named.label.contains("34.60000"))
+        XCTAssertTrue(named.label.contains("135.80000"))
         XCTAssertTrue(app.staticTexts["book-ll-S01"].waitForExistence(timeout: 5), "SIMA の S01 が無い")
         shot("49-vi-book")
 
@@ -142,6 +142,18 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(failed.waitForExistence(timeout: 15), "失敗の文が無い")
         XCTAssertTrue(failed.label.contains("読めませんでした"))
         shot("51-vi-fail")
+
+        app.terminate()
+        app.launchArguments = ["-surveyUITest", "-uitestField", "vi-nomet"]
+        app.launch()
+        allowSystemPrompts()
+        dismissStaturePrompt()
+        openDrawingImport()
+        let sixth = app.buttons["sheet-zone-6"]
+        XCTAssertTrue(sixth.waitForExistence(timeout: 20), "第VI系のピッカーが無い")
+        XCTAssertEqual(sixth.label, "第VI系")
+        XCTAssertTrue(app.staticTexts["draw-result"].label.contains("meta.json"))
+        shot("52-vi-zone-picker")
     }
 
     private func openDrawingImport() {

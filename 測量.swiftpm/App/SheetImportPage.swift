@@ -21,6 +21,17 @@ struct SheetImportPage: View {
                     .font(SurveyType(18, .heavy))
                     .lineLimit(1)
                     .accessibilityIdentifier("purpose-draw")
+                DeskTile(title: "フォルダを読む", systemImage: "folder", identifier: "draw-import-folder", prominent: false) {
+                    SheetFilePicker.present(types: [.folder], allowsMultiple: false, onPick: { urls in
+                        guard let folder = urls.first else {
+                            field.failSheet("フォルダが選ばれませんでした。")
+                            return
+                        }
+                        Self.importFolder(folder, into: field)
+                    }, onFail: { reason in
+                        field.failSheet(reason)
+                    })
+                }
                 DeskTile(title: "図面を読む", systemImage: "doc.badge.plus", identifier: "draw-import", prominent: true) {
                     if Self.uiTest, !Self.forcePicker {
                         field.importProjectSheet(data: Self.uiTestPNG, fileName: "図面.png")
@@ -42,7 +53,7 @@ struct SheetImportPage: View {
                     Text("系を選んでください。")
                         .font(SurveyType(16, .semibold))
                     ForEach(field.sheetZoneChoices, id: \.self) { zone in
-                        Button("\(zone)系") { field.acceptSheetZone(zone) }
+                        Button(PlaneZoneLabel.button(zone)) { field.acceptSheetZone(zone) }
                             .accessibilityIdentifier("sheet-zone-\(zone)")
                     }
                 }
@@ -84,13 +95,27 @@ struct SheetImportPage: View {
         .onAppear { field.refreshProjectSheet() }
     }
 
+    private static func importFolder(_ url: URL, into field: FieldModel) {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            field.failSheet("ファイルを開けませんでした（OneDriveなどは一度ダウンロードしてください）: フォルダを読めません。")
+            return
+        }
+        importFiles(children, into: field)
+    }
+
     private static func importFiles(_ urls: [URL], into field: FieldModel) {
         guard !urls.isEmpty else {
             field.failSheet("ファイルが選ばれませんでした。")
             return
         }
         var sheet: (Data, String, URL)?
-        var meta: Data?
+        var metas: [(name: String, data: Data)] = []
         var books: [(Data, String)] = []
         var failures: [String] = []
         for url in urls {
@@ -99,12 +124,12 @@ struct SheetImportPage: View {
                 failures.append(reason)
             case let .success(data):
                 var name = url.lastPathComponent
-                if !name.lowercased().hasSuffix("dxf"), looksLikeDXF(data) {
+                if !name.lowercased().hasSuffix("dxf"), !name.lowercased().hasSuffix("meta.json"), looksLikeDXF(data) {
                     name += ".dxf"
                 }
                 let lower = name.lowercased()
                 if lower.hasSuffix("meta.json") {
-                    meta = data
+                    metas.append((name, data))
                 } else if lower.hasSuffix("csv") || lower.hasSuffix("sima") {
                     books.append((data, name))
                 } else if lower.hasSuffix("dxf") || lower.hasSuffix("sfc") || lower.hasSuffix("pdf")
@@ -117,8 +142,17 @@ struct SheetImportPage: View {
                 }
             }
         }
-        if meta == nil, let sheet, case let .success(data) = PickedFileBytes.read(sheet.2.appendingPathExtension("meta.json")) {
-            meta = data
+        var meta = sheet.flatMap { item in
+            DrawingSidecarNames.match(dxfName: item.1, metaNames: metas.map(\.name))
+                .flatMap { matched in metas.first { $0.name.caseInsensitiveCompare(matched) == .orderedSame }?.data }
+        }
+        if meta == nil, let sheet {
+            for sibling in DrawingSidecarNames.siblingURLs(for: sheet.2) {
+                if case let .success(data) = PickedFileBytes.read(sibling) {
+                    meta = data
+                    break
+                }
+            }
         }
         if let sheet {
             field.importProjectSheet(data: sheet.0, fileName: sheet.1, sidecar: meta, books: books)
@@ -207,9 +241,14 @@ enum PickedFileBytes {
 enum SheetFilePicker {
     private static var delegate: Delegate?
 
-    static func present(types: [UTType], onPick: @escaping ([URL]) -> Void, onFail: @escaping (String) -> Void) {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
-        picker.allowsMultipleSelection = true
+    static func present(
+        types: [UTType],
+        allowsMultiple: Bool = true,
+        onPick: @escaping ([URL]) -> Void,
+        onFail: @escaping (String) -> Void
+    ) {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: !types.contains(.folder))
+        picker.allowsMultipleSelection = allowsMultiple
         picker.shouldShowFileExtensions = true
         let delegate = Delegate(onPick: onPick)
         self.delegate = delegate

@@ -3015,6 +3015,20 @@ final class FieldModel: ObservableObject {
                 prefecture: drawing.project?.prefecture
             )
             let axis = decision.axis ?? .cadEastNorth
+            if meta == nil, kind == "dxf" {
+                pendingSheet = PendingDrawingSheet(
+                    data: data,
+                    fileName: fileName,
+                    document: document,
+                    kind: kind,
+                    axis: axis,
+                    books: books
+                )
+                sheetZoneChoices = PlaneZoneLabel.pickerZones()
+                canPlaceOnSite = false
+                sheetMessage = "meta.json が読めません。系を選んでください。奈良の現場は第VI系です。"
+                return
+            }
             guard let zone = decision.zone else {
                 pendingSheet = PendingDrawingSheet(
                     data: data,
@@ -3253,7 +3267,7 @@ final class FieldModel: ObservableObject {
         guard let flag = args.firstIndex(of: "-uitestField"),
               args.indices.contains(flag + 1) else { return }
         let mode = args[flag + 1]
-        guard mode == "vi" || mode == "vi-fail" else { return }
+        guard mode == "vi" || mode == "vi-fail" || mode == "vi-nomet" else { return }
         if drawing.project == nil {
             drawing.createProject(named: "六系")
         }
@@ -3261,11 +3275,15 @@ final class FieldModel: ObservableObject {
             importProjectSheet(data: Data("not-a-dxf".utf8), fileName: "broken.dxf")
             return
         }
+        if mode == "vi-nomet" {
+            importProjectSheet(data: VIPack.dxf, fileName: VIPack.dxfFileName)
+            return
+        }
         // 試験は、伊良部の 16 系が残った状態から始める。meta の 6674 が上書きする。
         drawing.zone = 16
         importProjectSheet(
             data: VIPack.dxf,
-            fileName: "nara-vi.dxf",
+            fileName: VIPack.dxfFileName,
             sidecar: VIPack.meta,
             books: [(VIPack.csv, "control-points.csv"), (VIPack.sima, "points.sima")]
         )

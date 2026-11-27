@@ -238,20 +238,55 @@ public enum SiteDXF {
     }
 }
 
-/// 図面の隣に置く `.meta.json`。epsg 6684 は 16 系。
+/// 図面の隣に置く `.meta.json`。`図面.dxf.meta.json` が先、`図面.meta.json` がその次。
 public struct DrawingSidecar: Equatable, Decodable, Sendable {
     public var epsg: Int
     public var axis: String
     public var unit: String
+    public var transform: TransformNote?
 
-    public init(epsg: Int, axis: String, unit: String) {
+    public struct TransformNote: Equatable, Decodable, Sendable {
+        public var status: String?
+        public var version: String?
+        public var pairCount: Int?
+        public var rmsMillimetres: Double?
+        public var maxMillimetres: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case status
+            case version
+            case pairCount = "対応点"
+            case rmsMillimetres = "rms_mm"
+            case maxMillimetres = "最大_mm"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            status = try container.decodeIfPresent(String.self, forKey: .status)
+            if let number = try? container.decode(Int.self, forKey: .version) {
+                version = String(number)
+            } else if let number = try? container.decode(Double.self, forKey: .version) {
+                version = String(number)
+            } else {
+                version = try container.decodeIfPresent(String.self, forKey: .version)
+            }
+            pairCount = try container.decodeIfPresent(Int.self, forKey: .pairCount)
+            rmsMillimetres = try container.decodeIfPresent(Double.self, forKey: .rmsMillimetres)
+            maxMillimetres = try container.decodeIfPresent(Double.self, forKey: .maxMillimetres)
+        }
+    }
+
+    public init(epsg: Int, axis: String, unit: String, transform: TransformNote? = nil) {
         self.epsg = epsg
         self.axis = axis
         self.unit = unit
+        self.transform = transform
     }
 
     public static func load(_ data: Data) -> DrawingSidecar? {
-        try? JSONDecoder().decode(DrawingSidecar.self, from: data)
+        var body = data
+        if body.starts(with: Data([0xEF, 0xBB, 0xBF])) { body.removeFirst(3) }
+        return try? JSONDecoder().decode(DrawingSidecar.self, from: body)
     }
 
     public var zone: Int? { SiteDXF.zone(forEPSG: epsg) }
@@ -262,6 +297,43 @@ public struct DrawingSidecar: Equatable, Decodable, Sendable {
         case "NE": return .surveyNorthEast
         default: return nil
         }
+    }
+}
+
+public enum DrawingSidecarNames {
+    /// 先に `名前.dxf.meta.json`。次に `名前.meta.json`。
+    public static func candidates(forDXF fileName: String) -> [String] {
+        let full = fileName + ".meta.json"
+        let stem = (fileName as NSString).deletingPathExtension + ".meta.json"
+        if full.caseInsensitiveCompare(stem) == .orderedSame { return [full] }
+        return [full, stem]
+    }
+
+    public static func match(dxfName: String, metaNames: [String]) -> String? {
+        for wanted in candidates(forDXF: dxfName) {
+            if let found = metaNames.first(where: { $0.caseInsensitiveCompare(wanted) == .orderedSame }) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    public static func siblingURLs(for dxf: URL) -> [URL] {
+        let full = dxf.appendingPathExtension("meta.json")
+        let stem = dxf.deletingPathExtension().appendingPathExtension("meta.json")
+        if full.path == stem.path { return [full] }
+        return [full, stem]
+    }
+}
+
+public enum PlaneZoneLabel {
+    public static func button(_ zone: Int) -> String {
+        zone == 6 ? "第VI系" : "\(zone)系"
+    }
+
+    /// 第VI系を先頭にする。meta が無いときのピッカー。
+    public static func pickerZones() -> [Int] {
+        [6] + (1...19).filter { $0 != 6 }
     }
 }
 

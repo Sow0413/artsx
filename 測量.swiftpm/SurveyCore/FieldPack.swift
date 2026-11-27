@@ -84,8 +84,13 @@ public enum VIPack {
     public static let epsg = 6674
     public static let pointCount = 34
 
+    public static let dxfFileName = "20231101市道計画平面図_VI系_軽量.dxf"
+
     public static var meta: Data {
-        Data(#"{"epsg":6674,"axis":"EN","unit":"m"}"#.utf8)
+        let json = """
+        {"epsg":6674,"axis":"EN","unit":"m","transform":{"status":"合成","version":1,"対応点":4,"rms_mm":0.0,"最大_mm":0.0}}
+        """
+        return Data(json.utf8)
     }
 
     public static func plane() -> (easting: Double, northing: Double)? {
@@ -111,6 +116,10 @@ public enum VIPack {
         1
         AC1021
         9
+        $DWGCODEPAGE
+        1
+        ANSI_1252
+        9
         $INSUNITS
         70
         6
@@ -133,22 +142,43 @@ public enum VIPack {
         21
         \(north + 40)
         0
+        POINT
+        8
+        測設_基準点
+        10
+        \(east)
+        20
+        \(north)
+        0
+        TEXT
+        8
+        測設_基準点
+        10
+        \(east)
+        20
+        \(north)
+        40
+        2.5
+        1
+        T4-15'
+        0
         ENDSEC
         0
         EOF
 
         """
-        return Data(body.utf8)
+        return Data(body.replacingOccurrences(of: "\n", with: "\r\n").utf8)
     }
 
     /// 現場パックの基準点。標高は標高のままにし、楕円体高には入れない。
     public static var csv: Data {
-        var lines = ["id,name,kind,grade,latitude_deg,longitude_deg,height_m,height_kind,source_note"]
-        for index in 1...pointCount {
+        var lines = ["id,name,kind,grade,latitude_deg,longitude_deg,height_m,height_kind,ellipsoidal_height_m,source_note"]
+        lines.append("\"T4-15'\",\"T4-15'\",基準点,,\(latitude),\(longitude),,orthometric,,合成")
+        for index in 2...pointCount {
             let name = String(format: "P%02d", index)
             let lat = latitude + Double(index) * 0.00004
             let lon = longitude + Double(index) * 0.00004
-            lines.append("\(name),\(name),基準点,,\(lat),\(lon),\(400 + index),orthometric,合成")
+            lines.append("\(name),\(name),基準点,,\(lat),\(lon),,orthometric,,合成")
         }
         return Data(lines.joined(separator: "\n").appending("\n").utf8)
     }
