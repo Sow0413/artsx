@@ -8,6 +8,15 @@ struct CadPick: Equatable {
     var longitude: Double
 }
 
+struct NamedStakePoint: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var latitude: Double
+    var longitude: Double
+    var distance: String
+    var meters: Double = .greatestFiniteMagnitude
+}
+
 struct StakeoutLines: Equatable {
     var zone: String
     var name: String
@@ -62,6 +71,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var reading: PositionReading
     @Published private(set) var viewport: MapViewport
     @Published var followUser: Bool
+    /// 測設中は、現在地と目標が両方入る範囲に地図を固定する。
+    @Published var stakeoutCamera = false
     @Published var tab: FieldTab
     @Published private(set) var isDownloading = false
     @Published private(set) var downloadMessage = "表示中の範囲を、圏外用に保存します。"
@@ -2553,6 +2564,7 @@ final class FieldModel: ObservableObject {
             kind: "設計"
         )
         captureMessage = "\(basicTarget?.name ?? "入力") へ測設します。"
+        followCad()
     }
 
     func aimBasic(_ entry: CoordinateBookEntry) {
@@ -2560,6 +2572,7 @@ final class FieldModel: ObservableObject {
         horizontal.ellipsoidalHeightMeters = nil
         basicTarget = horizontal
         captureMessage = "\(entry.name) へ測設します。高さは未確認。"
+        followCad()
     }
 
     func importCoordinateFile(data: Data, filename: String) {
@@ -2572,13 +2585,6 @@ final class FieldModel: ObservableObject {
         guard drawing.project != nil else {
             failSheet("先に現場を作ってください。")
             return
-        }
-        if trustedZone == nil {
-            let here = placementSample()
-            if let latitude = here.latitude, let longitude = here.longitude,
-               let zone = PlaneZoneCatalog.nearestZone(latitude: latitude, longitude: longitude) {
-                applyExplicitZone(zone)
-            }
         }
         importBasic(data: data, filename: filename)
         coordinateMessage = bookNote ?? exportMessage
@@ -2598,6 +2604,7 @@ final class FieldModel: ObservableObject {
         let note = count > 0 ? Self.readNote(count: count, zone: zone) : PlaneZoneLabel.button(zone)
         bookNote = note
         exportMessage = note
+        coordinateMessage = note
     }
 
     private static func readNote(count: Int, zone: Int) -> String {
@@ -2609,6 +2616,23 @@ final class FieldModel: ObservableObject {
         trustedZone = zone
         zoneIsExplicit = true
         drawing.zone = zone
+    }
+
+    var zoneChoiceLabel: String {
+        zoneIsExplicit ? PlaneZoneLabel.button(drawing.zone) : "系を選ぶ"
+    }
+
+    var mapTargetVisible: Bool {
+        guard SurveyBuild.basicMode else { return false }
+        return cadStaking || cadPick != nil || basicTarget != nil || selectedControlPoint != nil
+    }
+
+    func dismissMapTarget() {
+        cadStaking = false
+        cadPick = nil
+        basicTarget = nil
+        selectedControlPointID = nil
+        stakeoutCamera = false
     }
 
     func snapDrawingVertex() {
@@ -2636,7 +2660,8 @@ final class FieldModel: ObservableObject {
                     eastingMeters: plane.easting,
                     zone: zone
                 ) else { return }
-                cadPick = CadPick(name: label(near: hit.point, in: document) ?? "図面の点", latitude: geo.latitudeDegrees, longitude: geo.longitudeDegrees)
+                let named = label(near: hit.point, in: document).flatMap { StakeTargetNames.isName($0) ? $0 : nil }
+                cadPick = CadPick(name: named ?? "図面の点", latitude: geo.latitudeDegrees, longitude: geo.longitudeDegrees)
                 return
             }
             if let point = controlPoints.min(by: { lhs, rhs in
@@ -2705,19 +2730,28 @@ final class FieldModel: ObservableObject {
     }
 
     private func followCad() {
-        guard cadStaking, let target = basicTarget, let position = reading.position ?? navigationReading.position, position.isPlottable else { return }
+        guard let target = basicTarget else {
+            stakeoutCamera = false
+            return
+        }
+        stakeoutCamera = true
+        followUser = false
+        guard let position = navigationReading.position, position.isPlottable else { return }
         let south = min(position.latitudeDegrees, target.latitudeDegrees)
         let north = max(position.latitudeDegrees, target.latitudeDegrees)
         let west = min(position.longitudeDegrees, target.longitudeDegrees)
         let east = max(position.longitudeDegrees, target.longitudeDegrees)
-        let padLatitude = max((north - south) * 0.8, 0.0008)
-        let padLongitude = max((east - west) * 0.8, 0.0008)
-        followUser = false
+        let midLatitude = (south + north) / 2
+        let cosine = max(0.2, abs(cos(midLatitude * .pi / 180)))
+        let minimumLatitude = 20.0 / 111_320
+        let minimumLongitude = 20.0 / (111_320 * cosine)
+        let latitudeDelta = max((north - south) * 1.8, minimumLatitude)
+        let longitudeDelta = max((east - west) * 1.8, minimumLongitude)
         viewport = MapViewport(
-            centerLatitude: (south + north) / 2,
+            centerLatitude: midLatitude - latitudeDelta * 0.18,
             centerLongitude: (west + east) / 2,
-            latitudeDelta: north - south + padLatitude,
-            longitudeDelta: east - west + padLongitude
+            latitudeDelta: latitudeDelta,
+            longitudeDelta: longitudeDelta
         )
     }
 
@@ -2796,10 +2830,14 @@ final class FieldModel: ObservableObject {
     }
 
     private static func horizontalText(_ meters: Double) -> String {
-        if abs(meters) < 1 {
-            return String(format: "%.0f cm", abs(meters) * 100)
+        let magnitude = abs(meters)
+        if magnitude < 1 {
+            return String(format: "%.0f cm", magnitude * 100)
         }
-        return String(format: "%.2f m", meters)
+        if magnitude >= 1000 {
+            return String(format: "%.2f km", magnitude / 1000)
+        }
+        return String(format: "%.2f m", magnitude)
     }
 
     private static func offsetText(_ meters: Double, positive: String, negative: String) -> String {
@@ -2916,36 +2954,91 @@ final class FieldModel: ObservableObject {
         localizeMessage = String(format: "合わせました。残差 %.1f mm。縮尺は1のまま。", fit.rmsMeters * 1000)
     }
 
-    func refreshCadPoints() -> [(name: String, east: Double, north: Double)] {
-        guard projectSheet?.kind == "dxf", let data = projectSheetData(),
-              let document = try? DrawingImport.load(data, fileName: projectSheet?.fileName ?? "図面.dxf") else {
-            cadMessage = "この図面に点名がありません。DXFの文字を使います。"
-            return []
+    func refreshCadPoints() -> [NamedStakePoint] {
+        var byName: [String: NamedStakePoint] = [:]
+        for point in controlPoints where StakeTargetNames.isName(point.name) {
+            byName[point.name] = NamedStakePoint(
+                id: point.id,
+                name: point.name,
+                latitude: point.latitudeDegrees,
+                longitude: point.longitudeDegrees,
+                distance: ""
+            )
         }
-        let points: [(name: String, east: Double, north: Double)] = document.entities.compactMap { entity in
-            guard case let .text(origin, string, _, _) = entity.primitive else { return nil }
-            let name = string.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { return nil }
-            let plane = drawing.axis.plane(drawingX: origin.x, drawingY: origin.y)
-            return (name, plane.easting, plane.northing)
+        if let document = drawing.document {
+            let zone = trustedZone ?? drawing.zone
+            for entity in document.entities {
+                guard case let .point(vertex) = entity.primitive else { continue }
+                guard let name = label(near: vertex, in: document), StakeTargetNames.isName(name) else { continue }
+                if byName[name] != nil { continue }
+                let plane = drawing.axis.plane(drawingX: vertex.x, drawingY: vertex.y)
+                guard let geo = PlaneRectangular.inverse(
+                    northingMeters: plane.northing,
+                    eastingMeters: plane.easting,
+                    zone: zone
+                ) else { continue }
+                byName[name] = NamedStakePoint(
+                    id: "point-\(name)",
+                    name: name,
+                    latitude: geo.latitudeDegrees,
+                    longitude: geo.longitudeDegrees,
+                    distance: ""
+                )
+            }
         }
-        cadMessage = points.isEmpty ? "この図面に点名がありません。DXFの文字を使います。" : "\(points.count)点あります。選ぶと測設します。"
-        return points
+        let here = navigationReading.position
+        var list = Array(byName.values)
+        for index in list.indices {
+            list[index].distance = Self.distanceText(
+                from: here,
+                latitude: list[index].latitude,
+                longitude: list[index].longitude
+            )
+            list[index].meters = Self.distanceMeters(
+                from: here,
+                latitude: list[index].latitude,
+                longitude: list[index].longitude
+            )
+        }
+        list.sort {
+            if $0.meters != $1.meters { return $0.meters < $1.meters }
+            return $0.name < $1.name
+        }
+        cadMessage = list.isEmpty
+            ? "点名のある測点がありません。地図の図面をタップして測設します。"
+            : "点名のある測点が\(list.count)点あります。地図の図面をタップして測設します。"
+        return list
     }
 
-    func aimCadPoint(name: String, east: Double, north: Double) {
-        guard let geo = PlaneRectangular.inverse(northingMeters: north, eastingMeters: east, zone: drawing.zone) else {
-            cadMessage = "この座標を緯度経度に戻せません。"
-            return
-        }
+    func aimNamedStakePoint(_ point: NamedStakePoint) {
         aimBasic(
-            name: name,
-            latitude: String(geo.latitudeDegrees),
-            longitude: String(geo.longitudeDegrees),
+            name: point.name,
+            latitude: String(point.latitude),
+            longitude: String(point.longitude),
             height: ""
         )
-        cadMessage = "\(name) へ測設します。"
+        cadPick = CadPick(name: point.name, latitude: point.latitude, longitude: point.longitude)
+        cadStaking = true
+        cadMessage = "\(point.name) へ測設します。"
         tab = .map
+        followCad()
+    }
+
+    private static func distanceMeters(from position: GeodeticPosition?, latitude: Double, longitude: Double) -> Double {
+        guard let position, position.isPlottable,
+              let gap = GRS80Geodesic.inverse(
+                latitude1: position.latitudeDegrees,
+                longitude1: position.longitudeDegrees,
+                latitude2: latitude,
+                longitude2: longitude
+              ) else { return .greatestFiniteMagnitude }
+        return gap.distanceMeters
+    }
+
+    private static func distanceText(from position: GeodeticPosition?, latitude: Double, longitude: Double) -> String {
+        let meters = distanceMeters(from: position, latitude: latitude, longitude: longitude)
+        guard meters < .greatestFiniteMagnitude else { return "" }
+        return horizontalText(meters)
     }
 
     func restoreExportedBook() {
@@ -3858,6 +3951,12 @@ final class FieldModel: ObservableObject {
                     noteCoordinate("0行です。")
                     return
                 }
+                if let zone = PlaneZoneCatalog.centroidZone(
+                    latitudes: points.map(\.latitudeDegrees),
+                    longitudes: points.map(\.longitudeDegrees)
+                ) {
+                    applyExplicitZone(zone)
+                }
                 adoptControlCatalog(points, data: data)
             } catch let error as ControlPointError {
                 switch error {
@@ -4009,7 +4108,7 @@ final class FieldModel: ObservableObject {
     /// 画面へ出す位置は秒10回まで。方位のたびに全体を描き直すと、タップが届かなくなる。
     private func commit(_ reading: PositionReading) {
         self.reading = reading
-        if cadStaking { followCad() }
+        if stakeoutCamera || cadStaking { followCad() }
         if let position = reading.position {
             let wasRecording = controlFix.canRecord
             let transition = StageLadder.step(held: stageTransition.stage, reported: position)

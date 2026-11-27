@@ -11,6 +11,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var field: FieldModel
     @StateObject private var appearance = SurveyAppearance()
+    @State private var showsDrawingImport = false
 
     init(
         source: any PositionSource,
@@ -48,14 +49,30 @@ struct RootView: View {
                     .padding(.top, 6)
             }
             if field.tab != .seat {
-                AccuracyBadgeView(
-                    badge: field.badge,
-                    stage: field.stageTransition.stage,
-                    compact: field.tab == .map || field.tab == .measure || field.tab == .export
-                )
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 8)
+                HStack(alignment: .center, spacing: 8) {
+                    AccuracyBadgeView(
+                        badge: field.badge,
+                        stage: field.stageTransition.stage,
+                        compact: field.tab == .map || field.tab == .measure || field.tab == .export
+                    )
+                    if SurveyBuild.basicMode, field.tab == .map {
+                        MapLoadMenu(field: field, showsDrawingImport: $showsDrawingImport)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 8)
+                if SurveyBuild.basicMode, field.tab == .map, let message = field.coordinateMessage {
+                    Text(message)
+                        .font(SurveyType(14, .heavy))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .foregroundStyle(SurveyColor.text)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 4)
+                        .accessibilityIdentifier("coordinate-result")
+                }
             }
             if field.tab != .seat, let correction = field.correctionStore.active {
                 CorrectionStatusBar(correction: correction)
@@ -133,6 +150,20 @@ struct RootView: View {
             field.consumePendingConfirm()
         }
         .modifier(MeshPresenceWatcher(field: field))
+        .sheet(isPresented: $showsDrawingImport) {
+            NavigationStack {
+                SheetImportPage(field: field) {
+                    showsDrawingImport = false
+                }
+                .navigationTitle("図面を読み込む")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("閉じる") { showsDrawingImport = false }
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $field.showsPrivacy) {
             LocationPrivacySheet(field: field)
         }

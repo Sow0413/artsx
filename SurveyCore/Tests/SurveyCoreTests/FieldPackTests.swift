@@ -168,4 +168,18 @@ final class FieldPackTests: XCTestCase {
         XCTAssertEqual(meta.transform?.pairCount, 4)
         XCTAssertEqual(meta.transform?.rmsMillimetres ?? -1, 0, accuracy: 1e-9)
     }
+
+    func testCSVCentroidUsesNaraNotThePhone() {
+        XCTAssertEqual(PlaneZoneCatalog.nearestZone(latitude: 35.181, longitude: 136.906), 7)
+        XCTAssertEqual(
+            PlaneZoneCatalog.centroidZone(latitudes: [34.6, 34.601], longitudes: [135.8, 135.801]),
+            6
+        )
+        XCTAssertNil(PlaneZoneCatalog.centroidZone(latitudes: [], longitudes: []))
+        XCTAssertFalse(StakeTargetNames.isName("449.37"))
+        XCTAssertFalse(StakeTargetNames.isName("418.50"))
+        XCTAssertFalse(StakeTargetNames.isName(" 12 "))
+        XCTAssertTrue(StakeTargetNames.isName("T4-15'"))
+        XCTAssertTrue(StakeTargetNames.isName("基準点"))
+    }
 }

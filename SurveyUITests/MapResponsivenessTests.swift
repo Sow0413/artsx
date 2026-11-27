@@ -111,8 +111,11 @@ final class MapResponsivenessTests: XCTestCase {
         let map = app.buttons["tab-map"]
         XCTAssertTrue(map.waitForExistence(timeout: 8), "地図タブが無い")
         map.tap()
-        let load = app.buttons["import-coordinates"]
+        openLoadMenu()
+        let load = menuItem("import-coordinates", title: "座標を読み込む")
         XCTAssertTrue(load.waitForExistence(timeout: 8), "座標を読み込むが無い")
+        let draw = menuItem("map-open-draw", title: "図面を読む")
+        XCTAssertTrue(draw.waitForExistence(timeout: 5), "図面を読むが無い")
         shot("53-coord-button")
         load.tap()
         if app.buttons["coord-zone-6"].waitForExistence(timeout: 3) {
@@ -121,17 +124,38 @@ final class MapResponsivenessTests: XCTestCase {
         let marks = app.staticTexts["survey-points"]
         XCTAssertTrue(marks.waitForExistence(timeout: 10), "測点が出ない")
         XCTAssertGreaterThanOrEqual(Int(marks.label.replacingOccurrences(of: "測点 ", with: "")) ?? 0, 34)
+        assertLoadMenuStays()
         shot("54-coord-loaded")
-        let pick = app.buttons["pick-imported-point"]
+        openLoadMenu()
+        let pick = menuItem("pick-imported-point", title: "T4-15'")
         XCTAssertTrue(pick.waitForExistence(timeout: 5), "点を選べない")
         pick.tap()
+        let back = app.buttons["selection-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "戻るが無い")
+        XCTAssertTrue(back.label.contains("戻る"))
+        back.tap()
+        let closed = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["stake-selected"])
+        XCTAssertEqual(XCTWaiter().wait(for: [closed], timeout: 5), .completed, "戻っても測設が残る")
+        openLoadMenu()
+        let pickAgain = menuItem("pick-imported-point", title: "T4-15'")
+        XCTAssertTrue(pickAgain.waitForExistence(timeout: 5), "点を選び直せない")
+        pickAgain.tap()
         let stake = app.buttons["stake-selected"]
         XCTAssertTrue(stake.waitForExistence(timeout: 5), "測設が無い")
         shot("55-point-select")
         stake.tap()
         assertStakeoutOffsetsVisible()
         XCTAssertTrue(app.staticTexts["stakeout-zone"].label.contains("第VI系"))
+        assertLoadMenuStays()
         shot("56-stakeout")
+        let stop = app.buttons["stakeout-stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5), "測設をやめるが無い")
+        XCTAssertTrue(stop.label.contains("測設をやめる"))
+        stop.tap()
+        let guide = app.descendants(matching: .any)["stakeout-guide"]
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: guide)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed, "測設をやめても案内が残る")
+        assertLoadMenuStays()
     }
 
     func testVIDrawingAndSurveyPoints() {
@@ -159,7 +183,9 @@ final class MapResponsivenessTests: XCTestCase {
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { tiles.fulfill() }
         wait(for: [tiles], timeout: 8)
         shot("48-vi-map")
-        let vertex = app.buttons["cad-tap-vertex"]
+        assertLoadMenuStays()
+        openLoadMenu()
+        let vertex = menuItem("cad-tap-vertex", title: "図面の頂点")
         XCTAssertTrue(vertex.waitForExistence(timeout: 5), "図面の頂点が無い")
         vertex.tap()
         let stakeHere = app.buttons["cad-stake"]
@@ -172,6 +198,10 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [arrived], timeout: 20), .completed, "距離が出ない。表示は \(distance.label)")
         shot("58-cad-target")
         shot("59-cad-guide")
+        assertLoadMenuStays()
+        let stopGuide = app.buttons["stakeout-stop"]
+        XCTAssertTrue(stopGuide.waitForExistence(timeout: 5), "測設をやめるが無い")
+        stopGuide.tap()
         let data = app.buttons["tab-measure"]
         XCTAssertTrue(data.waitForExistence(timeout: 5))
         data.tap()
@@ -210,6 +240,28 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertEqual(sixth.label, "第VI系")
         XCTAssertTrue(app.staticTexts["draw-result"].label.contains("meta.json"))
         shot("52-vi-zone-picker")
+    }
+
+    private func openLoadMenu() {
+        let menu = app.buttons["map-load"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 8), "読込が無い")
+        if !app.buttons["図面を読む"].exists && !app.buttons["座標を読み込む"].exists {
+            menu.tap()
+        }
+    }
+
+    private func menuItem(_ identifier: String, title: String) -> XCUIElement {
+        let identified = app.buttons[identifier]
+        if identified.waitForExistence(timeout: 4) { return identified }
+        let titled = app.buttons[title]
+        if titled.waitForExistence(timeout: 2) { return titled }
+        return identified
+    }
+
+    private func assertLoadMenuStays() {
+        let menu = app.buttons["map-load"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "読込が隠れた")
+        XCTAssertTrue(menu.isHittable || app.frame.intersects(menu.frame), "読込が押せない")
     }
 
     private func assertStakeoutOffsetsVisible() {

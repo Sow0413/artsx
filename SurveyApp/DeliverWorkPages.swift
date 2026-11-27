@@ -97,24 +97,31 @@ struct LocalizePage: View {
 
 struct CadStakePage: View {
     @ObservedObject var field: FieldModel
-    @State private var points: [(name: String, east: Double, north: Double)] = []
+    @State private var points: [NamedStakePoint] = []
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("図面の点を選んで、そこへ測設する。")
+                Text("地図の図面をタップして、そこへ測設する。")
                     .font(SurveyType(18, .heavy))
                     .lineLimit(2)
                     .accessibilityIdentifier("purpose-cad")
+                DeskTile(title: "地図で選ぶ", systemImage: "map", identifier: "cad-open-map", prominent: true) {
+                    field.tab = .map
+                }
                 if let message = field.cadMessage {
                     Text(message)
                         .font(SurveyType(18, .heavy))
                         .lineLimit(3)
                         .accessibilityIdentifier("cad-result")
                 }
-                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                    DeskTile(title: point.name, systemImage: "scope", identifier: "cad-\(point.name)") {
-                        field.aimCadPoint(name: point.name, east: point.east, north: point.north)
+                ForEach(points) { point in
+                    DeskTile(
+                        title: point.distance.isEmpty ? point.name : "\(point.name)  \(point.distance)",
+                        systemImage: "scope",
+                        identifier: "cad-named-\(point.id)"
+                    ) {
+                        field.aimNamedStakePoint(point)
                     }
                 }
             }

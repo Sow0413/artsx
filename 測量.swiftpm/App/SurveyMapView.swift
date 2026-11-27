@@ -36,7 +36,8 @@ struct SurveyMapView: UIViewRepresentable {
             viewport: field.viewport,
             followUser: field.followUser,
             tone: field.badge.tone,
-            offlineRevision: field.offlineRevision
+            offlineRevision: field.offlineRevision,
+            snap: field.stakeoutCamera
         )
         context.coordinator.syncControls(
             on: map,
@@ -497,7 +498,8 @@ struct SurveyMapView: UIViewRepresentable {
             viewport: MapViewport,
             followUser: Bool,
             tone: AccuracyTone,
-            offlineRevision: Int
+            offlineRevision: Int,
+            snap: Bool
         ) {
             self.tone = tone
             if offlineRevision != self.offlineRevision {
@@ -517,7 +519,7 @@ struct SurveyMapView: UIViewRepresentable {
                 span: MKCoordinateSpan(latitudeDelta: viewport.latitudeDelta, longitudeDelta: viewport.longitudeDelta)
             )
             applyingProgrammaticRegion = true
-            map.setRegion(region, animated: didSetInitialRegion)
+            map.setRegion(region, animated: snap ? false : didSetInitialRegion)
             applyingProgrammaticRegion = false
             didSetInitialRegion = true
             reportVisible(map)

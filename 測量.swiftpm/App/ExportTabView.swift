@@ -48,7 +48,7 @@ struct ExportTabView: View {
                     stepTile(order: 1, title: "図面を読み込む", systemImage: "doc", page: .drawing, status: field.projectSheet == nil ? "未着手" : "済", locked: false, later: false)
                     stepTile(order: 2, title: "図面の縮尺設定／2点割り付け", systemImage: "ruler", page: .scale, status: "2cm・1/10000", locked: field.projectSheet == nil, later: false)
                     stepTile(order: 3, title: "GNSSローカライズ", systemImage: "location.north.line", page: .localize, status: "3点以上", locked: false, later: false)
-                    stepTile(order: 4, title: "CAD測設", systemImage: "square.and.pencil", page: .cad, status: field.projectSheet == nil ? "図面のあと" : "図面の点", locked: field.projectSheet == nil, later: false)
+                    stepTile(order: 4, title: "CAD測設", systemImage: "square.and.pencil", page: .cad, status: "地図でタップ", locked: false, later: false)
                     Text("別の入口")
                         .font(SurveyType(18, .heavy))
                         .padding(.top, 8)

@@ -155,6 +155,16 @@ public enum DrawingSnap {
     }
 }
 
+/// 測設の目標にしてよい名前。標高のような数字だけの文字は名前にしない。
+public enum StakeTargetNames {
+    public static func isName(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let plain = trimmed.replacingOccurrences(of: ",", with: "")
+        return Double(plain) == nil
+    }
+}
+
 public enum StakeoutPrecision: Sendable, Equatable {
     case centimeters
     case meters
