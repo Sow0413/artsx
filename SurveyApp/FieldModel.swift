@@ -2685,7 +2685,7 @@ final class FieldModel: ObservableObject {
         if magnitude < 1 {
             return String(format: "%@ %.0f cm", word, magnitude * 100)
         }
-        return String(format: "%@ %+.2f m", word, magnitude)
+        return String(format: "%@ %.2f m", word, magnitude)
     }
 
     @discardableResult
@@ -3207,7 +3207,8 @@ final class FieldModel: ObservableObject {
            ) {
             projectSheet = record
         }
-        sheetMessage = "\(pending.fileName) を読みました。\(zone)系（EPSG \(6668 + zone)）。現場へ置くと地図に出します。"
+        let zoneName = zone == 6 ? "第VI系" : "第\(zone)系"
+        sheetMessage = "\(pending.fileName) を読みました。\(zoneName)（EPSG \(6668 + zone)）。現場へ置くと地図に出します。"
     }
 
     private func placeDrawing(_ pending: PendingDrawingSheet, zone: Int, axis: DrawingAxis) {

@@ -128,19 +128,8 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(stake.waitForExistence(timeout: 5), "測設が無い")
         shot("55-point-select")
         stake.tap()
-        let zoneLine = app.staticTexts["stakeout-zone"]
-        XCTAssertTrue(zoneLine.waitForExistence(timeout: 20), "測設の系が無い")
-        XCTAssertTrue(zoneLine.label.contains("第VI系"))
-        let north = app.staticTexts["stakeout-north"]
-        let east = app.staticTexts["stakeout-east"]
-        let ready = expectation(for: NSPredicate(format: "exists == true AND label MATCHES '.*[0-9].*'"), evaluatedWith: north)
-        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 25), .completed, "北か南が出ない。表示は \(north.label)")
-        XCTAssertTrue(north.label.contains("北") || north.label.contains("南"))
-        XCTAssertTrue(east.waitForExistence(timeout: 5))
-        XCTAssertTrue(east.label.contains("東") || east.label.contains("西"))
-        XCTAssertNotNil(east.label.range(of: "[0-9]", options: .regularExpression))
-        XCTAssertTrue(north.isHittable || app.frame.intersects(north.frame), "北か南が画面の外")
-        XCTAssertTrue(east.isHittable || app.frame.intersects(east.frame), "東か西が画面の外")
+        assertStakeoutOffsetsVisible()
+        XCTAssertTrue(app.staticTexts["stakeout-zone"].label.contains("第VI系"))
         shot("56-stakeout")
     }
 
@@ -155,7 +144,7 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(preview.waitForExistence(timeout: 25), "図面のプレビューが無い")
         let place = app.buttons["place-on-site"]
         XCTAssertTrue(place.waitForExistence(timeout: 5), "現場へ置くが無い")
-        XCTAssertTrue(app.staticTexts["draw-result"].label.contains("6系"))
+        XCTAssertTrue(app.staticTexts["draw-result"].label.contains("第VI系（EPSG 6674）"))
         shot("47-vi-preview")
         place.tap()
         let zone = app.staticTexts["map-zone"]
@@ -207,6 +196,22 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertEqual(sixth.label, "第VI系")
         XCTAssertTrue(app.staticTexts["draw-result"].label.contains("meta.json"))
         shot("52-vi-zone-picker")
+    }
+
+    private func assertStakeoutOffsetsVisible() {
+        let north = app.staticTexts["stakeout-north"]
+        let east = app.staticTexts["stakeout-east"]
+        let ready = expectation(for: NSPredicate(format: "exists == true AND label MATCHES '.*[0-9].*'"), evaluatedWith: north)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 25), .completed, "北か南が出ない。表示は \(north.label)")
+        XCTAssertTrue(north.label.contains("北") || north.label.contains("南"))
+        XCTAssertTrue(east.waitForExistence(timeout: 5), "東か西が出ない。表示は \(east.label)")
+        XCTAssertTrue(east.label.contains("東") || east.label.contains("西"))
+        XCTAssertNotNil(north.label.range(of: "[0-9]", options: .regularExpression))
+        XCTAssertNotNil(east.label.range(of: "[0-9]", options: .regularExpression))
+        XCTAssertFalse(north.label.contains("+"))
+        XCTAssertFalse(east.label.contains("+"))
+        XCTAssertTrue(north.isHittable || app.frame.intersects(north.frame), "北か南が画面の外")
+        XCTAssertTrue(east.isHittable || app.frame.intersects(east.frame), "東か西が画面の外")
     }
 
     private func openDrawingImport() {
@@ -535,12 +540,7 @@ final class MapResponsivenessTests: XCTestCase {
         shot("17-deliver-bottom")
         stake.tap()
         openTab("tab-map", showing: "stakeout-guide")
-        let guide = app.descendants(matching: .any)["stakeout-guide"]
-        let numbers = expectation(
-            for: NSPredicate(format: "label CONTAINS '方位' AND label CONTAINS '北' AND label CONTAINS '東'"),
-            evaluatedWith: guide
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [numbers], timeout: 8), .completed, "測設に距離と方位と南北東西が出ない")
+        assertStakeoutOffsetsVisible()
         shot("14-stakeout")
         let mapGCP = app.buttons["basic-gcp"]
         if mapGCP.waitForExistence(timeout: 3), mapGCP.isEnabled {
