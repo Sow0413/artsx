@@ -2553,8 +2553,9 @@ final class FieldModel: ObservableObject {
             return
         }
         if trustedZone == nil {
-            if let here = placementSample(),
-               let zone = PlaneZoneCatalog.nearestZone(latitude: here.latitude, longitude: here.longitude) {
+            let here = placementSample()
+            if let latitude = here.latitude, let longitude = here.longitude,
+               let zone = PlaneZoneCatalog.nearestZone(latitude: latitude, longitude: longitude) {
                 applyExplicitZone(zone)
             }
         }
