@@ -621,20 +621,18 @@ public enum SFCParser {
         return calls
     }
 
-    /// `/*SXF` から `SXF*/` までを一度だけ繋ぐ。`range(of:)` は残りをコピーするので使わない。
+    /// `/*SXF` から `SXF*/` まで。注釈が無ければ全体を見る。
     private static func sxfBodies(in text: String) -> String? {
-        var bodies = ""
+        var bodies: [String] = []
         var rest = text[...]
-        var found = false
-        while let start = rest.firstRange(of: "/*SXF") {
+        while let start = rest.range(of: "/*SXF") {
             rest = rest[start.upperBound...]
-            guard let end = rest.firstRange(of: "SXF*/") else { break }
-            if found { bodies.append("\n") }
-            bodies.append(contentsOf: rest[..<end.lowerBound])
+            guard let end = rest.range(of: "SXF*/") else { break }
+            bodies.append(String(rest[..<end.lowerBound]))
             rest = rest[end.upperBound...]
-            found = true
         }
-        return found ? bodies : nil
+        if bodies.isEmpty { return nil }
+        return bodies.joined(separator: "\n")
     }
 
     private static func identifierStart(in text: String, from index: String.Index) -> String.Index? {
