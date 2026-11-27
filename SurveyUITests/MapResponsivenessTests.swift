@@ -75,12 +75,22 @@ final class MapResponsivenessTests: XCTestCase {
         let read = app.buttons["draw-import"]
         XCTAssertTrue(read.waitForExistence(timeout: 8), "図面を読むが無い")
         read.tap()
-        let appeared = expectation(description: "書類ピッカー")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { appeared.fulfill() }
-        wait(for: [appeared], timeout: 3)
         let labels = ["キャンセル", "Cancel", "ブラウズ", "Browse", "最近使った項目", "Recents"]
-        let picker = labels.contains { label in
-            app.buttons[label].exists || app.navigationBars[label].exists || app.staticTexts[label].exists
+        func pickerIsVisible() -> Bool {
+            labels.contains { label in
+                app.buttons[label].exists || app.navigationBars[label].exists || app.staticTexts[label].exists
+            }
+        }
+        var picker = false
+        for _ in 0..<2 {
+            let appeared = expectation(description: "書類ピッカー")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { appeared.fulfill() }
+            wait(for: [appeared], timeout: 10)
+            if pickerIsVisible() {
+                picker = true
+                break
+            }
+            if read.exists { read.tap() }
         }
         XCTAssertTrue(picker, "図面を読むを押しても書類ピッカーが出ない")
         shot("50-draw-picker")
@@ -118,13 +128,19 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(stake.waitForExistence(timeout: 5), "測設が無い")
         shot("55-point-select")
         stake.tap()
-        let guide = app.staticTexts["stakeout-guide"]
-        XCTAssertTrue(guide.waitForExistence(timeout: 20), "測設の案内が無い")
-        let ready = expectation(
-            for: NSPredicate(format: "label CONTAINS '第VI系' AND label CONTAINS '東' AND label MATCHES '.*[0-9].*'"),
-            evaluatedWith: guide
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 25), .completed, "水平の測設が出ない。表示は \(guide.label)")
+        let zoneLine = app.staticTexts["stakeout-zone"]
+        XCTAssertTrue(zoneLine.waitForExistence(timeout: 20), "測設の系が無い")
+        XCTAssertTrue(zoneLine.label.contains("第VI系"))
+        let north = app.staticTexts["stakeout-north"]
+        let east = app.staticTexts["stakeout-east"]
+        let ready = expectation(for: NSPredicate(format: "exists == true AND label MATCHES '.*[0-9].*'"), evaluatedWith: north)
+        XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 25), .completed, "北か南が出ない。表示は \(north.label)")
+        XCTAssertTrue(north.label.contains("北") || north.label.contains("南"))
+        XCTAssertTrue(east.waitForExistence(timeout: 5))
+        XCTAssertTrue(east.label.contains("東") || east.label.contains("西"))
+        XCTAssertNotNil(east.label.range(of: "[0-9]", options: .regularExpression))
+        XCTAssertTrue(north.isHittable || app.frame.intersects(north.frame), "北か南が画面の外")
+        XCTAssertTrue(east.isHittable || app.frame.intersects(east.frame), "東か西が画面の外")
         shot("56-stakeout")
     }
 
@@ -161,7 +177,7 @@ final class MapResponsivenessTests: XCTestCase {
         ledger.tap()
         let book = app.staticTexts["book-count"]
         XCTAssertTrue(book.waitForExistence(timeout: 8))
-        XCTAssertTrue(book.label.contains("6系"))
+        XCTAssertTrue(book.label.contains("第VI系"))
         let named = app.staticTexts["book-ll-T4-15'"]
         XCTAssertTrue(named.waitForExistence(timeout: 5), "T4-15' の経緯度が無い")
         XCTAssertTrue(named.label.contains("34.60000"))

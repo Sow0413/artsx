@@ -2,6 +2,15 @@ import Combine
 import Foundation
 import SurveyCore
 
+struct StakeoutLines: Equatable {
+    var zone: String
+    var name: String
+    var distance: String
+    var north: String
+    var east: String
+    var height: String
+}
+
 struct SealedIncidentRow: Identifiable, Equatable {
     var id: UUID
     var title: String
@@ -2632,15 +2641,51 @@ final class FieldModel: ObservableObject {
     }
 
     var basicStakeoutLine: String? {
+        basicStakeoutLines.map { "\($0.zone) \($0.name) \($0.distance) \($0.north) \($0.east) \($0.height)" }
+    }
+
+    var basicStakeoutLines: StakeoutLines? {
         guard SurveyBuild.basicMode, let target = basicTarget else { return nil }
         guard zoneIsExplicit else {
-            return "\(target.name) 系を選んでください。奈良の現場は第VI系です。"
+            return StakeoutLines(
+                zone: "系を選んでください",
+                name: target.name,
+                distance: "奈良の現場は第VI系です。",
+                north: "",
+                east: "",
+                height: "高さは未確認"
+            )
         }
-        guard let position = navigationReading.position, position.isPlottable else {
-            return "\(PlaneZoneLabel.button(drawing.zone)) \(target.name) 位置を待っています"
+        let zone = PlaneZoneLabel.button(drawing.zone)
+        guard let position = navigationReading.position, position.isPlottable,
+              let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else {
+            return StakeoutLines(zone: zone, name: target.name, distance: "位置を待っています", north: "", east: "", height: "高さは未確認")
         }
-        guard let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else { return nil }
-        return "\(PlaneZoneLabel.button(drawing.zone)) \(target.name) \(guide.line)"
+        let height = guide.heightMeters.map { String(format: "高さ %+.2f m", $0) } ?? "高さは未確認"
+        return StakeoutLines(
+            zone: zone,
+            name: target.name,
+            distance: Self.horizontalText(guide.distanceMeters),
+            north: Self.offsetText(guide.northMeters, positive: "北", negative: "南"),
+            east: Self.offsetText(guide.eastMeters, positive: "東", negative: "西"),
+            height: height
+        )
+    }
+
+    private static func horizontalText(_ meters: Double) -> String {
+        if abs(meters) < 1 {
+            return String(format: "%.0f cm", abs(meters) * 100)
+        }
+        return String(format: "%.2f m", meters)
+    }
+
+    private static func offsetText(_ meters: Double, positive: String, negative: String) -> String {
+        let word = meters < 0 ? negative : positive
+        let magnitude = abs(meters)
+        if magnitude < 1 {
+            return String(format: "%@ %.0f cm", word, magnitude * 100)
+        }
+        return String(format: "%@ %+.2f m", word, magnitude)
     }
 
     @discardableResult

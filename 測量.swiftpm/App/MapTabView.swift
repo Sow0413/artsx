@@ -172,16 +172,8 @@ struct MapTabView: View {
                 if SurveyBuild.basicMode {
                     coordinateBar
                 }
-                if let line = field.basicStakeoutLine {
-                    Text(line)
-                        .font(SurveyType(22, .heavy))
-                        .foregroundStyle(SurveyColor.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .background(SurveyColor.card)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 6)
-                        .accessibilityIdentifier("stakeout-guide")
+                if let lines = field.basicStakeoutLines {
+                    StakeoutGuideBlock(lines: lines)
                 }
                 if SurveyBuild.basicMode, field.tab == .map, let message = mapCaptureMessage {
                     Text(message)
@@ -266,6 +258,38 @@ struct MapTabView: View {
             return "作業半径 \(meters)m（\(preset.label)・目安）"
         }
         return "作業半径 \(meters)m"
+    }
+
+    private struct StakeoutGuideBlock: View {
+        var lines: StakeoutLines
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                guideLine(lines.zone, "stakeout-zone")
+                guideLine(lines.name, "stakeout-name")
+                guideLine(lines.distance, "stakeout-distance")
+                if !lines.north.isEmpty { guideLine(lines.north, "stakeout-north") }
+                if !lines.east.isEmpty { guideLine(lines.east, "stakeout-east") }
+                guideLine(lines.height, "stakeout-height")
+            }
+            .font(.system(size: 28, weight: .bold, design: .monospaced))
+            .foregroundStyle(SurveyColor.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(10)
+            .background(SurveyColor.card)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("stakeout-guide")
+        }
+
+        private func guideLine(_ text: String, _ identifier: String) -> some View {
+            Text(text)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(identifier)
+        }
     }
 
     private var coordinateBar: some View {
