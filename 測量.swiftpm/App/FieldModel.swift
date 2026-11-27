@@ -3340,13 +3340,14 @@ final class FieldModel: ObservableObject {
             return
         }
         let books = pending.books
+        let census = pending.document.importCensus
         pendingSheet = nil
         canPlaceOnSite = false
         placeDrawing(pending, zone: zone, axis: pending.axis)
         importBooks(books)
         frameMapToSurvey()
         if sheetUsesCoordinates {
-            sheetMessage = Self.placedNote(zone: zone)
+            sheetMessage = Self.placedNote(zone: zone) + "\n" + census
         }
     }
 
@@ -3396,7 +3397,7 @@ final class FieldModel: ObservableObject {
                 sheetZoneChoices = PlaneZoneLabel.pickerZones()
                 canPlaceOnSite = false
                 sheetUsesCoordinates = false
-                sheetMessage = "meta.json が読めません。系を選んでください。奈良の現場は第VI系です。"
+                sheetMessage = "meta.json が読めません。系を選んでください。奈良の現場は第VI系です。\n" + document.importCensus
                 return
             }
             guard let zone = decision.zone else {
@@ -3437,7 +3438,7 @@ final class FieldModel: ObservableObject {
            ) {
             projectSheet = record
         }
-        sheetMessage = Self.placedNote(zone: zone)
+        sheetMessage = Self.placedNote(zone: zone) + "\n" + pending.document.importCensus
     }
 
     private func placeDrawing(_ pending: PendingDrawingSheet, zone: Int, axis: DrawingAxis) {

@@ -97,6 +97,303 @@ final class DrawingConditionTests: XCTestCase {
         XCTAssertEqual(DrawingReadiness.notice(origin), "座標がすべて原点です。位置を決められません。")
     }
 
+    func testBlocksPolylinesHatchesAndFrozenLayersStayOnTheDrawing() throws {
+        let document = try DXFParser.parse(Data(planDXF.utf8))
+        XCTAssertTrue(document.layers.allSatisfy(\.isVisible), "凍結レイヤを消している")
+        XCTAssertEqual(document.importCensus, "線 6 / 文字 1 / 点 1")
+
+        let polyline = try XCTUnwrap(document.entities.first { entity in
+            if case let .polyline(vertices, _, _) = entity.primitive, vertices.count == 3 { return true }
+            return false
+        })
+        guard case let .polyline(vertices, _, _) = polyline.primitive else { return }
+        XCTAssertEqual(vertices[0].distance(to: PlanarPoint(x: 1, y: 2)), 0, accuracy: 1e-6)
+        XCTAssertEqual(vertices[2].distance(to: PlanarPoint(x: 4, y: 6)), 0, accuracy: 1e-6)
+        XCTAssertFalse(vertices.contains { $0.distance(to: PlanarPoint(x: 0, y: 0)) < 1e-6 })
+
+        let nested = document.entities.compactMap { entity -> (PlanarPoint, PlanarPoint)? in
+            if case let .line(start, end) = entity.primitive, entity.layer == "計画" { return (start, end) }
+            return nil
+        }
+        XCTAssertTrue(nested.contains { start, end in
+            start.distance(to: PlanarPoint(x: 5, y: 5)) < 1e-6 && end.distance(to: PlanarPoint(x: 7, y: 5)) < 1e-6
+        })
+
+        let hatch = try XCTUnwrap(document.entities.first { entity in
+            if case let .polyline(vertices, _, _) = entity.primitive, entity.layer == "塗り" { return vertices.count >= 4 }
+            return false
+        })
+        guard case let .polyline(outline, _, _) = hatch.primitive else { return }
+        XCTAssertEqual(outline[1].distance(to: PlanarPoint(x: 10, y: 0)), 0, accuracy: 1e-6)
+
+        XCTAssertTrue(document.entities.contains { entity in
+            if case .polyline = entity.primitive, entity.layer == "曲線" { return true }
+            return false
+        })
+        XCTAssertFalse(document.entities.contains { $0.layer == "紙" })
+        XCTAssertTrue(document.entities.contains { $0.layer == "凍結" })
+    }
+
+    private var planDXF: String {
+        """
+        0
+        SECTION
+        2
+        HEADER
+        9
+        $ACADVER
+        1
+        AC1021
+        9
+        $INSUNITS
+        70
+        6
+        0
+        ENDSEC
+        0
+        SECTION
+        2
+        TABLES
+        0
+        TABLE
+        2
+        LAYER
+        0
+        LAYER
+        2
+        凍結
+        70
+        1
+        62
+        -7
+        0
+        ENDTAB
+        0
+        ENDSEC
+        0
+        SECTION
+        2
+        BLOCKS
+        0
+        BLOCK
+        2
+        PART
+        10
+        0
+        20
+        0
+        0
+        LINE
+        8
+        0
+        10
+        0
+        20
+        0
+        11
+        2
+        21
+        0
+        0
+        ENDBLK
+        0
+        BLOCK
+        2
+        NEST
+        10
+        0
+        20
+        0
+        0
+        INSERT
+        8
+        計画
+        2
+        PART
+        10
+        0
+        20
+        0
+        0
+        ENDBLK
+        0
+        ENDSEC
+        0
+        SECTION
+        2
+        ENTITIES
+        0
+        INSERT
+        8
+        計画
+        2
+        NEST
+        10
+        5
+        20
+        5
+        0
+        POLYLINE
+        8
+        道路
+        66
+        1
+        70
+        0
+        10
+        0
+        20
+        0
+        0
+        VERTEX
+        8
+        道路
+        10
+        1
+        20
+        2
+        0
+        VERTEX
+        8
+        道路
+        10
+        4
+        20
+        2
+        0
+        VERTEX
+        8
+        道路
+        10
+        4
+        20
+        6
+        0
+        SEQEND
+        0
+        LINE
+        8
+        紙
+        67
+        1
+        10
+        100
+        20
+        100
+        11
+        110
+        21
+        100
+        0
+        LINE
+        8
+        凍結
+        10
+        0
+        20
+        1
+        11
+        3
+        21
+        1
+        0
+        SPLINE
+        8
+        曲線
+        70
+        8
+        11
+        0
+        21
+        0
+        11
+        5
+        21
+        1
+        11
+        10
+        21
+        0
+        0
+        ELLIPSE
+        8
+        曲線
+        10
+        0
+        20
+        0
+        11
+        4
+        21
+        0
+        40
+        0.5
+        41
+        0
+        42
+        6.283185307
+        0
+        HATCH
+        8
+        塗り
+        10
+        0
+        20
+        0
+        91
+        1
+        92
+        7
+        72
+        0
+        73
+        1
+        93
+        4
+        10
+        0
+        20
+        0
+        10
+        10
+        20
+        0
+        10
+        10
+        20
+        5
+        10
+        0
+        20
+        5
+        0
+        TEXT
+        8
+        注記
+        10
+        1
+        20
+        1
+        40
+        1
+        1
+        T4
+        0
+        POINT
+        8
+        点
+        10
+        2
+        20
+        2
+        0
+        ENDSEC
+        0
+        EOF
+
+        """
+    }
+
     private func strings(_ document: DrawingDocument) -> [String] {
         document.entities.compactMap { entity in
             if case let .text(_, string, _, _) = entity.primitive { return string }
