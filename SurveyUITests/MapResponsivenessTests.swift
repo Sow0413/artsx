@@ -60,25 +60,62 @@ final class MapResponsivenessTests: XCTestCase {
         }
     }
 
+    func testDrawingPickerAppears() {
+        app.terminate()
+        app.launchArguments = ["-surveyUITest", "-surveyUITestPicker"]
+        app.launch()
+        allowSystemPrompts()
+        dismissStaturePrompt()
+        let tab = app.buttons["tab-export"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 8), "出すタブが無い")
+        tab.tap()
+        let draw = app.buttons["open-draw"]
+        XCTAssertTrue(draw.waitForExistence(timeout: 8), "図面を読み込むが無い")
+        draw.tap()
+        let read = app.buttons["draw-import"]
+        XCTAssertTrue(read.waitForExistence(timeout: 8), "図面を読むが無い")
+        read.tap()
+        let appeared = expectation(description: "書類ピッカー")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { appeared.fulfill() }
+        wait(for: [appeared], timeout: 3)
+        let labels = ["キャンセル", "Cancel", "ブラウズ", "Browse", "最近使った項目", "Recents"]
+        let picker = labels.contains { label in
+            app.buttons[label].exists || app.navigationBars[label].exists || app.staticTexts[label].exists
+        }
+        XCTAssertTrue(picker, "図面を読むを押しても書類ピッカーが出ない")
+        shot("50-draw-picker")
+        if app.buttons["キャンセル"].exists {
+            app.buttons["キャンセル"].tap()
+        } else if app.buttons["Cancel"].exists {
+            app.buttons["Cancel"].tap()
+        }
+    }
+
     func testVIDrawingAndSurveyPoints() {
         app.terminate()
         app.launchArguments = ["-surveyUITest", "-uitestField", "vi"]
         app.launch()
         allowSystemPrompts()
         dismissStaturePrompt()
+        openDrawingImport()
+        let preview = app.descendants(matching: .any)["sheet-preview"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 25), "図面のプレビューが無い")
+        let place = app.buttons["place-on-site"]
+        XCTAssertTrue(place.waitForExistence(timeout: 5), "現場へ置くが無い")
+        XCTAssertTrue(app.staticTexts["draw-result"].label.contains("6系"))
+        shot("47-vi-preview")
+        place.tap()
         let zone = app.staticTexts["map-zone"]
-        XCTAssertTrue(zone.waitForExistence(timeout: 25), "6系の図面が出ない")
+        XCTAssertTrue(zone.waitForExistence(timeout: 15), "6系の図面が出ない")
         XCTAssertEqual(zone.label, "6系")
         let marks = app.staticTexts["survey-points"]
         XCTAssertTrue(marks.waitForExistence(timeout: 8), "測点が出ない")
-        XCTAssertTrue(marks.label.contains("測点"))
         let countText = marks.label.replacingOccurrences(of: "測点 ", with: "")
         XCTAssertGreaterThanOrEqual(Int(countText) ?? 0, 34)
         let tiles = expectation(description: "地理院タイル")
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { tiles.fulfill() }
         wait(for: [tiles], timeout: 8)
-        shot("47-vi-drawing")
-        shot("48-vi-points")
+        shot("48-vi-map")
         let data = app.buttons["tab-measure"]
         XCTAssertTrue(data.waitForExistence(timeout: 5))
         data.tap()
@@ -88,9 +125,33 @@ final class MapResponsivenessTests: XCTestCase {
         let book = app.staticTexts["book-count"]
         XCTAssertTrue(book.waitForExistence(timeout: 8))
         XCTAssertTrue(book.label.contains("6系"))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'P01'")).firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'S01'")).firstMatch.waitForExistence(timeout: 5))
+        let p01 = app.staticTexts["book-ll-P01"]
+        XCTAssertTrue(p01.waitForExistence(timeout: 5), "P01 の経緯度が無い")
+        XCTAssertTrue(p01.label.contains("34.600"))
+        XCTAssertTrue(p01.label.contains("135.800"))
+        XCTAssertTrue(app.staticTexts["book-ll-S01"].waitForExistence(timeout: 5), "SIMA の S01 が無い")
         shot("49-vi-book")
+
+        app.terminate()
+        app.launchArguments = ["-surveyUITest", "-uitestField", "vi-fail"]
+        app.launch()
+        allowSystemPrompts()
+        dismissStaturePrompt()
+        openDrawingImport()
+        let failed = app.staticTexts["draw-result"]
+        XCTAssertTrue(failed.waitForExistence(timeout: 15), "失敗の文が無い")
+        XCTAssertTrue(failed.label.contains("読めませんでした"))
+        shot("51-vi-fail")
+    }
+
+    private func openDrawingImport() {
+        let tab = app.buttons["tab-export"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 8), "出すタブが無い")
+        tab.tap()
+        let draw = app.buttons["open-draw"]
+        XCTAssertTrue(draw.waitForExistence(timeout: 8), "図面を読み込むが無い")
+        draw.tap()
+        XCTAssertTrue(app.scrollViews["screen-draw"].waitForExistence(timeout: 8), "図面の読み込みが開かない")
     }
 
     func testBasicMapMeasureExportAndRTK() {

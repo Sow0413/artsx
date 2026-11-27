@@ -108,6 +108,27 @@ final class FieldPackTests: XCTestCase {
         XCTAssertEqual(document.entities.count, 1)
         let meta = try XCTUnwrap(DrawingSidecar.load(VIPack.meta))
         XCTAssertEqual(meta.zone, 6)
+        let decision = FieldPackPlacement.resolve(
+            sidecar: meta,
+            x: document.bounds.midX,
+            y: document.bounds.midY,
+            latitude: nil,
+            longitude: nil,
+            prefecture: nil
+        )
+        XCTAssertEqual(decision.zone, 6)
+        XCTAssertNotEqual(decision.zone, 9)
+        XCTAssertNotEqual(decision.zone, 16)
+        let overlay = DrawingPlacement.overlay(
+            document: document,
+            zone: decision.zone ?? 0,
+            axis: .cadEastNorth,
+            transform: nil
+        )
+        XCTAssertFalse(overlay.paths.isEmpty)
+        let corner = try XCTUnwrap(overlay.paths.first?.coordinates.first)
+        XCTAssertEqual(corner.latitudeDegrees, VIPack.latitude, accuracy: 0.002)
+        XCTAssertEqual(corner.longitudeDegrees, VIPack.longitude, accuracy: 0.002)
         let sima = try XCTUnwrap(String(data: VIPack.sima, encoding: .utf8))
         XCTAssertTrue(sima.contains("A01,1,S01,"))
         let entries = CoordinateExchange.parse(data: VIPack.sima, filename: "points.sima", zone: 6)

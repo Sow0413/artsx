@@ -11,7 +11,6 @@ import PDFKit
 struct SheetImportPage: View {
     @ObservedObject var field: FieldModel
     var onNext: () -> Void
-    @State private var picking = false
 
     private static let uiTestPNG = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")!
 
@@ -23,10 +22,14 @@ struct SheetImportPage: View {
                     .lineLimit(1)
                     .accessibilityIdentifier("purpose-draw")
                 DeskTile(title: "図面を読む", systemImage: "doc.badge.plus", identifier: "draw-import", prominent: true) {
-                    if Self.uiTest {
+                    if Self.uiTest, !Self.forcePicker {
                         field.importProjectSheet(data: Self.uiTestPNG, fileName: "図面.png")
                     } else {
-                        picking = true
+                        SheetFilePicker.present(types: Self.types, onPick: { urls in
+                            Self.importFiles(urls, into: field)
+                        }, onFail: { reason in
+                            field.failSheet(reason)
+                        })
                     }
                 }
                 if let message = field.sheetMessage {
@@ -44,10 +47,23 @@ struct SheetImportPage: View {
                     }
                 }
                 if let sheet = field.projectSheet, let data = field.projectSheetData() {
-                    SheetPreview(data: data, sheet: sheet)
+                    SheetPreview(data: data, sheet: sheet, readyToPlace: field.canPlaceOnSite)
                         .accessibilityIdentifier("sheet-preview")
                 }
-                if field.projectSheet != nil {
+                if field.canPlaceOnSite {
+                    Button {
+                        field.placeImportedSheet()
+                    } label: {
+                        Text("現場へ置く")
+                            .font(SurveyType(18, .heavy))
+                            .frame(maxWidth: .infinity, minHeight: 72)
+                            .background(SurveyColor.blue, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .foregroundStyle(SurveyColor.onAccent)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("place-on-site")
+                }
+                if field.projectSheet != nil, !field.canPlaceOnSite {
                     Button(action: onNext) {
                         Text("縮尺設定へ")
                             .font(SurveyType(18, .heavy))
@@ -66,61 +82,162 @@ struct SheetImportPage: View {
         .accessibilityIdentifier("screen-draw")
         .background(SurveyColor.background)
         .onAppear { field.refreshProjectSheet() }
-        .fileImporter(isPresented: $picking, allowedContentTypes: Self.types, allowsMultipleSelection: true) { result in
-            guard case let .success(urls) = result else { return }
-            Self.importFiles(urls, into: field)
-        }
     }
 
     private static func importFiles(_ urls: [URL], into field: FieldModel) {
+        guard !urls.isEmpty else {
+            field.failSheet("ファイルが選ばれませんでした。")
+            return
+        }
         var sheet: (Data, String, URL)?
         var meta: Data?
         var books: [(Data, String)] = []
+        var failures: [String] = []
         for url in urls {
-            let allowed = url.startAccessingSecurityScopedResource()
-            defer { if allowed { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url) else { continue }
-            let name = url.lastPathComponent
-            let lower = name.lowercased()
-            if lower.hasSuffix("meta.json") {
-                meta = data
-            } else if lower.hasSuffix("csv") || lower.hasSuffix("sima") {
-                books.append((data, name))
-            } else if lower.hasSuffix("dxf") || lower.hasSuffix("sfc") || lower.hasSuffix("pdf")
-                        || lower.hasSuffix("png") || lower.hasSuffix("jpg") || lower.hasSuffix("jpeg") {
-                sheet = (data, name, url)
+            switch PickedFileBytes.read(url) {
+            case let .failure(reason):
+                failures.append(reason)
+            case let .success(data):
+                var name = url.lastPathComponent
+                if !name.lowercased().hasSuffix("dxf"), looksLikeDXF(data) {
+                    name += ".dxf"
+                }
+                let lower = name.lowercased()
+                if lower.hasSuffix("meta.json") {
+                    meta = data
+                } else if lower.hasSuffix("csv") || lower.hasSuffix("sima") {
+                    books.append((data, name))
+                } else if lower.hasSuffix("dxf") || lower.hasSuffix("sfc") || lower.hasSuffix("pdf")
+                            || lower.hasSuffix("png") || lower.hasSuffix("jpg") || lower.hasSuffix("jpeg")
+                            || lower.hasSuffix("heic") || lower.hasSuffix("gif") || lower.hasSuffix("webp")
+                            || lower.hasSuffix("tif") || lower.hasSuffix("tiff") {
+                    sheet = (data, name, url)
+                } else {
+                    failures.append("\(name) は図面でも基準点でもありません。")
+                }
             }
         }
-        if meta == nil, let sheet {
-            let sibling = sheet.2.appendingPathExtension("meta.json")
-            meta = try? Data(contentsOf: sibling)
+        if meta == nil, let sheet, case let .success(data) = PickedFileBytes.read(sheet.2.appendingPathExtension("meta.json")) {
+            meta = data
         }
         if let sheet {
             field.importProjectSheet(data: sheet.0, fileName: sheet.1, sidecar: meta, books: books)
         } else if let meta {
             field.holdSidecar(meta)
             for book in books { field.importBasic(data: book.0, filename: book.1) }
-        } else {
+        } else if !books.isEmpty {
             for book in books { field.importBasic(data: book.0, filename: book.1) }
+        } else {
+            let reason = failures.isEmpty
+                ? "選んだファイルを読めませんでした。"
+                : failures.joined(separator: " ")
+            field.failSheet(reason)
         }
+    }
+
+    private static func looksLikeDXF(_ data: Data) -> Bool {
+        let sample = data.prefix(4000)
+        guard let text = String(data: sample, encoding: .utf8) ?? String(data: sample, encoding: .ascii) else { return false }
+        return text.contains("SECTION") && (text.contains("ENTITIES") || text.contains("AC10"))
     }
 
     private static var uiTest: Bool { ProcessInfo.processInfo.arguments.contains("-surveyUITest") }
 
+    private static var forcePicker: Bool { ProcessInfo.processInfo.arguments.contains("-surveyUITestPicker") }
+
     private static var types: [UTType] {
-        var list: [UTType] = [.pdf, .image]
-        if let dxf = UTType(filenameExtension: "dxf") { list.append(dxf) }
-        if let sfc = UTType(filenameExtension: "sfc") { list.append(sfc) }
-        if let json = UTType(filenameExtension: "json") { list.append(json) }
-        if let csv = UTType(filenameExtension: "csv") { list.append(csv) }
-        list.append(.commaSeparatedText)
+        var list: [UTType] = [.pdf, .image, .json, .commaSeparatedText, .plainText, .data]
+        list.append(UTType(filenameExtension: "dxf") ?? .data)
+        list.append(UTType(filenameExtension: "sfc") ?? .data)
+        list.append(UTType(filenameExtension: "csv") ?? .commaSeparatedText)
+        list.append(UTType(filenameExtension: "json") ?? .json)
         return list
+    }
+}
+
+/// ファイルアプリの OneDrive は、選んだ直後は中身が端末に無いことがある。
+enum PickedFileBytes {
+    static func read(_ url: URL) -> Result<Data, String> {
+        let name = url.lastPathComponent.isEmpty ? "ファイル" : url.lastPathComponent
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        if (try? url.resourceValues(forKeys: [.isUbiquitousItemKey]))?.isUbiquitousItem == true {
+            do {
+                try FileManager.default.startDownloadingUbiquitousItem(at: url)
+            } catch {
+                return .failure("\(name) のダウンロードを始められませんでした。\(error.localizedDescription)")
+            }
+        }
+        let sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("picked-\(UUID().uuidString)-\(name)")
+        var copied: Result<Data, String> = .failure("\(name) をアプリにコピーできませんでした。")
+        var coordinationError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &coordinationError) { coordinated in
+            do {
+                if FileManager.default.fileExists(atPath: sandbox.path) {
+                    try FileManager.default.removeItem(at: sandbox)
+                }
+                try FileManager.default.copyItem(at: coordinated, to: sandbox)
+                let data = try Data(contentsOf: sandbox)
+                copied = data.isEmpty ? .failure("\(name) は空です。") : .success(data)
+            } catch {
+                copied = .failure("\(name) をアプリにコピーできませんでした。\(error.localizedDescription)")
+            }
+        }
+        if let coordinationError, case .failure = copied {
+            return .failure("\(name) を開けませんでした。\(coordinationError.localizedDescription)")
+        }
+        return copied
+    }
+}
+
+/// SwiftUI の fileImporter は、ナビゲーションの中だとシートが重なって出ないことがある。
+enum SheetFilePicker {
+    private static var delegate: Delegate?
+
+    static func present(types: [UTType], onPick: @escaping ([URL]) -> Void, onFail: @escaping (String) -> Void) {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+        picker.allowsMultipleSelection = true
+        picker.shouldShowFileExtensions = true
+        let delegate = Delegate(onPick: onPick)
+        self.delegate = delegate
+        picker.delegate = delegate
+        guard let host = topViewController() else {
+            onFail("書類の選択画面を出せませんでした。")
+            return
+        }
+        host.present(picker, animated: true)
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first { $0.isKeyWindow } ?? scenes.flatMap(\.windows).first
+        var controller = window?.rootViewController
+        while let presented = controller?.presentedViewController {
+            controller = presented
+        }
+        return controller
+    }
+
+    private final class Delegate: NSObject, UIDocumentPickerDelegate {
+        let onPick: ([URL]) -> Void
+        init(onPick: @escaping ([URL]) -> Void) { self.onPick = onPick }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(urls)
+            SheetFilePicker.delegate = nil
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            SheetFilePicker.delegate = nil
+        }
     }
 }
 
 private struct SheetPreview: View {
     var data: Data
     var sheet: ProjectSheet
+    var readyToPlace: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -141,7 +258,7 @@ private struct SheetPreview: View {
         } else if sheet.kind == "pdf" {
             pdfPreview
         } else {
-            Text("DXF を現場に置きました。図への合わせは次の段です。")
+            Text(readyToPlace ? "読み込んだ図面です。現場へ置くと地図に出します。" : "DXF を現場に置きました。図への合わせは次の段です。")
                 .font(SurveyType(16, .semibold))
                 .foregroundStyle(SurveyColor.muted)
                 .lineLimit(2)

@@ -85,6 +85,7 @@ final class FieldModel: ObservableObject {
     @Published private(set) var sheetZoneChoices: [Int] = []
     @Published private(set) var bookNote: String?
     @Published private(set) var bookZoneChoices: [Int] = []
+    @Published private(set) var canPlaceOnSite = false
     /// 図面フィクスチャを地図へ重ねた結果。`-surveyUITestDrawings` のときだけ書く。
     @Published var uiTestDrawingStatus: String?
     private var uiTestDrawingStep = 0
@@ -2950,6 +2951,11 @@ final class FieldModel: ObservableObject {
         importBooks(books)
     }
 
+    func failSheet(_ reason: String) {
+        let text = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        sheetMessage = text.isEmpty ? "図面を読めませんでした。" : text
+    }
+
     func holdSidecar(_ data: Data) {
         heldSidecarData = data
         if let sidecar = DrawingSidecar.load(data), let zone = sidecar.zone {
@@ -2960,11 +2966,18 @@ final class FieldModel: ObservableObject {
 
     func acceptSheetZone(_ zone: Int) {
         guard let pending = pendingSheet, (1...19).contains(zone) else { return }
-        trustedZone = zone
-        sheetZoneChoices = []
-        placeDrawing(pending, zone: zone, axis: pending.axis)
+        stageForPlacement(pending, zone: zone)
+    }
+
+    func placeImportedSheet() {
+        guard let pending = pendingSheet, let zone = trustedZone else {
+            failSheet("置く図面がありません。先に図面を読んでください。")
+            return
+        }
         let books = pending.books
         pendingSheet = nil
+        canPlaceOnSite = false
+        placeDrawing(pending, zone: zone, axis: pending.axis)
         importBooks(books)
         frameMapToSurvey()
     }
@@ -2987,7 +3000,10 @@ final class FieldModel: ObservableObject {
     ) {
         switch parsed {
         case let .failure(error):
-            sheetMessage = (error as? DXFError)?.description ?? (error as? SFCError)?.description ?? "図面を読めませんでした。"
+            let reason = (error as? DXFError)?.description
+                ?? (error as? SFCError)?.description
+                ?? error.localizedDescription
+            sheetMessage = "\(fileName) を読めませんでした。\(reason)"
         case let .success(document):
             let here = placementSample()
             let decision = FieldPackPlacement.resolve(
@@ -3013,14 +3029,29 @@ final class FieldModel: ObservableObject {
                 return
             }
             trustedZone = zone
-            placeDrawing(
+            stageForPlacement(
                 PendingDrawingSheet(data: data, fileName: fileName, document: document, kind: kind, axis: axis, books: books),
-                zone: zone,
-                axis: axis
+                zone: zone
             )
-            importBooks(books)
-            frameMapToSurvey()
         }
+    }
+
+    private func stageForPlacement(_ pending: PendingDrawingSheet, zone: Int) {
+        pendingSheet = pending
+        trustedZone = zone
+        canPlaceOnSite = true
+        sheetZoneChoices = []
+        if let name = drawing.project?.name,
+           let record = try? ProjectStore.saveSheet(
+            data: pending.data,
+            fileName: pending.fileName,
+            kind: pending.kind,
+            projectName: name,
+            at: drawing.projectsRoot
+           ) {
+            projectSheet = record
+        }
+        sheetMessage = "\(pending.fileName) を読みました。\(zone)系（EPSG \(6668 + zone)）。現場へ置くと地図に出します。"
     }
 
     private func placeDrawing(_ pending: PendingDrawingSheet, zone: Int, axis: DrawingAxis) {
@@ -3042,8 +3073,22 @@ final class FieldModel: ObservableObject {
         if let record = ProjectStore.loadSheet(projectName: drawing.project?.name ?? "", at: drawing.projectsRoot) {
             projectSheet = record
         }
+        if let name = drawing.project?.name,
+           let record = try? ProjectStore.saveSheet(
+            data: pending.data,
+            fileName: pending.fileName,
+            kind: pending.kind,
+            projectName: name,
+            at: drawing.projectsRoot
+           ) {
+            projectSheet = record
+        }
         sheetMessage = note
         sheetZoneChoices = []
+        if drawing.mapPaths.isEmpty {
+            sheetMessage = note + "地図には出ていません。"
+            return
+        }
         frameMapToDrawing()
         tab = .map
     }
@@ -3206,9 +3251,15 @@ final class FieldModel: ObservableObject {
     private func loadVIPackIfRequested() {
         let args = ProcessInfo.processInfo.arguments
         guard let flag = args.firstIndex(of: "-uitestField"),
-              args.indices.contains(flag + 1), args[flag + 1] == "vi" else { return }
+              args.indices.contains(flag + 1) else { return }
+        let mode = args[flag + 1]
+        guard mode == "vi" || mode == "vi-fail" else { return }
         if drawing.project == nil {
             drawing.createProject(named: "六系")
+        }
+        if mode == "vi-fail" {
+            importProjectSheet(data: Data("not-a-dxf".utf8), fileName: "broken.dxf")
+            return
         }
         drawing.zone = 16
         importProjectSheet(

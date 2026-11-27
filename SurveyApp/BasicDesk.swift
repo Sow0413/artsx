@@ -332,6 +332,9 @@ struct BasicDesk: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(entry.name)  \(entry.kind ?? "")")
                         .font(SurveyType(16, .heavy))
+                    Text(String(format: "%.5f°N  %.5f°E", entry.latitudeDegrees, entry.longitudeDegrees))
+                        .font(SurveyType(15, .heavy))
+                        .accessibilityIdentifier("book-ll-\(entry.name)")
                     Text(line(entry))
                         .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
