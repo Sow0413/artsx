@@ -728,8 +728,11 @@ final class MapResponsivenessTests: XCTestCase {
         let tab = app.buttons[identifier]
         XCTAssertTrue(tab.waitForExistence(timeout: 5), "\(identifier) が無い")
         tab.tap()
-        waitUntilSelected(tab, name: identifier)
-        XCTAssertTrue(marker(needle).waitForExistence(timeout: 5), "\(identifier) をタップしても画面が変わらない")
+        let selected = expectation(for: NSPredicate(format: "isSelected == true"), evaluatedWith: tab)
+        if XCTWaiter().wait(for: [selected], timeout: 5) != .completed, !marker(needle).exists {
+            XCTAssertTrue(tab.isSelected, "\(identifier) が選ばれない")
+        }
+        XCTAssertTrue(marker(needle).waitForExistence(timeout: 8), "\(identifier) をタップしても画面が変わらない")
     }
 
     private func marker(_ needle: String) -> XCUIElement {

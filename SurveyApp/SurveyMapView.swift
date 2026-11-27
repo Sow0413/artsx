@@ -88,7 +88,8 @@ struct SurveyMapView: UIViewRepresentable {
         private var didSetInitialRegion = false
         private var applyingProgrammaticRegion = false
         private var wasFollowing = true
-        private var drawingLines: [MKPolyline] = []
+        private var drawingLines: [MKOverlay] = []
+        private var drawingColors: [ObjectIdentifier: UIColor] = [:]
         var attachedIndex = DrawingMapIndex.empty
         private var drawingRevision = -1
         private var drawingShown = true
@@ -457,16 +458,25 @@ struct SurveyMapView: UIViewRepresentable {
                 map.removeOverlays(drawingLines)
             }
             drawingLines = []
+            drawingColors = [:]
             guard drawingShown else { return }
-            drawingLines = paths.compactMap { path in
-                let coordinates = path.coordinates.map {
+            var groups: [String: (UIColor, [MKPolyline])] = [:]
+            for path in paths {
+                var coordinates = path.coordinates.map {
                     CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
                 }
-                guard coordinates.count >= 2 else { return nil }
-                var copy = coordinates
-                let line = DrawingStrokeOverlay(coordinates: &copy, count: copy.count)
-                line.stroke = UIColor(red: path.red, green: path.green, blue: path.blue, alpha: 1)
-                return line
+                guard coordinates.count >= 2 else { continue }
+                let line = MKPolyline(coordinates: &coordinates, count: coordinates.count)
+                let key = String(format: "%.3f %.3f %.3f", path.red, path.green, path.blue)
+                let color = UIColor(red: path.red, green: path.green, blue: path.blue, alpha: 1)
+                var group = groups[key] ?? (color, [])
+                group.1.append(line)
+                groups[key] = group
+            }
+            for (_, group) in groups {
+                let multi = MKMultiPolyline(group.1)
+                drawingColors[ObjectIdentifier(multi)] = group.0
+                drawingLines.append(multi)
             }
             if !drawingLines.isEmpty {
                 map.addOverlays(drawingLines, level: .aboveLabels)
@@ -639,9 +649,9 @@ struct SurveyMapView: UIViewRepresentable {
                 renderer.lineWidth = circle === cadInner ? 2 : 4
                 return renderer
             }
-            if let drawing = overlay as? DrawingStrokeOverlay {
-                let renderer = MKPolylineRenderer(polyline: drawing)
-                renderer.strokeColor = drawing.stroke
+            if let multi = overlay as? MKMultiPolyline {
+                let renderer = MKMultiPolylineRenderer(multiPolyline: multi)
+                renderer.strokeColor = drawingColors[ObjectIdentifier(multi)] ?? UIColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1)
                 renderer.lineWidth = 1
                 return renderer
             }
