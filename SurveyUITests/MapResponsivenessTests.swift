@@ -92,6 +92,11 @@ final class MapResponsivenessTests: XCTestCase {
     }
 
     func testCoordinateImportAndStakeout() {
+        app.terminate()
+        app.launchArguments = ["-surveyUITest", "-uitestLatitude", "34.6", "-uitestLongitude", "135.8"]
+        app.launch()
+        allowSystemPrompts()
+        dismissStaturePrompt()
         let map = app.buttons["tab-map"]
         XCTAssertTrue(map.waitForExistence(timeout: 8), "地図タブが無い")
         map.tap()
@@ -115,7 +120,10 @@ final class MapResponsivenessTests: XCTestCase {
         stake.tap()
         let guide = app.staticTexts["stakeout-guide"]
         XCTAssertTrue(guide.waitForExistence(timeout: 20), "測設の案内が無い")
-        let ready = expectation(for: NSPredicate(format: "label CONTAINS '未確認' AND label CONTAINS '北' AND label CONTAINS '系'"), evaluatedWith: guide)
+        let ready = expectation(
+            for: NSPredicate(format: "label CONTAINS '第VI系' AND label CONTAINS '東' AND label MATCHES '.*[0-9].*'"),
+            evaluatedWith: guide
+        )
         XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 25), .completed, "水平の測設が出ない。表示は \(guide.label)")
         shot("56-stakeout")
     }
@@ -394,8 +402,15 @@ final class MapResponsivenessTests: XCTestCase {
         shot("10-export")
         tapClear("basic-import", in: exportData)
         confirm("上書きして読む")
-        let imported = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '1点を読みました'")).firstMatch
+        let needsZone = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '系を選んでください'")).firstMatch
+        if needsZone.waitForExistence(timeout: 3) {
+            let zone = app.buttons["book-zone-6"]
+            XCTAssertTrue(zone.waitForExistence(timeout: 3), "系のピッカーが無い")
+            zone.tap()
+        }
+        let imported = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '点を読みました'")).firstMatch
         XCTAssertTrue(imported.waitForExistence(timeout: 5), "座標を読み込めない")
+        XCTAssertTrue(imported.label.contains("系"))
         scrollClear(imported, in: exportData)
         shot("11-import")
         tapClear("basic-backup", in: exportData)

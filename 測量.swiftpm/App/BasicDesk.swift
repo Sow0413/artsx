@@ -405,6 +405,13 @@ struct BasicDesk: View {
                     .lineLimit(3)
                     .accessibilityIdentifier("export-result")
             }
+            if !field.bookZoneChoices.isEmpty {
+                ForEach(field.bookZoneChoices, id: \.self) { zone in
+                    Button(PlaneZoneLabel.button(zone)) { field.acceptBookZone(zone) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("book-zone-\(zone)")
+                }
+            }
             if let url = field.exportURL {
                 Text("保存先 \(url.lastPathComponent)")
                     .font(SurveyType(16, .heavy))

@@ -2573,7 +2573,14 @@ final class FieldModel: ObservableObject {
         applyExplicitZone(zone)
         coordinateZoneChoices = []
         let count = basicPoints().count
-        bookNote = count > 0 ? "\(count)点・\(PlaneZoneLabel.button(zone))" : PlaneZoneLabel.button(zone)
+        let note = count > 0 ? Self.readNote(count: count, zone: zone) : PlaneZoneLabel.button(zone)
+        bookNote = note
+        exportMessage = note
+    }
+
+    private static func readNote(count: Int, zone: Int) -> String {
+        let name = zone == 6 ? "第VI系" : "第\(zone)系"
+        return "\(count)点を読みました（\(name)）"
     }
 
     private func applyExplicitZone(_ zone: Int) {
@@ -3233,13 +3240,12 @@ final class FieldModel: ObservableObject {
         do {
             try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
             if adoptZone {
-                trustedZone = zone
-                drawing.zone = zone
+                applyExplicitZone(zone)
             }
             basicRevision += 1
             showSurveyMarks(entries)
             let total = basicPoints().count
-            let note = adoptZone ? "\(total)点・\(zone)系" : "\(total)点"
+            let note = adoptZone ? Self.readNote(count: total, zone: zone) : "\(total)点を読みました"
             exportMessage = note
             bookNote = note
         } catch {
@@ -3327,7 +3333,7 @@ final class FieldModel: ObservableObject {
             basicRevision += 1
             showSurveyMarks(entries)
             let total = basicPoints().count
-            let note = trustedZone.map { "\(total)点・\($0)系" } ?? "\(total)点"
+            let note = trustedZone.map { Self.readNote(count: total, zone: $0) } ?? "\(total)点を読みました"
             exportMessage = note
             bookNote = note
         } catch {
