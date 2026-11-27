@@ -24,7 +24,7 @@ final class MapResponsivenessTests: XCTestCase {
             (1, "1_irabu", "34-draw-irabu", 40.0),
             (2, "2_nagoya", "35-draw-nagoya", 40.0),
             (3, "ミリ", "36-draw-mm", 40.0),
-            (4, "途中まで", "37-draw-heavy", 90.0),
+            (4, "置きました", "37-draw-heavy", 90.0),
             (5, "途中で切れています", "38-draw-broken", 30.0),
             (6, "DXF の形になっていません", "39-draw-empty", 30.0),
             (7, "1系", "40-draw-wrong-zone", 30.0),
@@ -247,7 +247,7 @@ final class MapResponsivenessTests: XCTestCase {
     private func openLoadMenu() {
         let menu = app.buttons["map-load"]
         XCTAssertTrue(menu.waitForExistence(timeout: 8), "読込が無い")
-        if !app.buttons["図面を読む"].exists && !app.buttons["座標を読み込む"].exists {
+        if !app.buttons["図面を読む"].exists && !app.buttons["座標を読む"].exists && !app.buttons["座標を読み込む"].exists {
             menu.tap()
         }
     }

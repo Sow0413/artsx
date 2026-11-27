@@ -3258,6 +3258,18 @@ final class FieldModel: ObservableObject {
     }
 
     private func frameMapToDrawing() {
+        if let bounds = drawing.mapIndex.bounds {
+            followUser = false
+            let latitude = max(bounds.north - bounds.south, 0.002) * 1.8
+            let longitude = max(bounds.east - bounds.west, 0.002) * 1.8
+            viewport = MapViewport(
+                centerLatitude: (bounds.south + bounds.north) / 2,
+                centerLongitude: (bounds.west + bounds.east) / 2,
+                latitudeDelta: latitude,
+                longitudeDelta: longitude
+            )
+            return
+        }
         var south = Double.greatestFiniteMagnitude
         var north = -Double.greatestFiniteMagnitude
         var west = Double.greatestFiniteMagnitude

@@ -45,6 +45,7 @@ struct SurveyMapView: UIViewRepresentable {
             selectedID: field.selectedControlPointID
         )
         context.coordinator.syncTiles(on: map, shown: field.showMapTiles)
+        context.coordinator.attachedIndex = field.drawing.mapIndex
         context.coordinator.syncDrawing(
             on: map,
             paths: field.drawing.mapPaths,
@@ -88,10 +89,15 @@ struct SurveyMapView: UIViewRepresentable {
         private var applyingProgrammaticRegion = false
         private var wasFollowing = true
         private var drawingLines: [MKPolyline] = []
+        var attachedIndex = DrawingMapIndex.empty
         private var drawingRevision = -1
         private var drawingShown = true
         private var drawingZoom = -1
         private var lastDrawingPaths: [GeographicPath] = []
+        private var drawingBuffer: GeoBounds?
+        private var drawingPixel = 0.0
+        private var drawingCull: DispatchWorkItem?
+        private var drawingCullID = 0
         private var reachOverlays: [MKOverlay] = []
         private var reachKey = ""
         private var crewOverlays: [MKOverlay] = []
@@ -384,29 +390,79 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func syncDrawing(on map: MKMapView, paths: [GeographicPath], revision: Int, shown: Bool) {
-            let zoom = MapZoom.level(
-                longitudeDelta: map.region.span.longitudeDelta,
-                screenWidthPoints: Double(max(map.bounds.width, 1))
-            )
             lastDrawingPaths = paths
-            guard revision != drawingRevision || shown != drawingShown || zoom != drawingZoom else { return }
+            guard revision != drawingRevision || shown != drawingShown else { return }
             drawingRevision = revision
             drawingShown = shown
-            drawingZoom = zoom
+            drawingBuffer = nil
+            drawingCull?.cancel()
+            replaceDrawing(paths, on: map)
+        }
+
+        func scheduleDrawingCull(on map: MKMapView) {
+            guard drawingShown else { return }
+            drawingCull?.cancel()
+            let work = DispatchWorkItem { [weak self, weak map] in
+                guard let self, let map else { return }
+                self.cullDrawing(on: map)
+            }
+            drawingCull = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        }
+
+        private func cullDrawing(on map: MKMapView) {
+            let region = map.region
+            let visible = GeoBounds(
+                south: region.center.latitude - region.span.latitudeDelta / 2,
+                west: region.center.longitude - region.span.longitudeDelta / 2,
+                north: region.center.latitude + region.span.latitudeDelta / 2,
+                east: region.center.longitude + region.span.longitudeDelta / 2
+            )
+            let width = Double(max(map.bounds.width, 1))
+            let latitude = region.center.latitude * .pi / 180
+            let metersPerPixel = region.span.longitudeDelta * 111_320 * max(0.2, abs(cos(latitude))) / width
+            if let drawingBuffer, DrawingMapIndex.contains(inner: visible, in: drawingBuffer),
+               drawingPixel > 0, abs(metersPerPixel - drawingPixel) / drawingPixel < 0.25 {
+                return
+            }
+            let index = attachedIndex
+            guard index.bounds != nil else { return }
+            let buffer = DrawingMapIndex.buffer(
+                south: visible.south,
+                west: visible.west,
+                north: visible.north,
+                east: visible.east
+            )
+            drawingCullID += 1
+            let ticket = drawingCullID
+            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak map] in
+                let query = index.paths(
+                    south: buffer.south,
+                    west: buffer.west,
+                    north: buffer.north,
+                    east: buffer.east,
+                    metersPerPixel: metersPerPixel
+                )
+                DispatchQueue.main.async {
+                    guard let self, let map, ticket == self.drawingCullID else { return }
+                    self.drawingBuffer = buffer
+                    self.drawingPixel = metersPerPixel
+                    self.replaceDrawing(query.paths, on: map)
+                }
+            }
+        }
+
+        private func replaceDrawing(_ paths: [GeographicPath], on map: MKMapView) {
             if !drawingLines.isEmpty {
                 map.removeOverlays(drawingLines)
             }
             drawingLines = []
-            guard shown else { return }
-            let latitude = map.region.center.latitude * .pi / 180
-            let metersPerPixel = map.region.span.longitudeDelta * 111_320 * max(0.2, abs(cos(latitude))) / Double(max(map.bounds.width, 1))
+            guard drawingShown else { return }
             drawingLines = paths.compactMap { path in
                 let coordinates = path.coordinates.map {
                     CLLocationCoordinate2D(latitude: $0.latitudeDegrees, longitude: $0.longitudeDegrees)
                 }
                 guard coordinates.count >= 2 else { return nil }
-                let length = Self.meters(coordinates)
-                if length < metersPerPixel * 1.5 { return nil }
                 var copy = coordinates
                 let line = DrawingStrokeOverlay(coordinates: &copy, count: copy.count)
                 line.stroke = UIColor(red: path.red, green: path.green, blue: path.blue, alpha: 1)
@@ -535,7 +591,7 @@ struct SurveyMapView: UIViewRepresentable {
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
             reportVisible(mapView)
-            syncDrawing(on: mapView, paths: lastDrawingPaths, revision: drawingRevision, shown: drawingShown)
+            scheduleDrawingCull(on: mapView)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {

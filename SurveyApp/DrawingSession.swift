@@ -41,6 +41,8 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var mapPaths: [GeographicPath] = []
     @Published private(set) var mapRevision = 0
     @Published private(set) var overlayCapped = false
+    /// 地図の範囲照会。描画のたびに図面全体は走査しない。
+    private(set) var mapIndex = DrawingMapIndex.empty
     @Published var camera = DrawingCamera()
     @Published private(set) var backgroundVerdict: BackgroundVerdict?
     @Published private(set) var backgroundBusy = false
@@ -313,22 +315,24 @@ final class DrawingSession: ObservableObject {
             if let unit = parsed.unitWarning { note += unit }
             if let notice = parsed.readNotice { note += notice }
             if waiting {
+                mapIndex = .empty
                 mapPaths = []
                 overlayCapped = false
                 mapRevision += 1
                 note += "仮置き。"
             } else {
-                let built = DrawingPlacement.overlay(
+                mapIndex = DrawingMapIndex.build(
                     document: parsed,
                     zone: zone,
                     axis: axis,
                     transform: heldAlignment ?? activeTransform,
                     composesAxis: activeComposesAxis && heldAlignment == nil
                 )
-                mapPaths = built.paths
-                overlayCapped = built.capped
+                let fitted = mapIndex.fitted()
+                mapPaths = fitted.paths
+                overlayCapped = fitted.capped
                 mapRevision += 1
-                if built.capped { note += "途中まで" }
+                if fitted.capped { note += "途中まで" }
             }
             message = note
             return note
@@ -345,15 +349,16 @@ final class DrawingSession: ObservableObject {
         zone = number
         axis = .cadEastNorth
         mapGeneration += 1
-        let built = DrawingPlacement.overlay(
+        mapIndex = DrawingMapIndex.build(
             document: document,
             zone: number,
             axis: .cadEastNorth,
             transform: transform,
             composesAxis: false
         )
-        mapPaths = built.paths
-        overlayCapped = built.capped
+        let fitted = mapIndex.fitted()
+        mapPaths = fitted.paths
+        overlayCapped = fitted.capped
         mapRevision += 1
     }
 
@@ -1256,6 +1261,7 @@ final class DrawingSession: ObservableObject {
         mapGeneration += 1
         let generation = mapGeneration
         guard let document else {
+            mapIndex = .empty
             mapPaths = []
             overlayCapped = false
             mapRevision += 1
@@ -1269,6 +1275,7 @@ final class DrawingSession: ObservableObject {
         if provisional {
             DispatchQueue.main.async {
                 guard generation == self.mapGeneration else { return }
+                self.mapIndex = .empty
                 self.mapPaths = []
                 self.overlayCapped = false
                 self.mapRevision += 1
@@ -1276,17 +1283,19 @@ final class DrawingSession: ObservableObject {
             return
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            let built = DrawingPlacement.overlay(
+            let index = DrawingMapIndex.build(
                 document: document,
                 zone: zone,
                 axis: axis,
                 transform: transform,
                 composesAxis: composes
             )
+            let fitted = index.fitted()
             DispatchQueue.main.async {
                 guard generation == self.mapGeneration else { return }
-                self.mapPaths = built.paths
-                self.overlayCapped = built.capped
+                self.mapIndex = index
+                self.mapPaths = fitted.paths
+                self.overlayCapped = fitted.capped
                 self.mapRevision += 1
                 self.onMapPaths?()
             }

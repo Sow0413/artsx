@@ -95,6 +95,27 @@ final class DrawingFixtureTests: XCTestCase {
             longitude: HeavyDrawingFixture.northEastLongitude,
             zone: HeavyDrawingFixture.zone
         )
+        let index = DrawingMapIndex.build(
+            document: document,
+            zone: HeavyDrawingFixture.zone,
+            axis: .cadEastNorth,
+            transform: nil
+        )
+        let fitted = index.fitted()
+        let fittedVertices = fitted.paths.reduce(0) { $0 + $1.coordinates.count }
+        XCTAssertLessThanOrEqual(fittedVertices, DrawingMapIndex.vertexBudget)
+        XCTAssertLessThan(fitted.paths.count, HeavyDrawingFixture.lineCount)
+        let window = index.paths(
+            south: HeavyDrawingFixture.southWestLatitude - 0.001,
+            west: HeavyDrawingFixture.southWestLongitude - 0.001,
+            north: HeavyDrawingFixture.southWestLatitude + 0.001,
+            east: HeavyDrawingFixture.southWestLongitude + 0.001,
+            metersPerPixel: 0.4
+        )
+        let windowVertices = window.paths.reduce(0) { $0 + $1.coordinates.count }
+        XCTAssertLessThanOrEqual(windowVertices, DrawingMapIndex.vertexBudget)
+        XCTAssertFalse(window.paths.isEmpty)
+        XCTAssertLessThan(window.paths.count, fitted.paths.count)
     }
 
     func testBrokenDXFReportsACleanError() throws {
