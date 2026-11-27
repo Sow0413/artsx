@@ -60,6 +60,39 @@ final class MapResponsivenessTests: XCTestCase {
         }
     }
 
+    func testVIDrawingAndSurveyPoints() {
+        app.terminate()
+        app.launchArguments = ["-surveyUITest", "-uitestField", "vi"]
+        app.launch()
+        allowSystemPrompts()
+        dismissStaturePrompt()
+        let zone = app.staticTexts["map-zone"]
+        XCTAssertTrue(zone.waitForExistence(timeout: 25), "6系の図面が出ない")
+        XCTAssertEqual(zone.label, "6系")
+        let marks = app.staticTexts["survey-points"]
+        XCTAssertTrue(marks.waitForExistence(timeout: 8), "測点が出ない")
+        XCTAssertTrue(marks.label.contains("測点"))
+        let countText = marks.label.replacingOccurrences(of: "測点 ", with: "")
+        XCTAssertGreaterThanOrEqual(Int(countText) ?? 0, 34)
+        let tiles = expectation(description: "地理院タイル")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { tiles.fulfill() }
+        wait(for: [tiles], timeout: 8)
+        shot("47-vi-drawing")
+        shot("48-vi-points")
+        let data = app.buttons["tab-measure"]
+        XCTAssertTrue(data.waitForExistence(timeout: 5))
+        data.tap()
+        let ledger = app.buttons["open-ledger"]
+        XCTAssertTrue(ledger.waitForExistence(timeout: 5))
+        ledger.tap()
+        let book = app.staticTexts["book-count"]
+        XCTAssertTrue(book.waitForExistence(timeout: 8))
+        XCTAssertTrue(book.label.contains("6系"))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'P01'")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'S01'")).firstMatch.waitForExistence(timeout: 5))
+        shot("49-vi-book")
+    }
+
     func testBasicMapMeasureExportAndRTK() {
         let map = app.buttons["tab-map"]
         XCTAssertTrue(map.waitForExistence(timeout: 8), "地図タブが出ない")

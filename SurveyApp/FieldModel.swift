@@ -82,9 +82,25 @@ final class FieldModel: ObservableObject {
     /// 出すの1段目。現場の下敷きに置いた図面。
     @Published private(set) var projectSheet: ProjectSheet?
     @Published private(set) var sheetMessage: String?
+    @Published private(set) var sheetZoneChoices: [Int] = []
+    @Published private(set) var bookNote: String?
+    @Published private(set) var bookZoneChoices: [Int] = []
     /// 図面フィクスチャを地図へ重ねた結果。`-surveyUITestDrawings` のときだけ書く。
     @Published var uiTestDrawingStatus: String?
     private var uiTestDrawingStep = 0
+    private var heldSidecarData: Data?
+    private var trustedZone: Int?
+    private var pendingSheet: PendingDrawingSheet?
+    private var pendingBook: (data: Data, filename: String)?
+
+    private struct PendingDrawingSheet {
+        var data: Data
+        var fileName: String
+        var document: DrawingDocument
+        var kind: String
+        var axis: DrawingAxis
+        var books: [(Data, String)]
+    }
     @Published var scaleMessage: String?
     @Published var localizeMessage: String?
     @Published var cadMessage: String?
@@ -225,7 +241,7 @@ final class FieldModel: ObservableObject {
     private let statsRelay = IncidentStatsRelayStub(reachable: false)
     private var incidentTimer: Timer?
     private var restoredIncidentProject: String?
-    let controlPoints: [ControlPoint]
+    private(set) var controlPoints: [ControlPoint]
     let journal: FieldJournal
     let gnss: GNSSLink
     let gnssAvailable: Bool
@@ -1832,6 +1848,7 @@ final class FieldModel: ObservableObject {
 
     func start() {
         loadUITestDrawingIfRequested()
+        loadVIPackIfRequested()
         if !SurveyBuild.basicMode,
            stature.statureMeters == nil,
            !ProcessInfo.processInfo.arguments.contains("-skipStatureAsk") {
@@ -2907,48 +2924,299 @@ final class FieldModel: ObservableObject {
         projectSheet = ProjectStore.loadSheet(projectName: name, at: drawing.projectsRoot)
     }
 
-    func importProjectSheet(data: Data, fileName: String) {
-        guard let name = drawing.project?.name else {
+    func importProjectSheet(data: Data, fileName: String, sidecar: Data? = nil, books: [(Data, String)] = []) {
+        guard drawing.project?.name != nil else {
             sheetMessage = "先に現場を作ってください。"
             projectSheet = nil
             return
         }
         let kind = Self.sheetKind(fileName: fileName, data: data)
         guard kind != "unknown" else {
-            sheetMessage = "PDF、画像、DXF を選んでください。"
+            sheetMessage = "PDF、画像、DXF、SFC を選んでください。"
             return
         }
-        let root = drawing.projectsRoot
-        let parsed = kind == "dxf" ? try? DrawingImport.load(data, fileName: fileName) : nil
+        let meta = (sidecar ?? heldSidecarData).flatMap(DrawingSidecar.load)
+        if kind == "dxf" || kind == "sfc" {
+            sheetMessage = "図面を読んでいます。"
+            DispatchQueue.global(qos: .userInitiated).async {
+                let parsed = Result { try DrawingImport.load(data, fileName: fileName) }
+                DispatchQueue.main.async {
+                    self.finishDrawingSheet(parsed, data: data, fileName: fileName, kind: kind, meta: meta, books: books)
+                }
+            }
+            return
+        }
+        storeLooseSheet(data: data, fileName: fileName, kind: kind, note: nil)
+        importBooks(books)
+    }
+
+    func holdSidecar(_ data: Data) {
+        heldSidecarData = data
+        if let sidecar = DrawingSidecar.load(data), let zone = sidecar.zone {
+            trustedZone = zone
+            sheetMessage = "\(zone)系（EPSG \(sidecar.epsg)）を覚えました。図面を選んでください。"
+        }
+    }
+
+    func acceptSheetZone(_ zone: Int) {
+        guard let pending = pendingSheet, (1...19).contains(zone) else { return }
+        trustedZone = zone
+        sheetZoneChoices = []
+        placeDrawing(pending, zone: zone, axis: pending.axis)
+        let books = pending.books
+        pendingSheet = nil
+        importBooks(books)
+        frameMapToSurvey()
+    }
+
+    func acceptBookZone(_ zone: Int) {
+        guard let pending = pendingBook, (1...19).contains(zone) else { return }
+        trustedZone = zone
+        bookZoneChoices = []
+        pendingBook = nil
+        commitPlaneBook(pending.data, filename: pending.filename, zone: zone, adoptZone: true)
+    }
+
+    private func finishDrawingSheet(
+        _ parsed: Result<DrawingDocument, Error>,
+        data: Data,
+        fileName: String,
+        kind: String,
+        meta: DrawingSidecar?,
+        books: [(Data, String)]
+    ) {
+        switch parsed {
+        case let .failure(error):
+            sheetMessage = (error as? DXFError)?.description ?? (error as? SFCError)?.description ?? "図面を読めませんでした。"
+        case let .success(document):
+            let here = placementSample()
+            let decision = FieldPackPlacement.resolve(
+                sidecar: meta,
+                x: document.bounds.midX,
+                y: document.bounds.midY,
+                latitude: here.latitude,
+                longitude: here.longitude,
+                prefecture: drawing.project?.prefecture
+            )
+            let axis = decision.axis ?? .cadEastNorth
+            guard let zone = decision.zone else {
+                pendingSheet = PendingDrawingSheet(
+                    data: data,
+                    fileName: fileName,
+                    document: document,
+                    kind: kind,
+                    axis: axis,
+                    books: books
+                )
+                sheetZoneChoices = decision.choices
+                sheetMessage = "系を選んでください。"
+                return
+            }
+            trustedZone = zone
+            placeDrawing(
+                PendingDrawingSheet(data: data, fileName: fileName, document: document, kind: kind, axis: axis, books: books),
+                zone: zone,
+                axis: axis
+            )
+            importBooks(books)
+            frameMapToSurvey()
+        }
+    }
+
+    private func placeDrawing(_ pending: PendingDrawingSheet, zone: Int, axis: DrawingAxis) {
+        let epsg = 6668 + zone
+        var note = drawing.installParsed(
+            pending.document,
+            data: pending.data,
+            fileName: pending.fileName,
+            zone: zone,
+            axis: axis
+        )
+        let names = SiteDXF.controlNames(in: pending.document)
+        let axisLabel = axis == .surveyNorthEast ? "X北 Y東" : "X東 Y北"
+        note += "\(zone)系（EPSG \(epsg)）。\(axisLabel)。"
+        if pending.kind == "dxf", !names.isEmpty {
+            let bad = SiteDXF.mismatches(drawing: names, ledger: basicPoints().map(\.name))
+            note += bad.isEmpty ? "測設_基準点は台帳と一致。" : "台帳と違う: \(bad.joined(separator: " "))。"
+        }
+        if let record = ProjectStore.loadSheet(projectName: drawing.project?.name ?? "", at: drawing.projectsRoot) {
+            projectSheet = record
+        }
+        sheetMessage = note
+        sheetZoneChoices = []
+        frameMapToDrawing()
+        tab = .map
+    }
+
+    private func storeLooseSheet(data: Data, fileName: String, kind: String, note extra: String?) {
+        guard let name = drawing.project?.name else { return }
         do {
             let record = try ProjectStore.saveSheet(
                 data: data,
                 fileName: fileName,
                 kind: kind,
                 projectName: name,
-                at: root
+                at: drawing.projectsRoot
             )
             projectSheet = record
-            var note = "済。\(record.fileName)。"
-            if let parsed {
-                drawing.zone = SiteDXF.zone
-                drawing.axis = .cadEastNorth
-                let names = SiteDXF.controlNames(in: parsed)
-                if names.isEmpty {
-                    note += "DXF \(parsed.entities.count) 要素。16系（EPSG \(SiteDXF.epsg)）、X東 Y北。"
-                } else {
-                    let bad = SiteDXF.mismatches(drawing: names, ledger: basicPoints().map(\.name))
-                    note += bad.isEmpty
-                        ? "測設_基準点は台帳と一致。"
-                        : "台帳と違う: \(bad.joined(separator: " "))。"
-                }
-            } else {
-                note += "\(record.byteCount) バイト。"
-            }
+            var note = "済。\(record.fileName)。\(record.byteCount) バイト。"
+            if let extra { note += extra }
             sheetMessage = note
         } catch {
             sheetMessage = "図面を置けませんでした。"
         }
+    }
+
+    private func importBooks(_ books: [(Data, String)]) {
+        for book in books {
+            importBasic(data: book.0, filename: book.1)
+        }
+    }
+
+    private func commitPlaneBook(_ data: Data, filename: String, zone: Int, adoptZone: Bool) {
+        guard let project = drawing.project else { return }
+        let entries = CoordinateExchange.parse(data: data, filename: filename, zone: zone)
+        guard !entries.isEmpty else {
+            exportMessage = "読める点がありません。"
+            bookNote = exportMessage
+            return
+        }
+        do {
+            try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
+            if adoptZone {
+                trustedZone = zone
+                drawing.zone = zone
+            }
+            basicRevision += 1
+            showSurveyMarks(entries)
+            let total = basicPoints().count
+            let note = adoptZone ? "\(total)点・\(zone)系" : "\(total)点"
+            exportMessage = note
+            bookNote = note
+        } catch {
+            exportMessage = "読み込めませんでした。"
+            bookNote = exportMessage
+        }
+    }
+
+    private func showSurveyMarks(_ entries: [CoordinateBookEntry]) {
+        var merged = controlPoints
+        for entry in entries {
+            let mark = ControlPoint(
+                id: entry.name,
+                name: entry.name,
+                kind: entry.kind ?? "測点",
+                latitudeDegrees: entry.latitudeDegrees,
+                longitudeDegrees: entry.longitudeDegrees,
+                heightMeters: nil,
+                ellipsoidalHeightMeters: nil,
+                heightKind: .orthometric,
+                sourceNote: entry.source ?? ""
+            )
+            if let index = merged.firstIndex(where: { $0.id == mark.id }) {
+                merged[index] = mark
+            } else {
+                merged.append(mark)
+            }
+        }
+        controlPoints = merged
+        refreshVisibleControlPoints()
+    }
+
+    private func frameMapToSurvey() {
+        frameMapToDrawing()
+        guard !controlPoints.isEmpty else { return }
+        var south = viewport.centerLatitude - viewport.latitudeDelta / 2
+        var north = viewport.centerLatitude + viewport.latitudeDelta / 2
+        var west = viewport.centerLongitude - viewport.longitudeDelta / 2
+        var east = viewport.centerLongitude + viewport.longitudeDelta / 2
+        for point in controlPoints {
+            south = min(south, point.latitudeDegrees)
+            north = max(north, point.latitudeDegrees)
+            west = min(west, point.longitudeDegrees)
+            east = max(east, point.longitudeDegrees)
+        }
+        let padLatitude = max((north - south) * 0.2, 0.0008)
+        let padLongitude = max((east - west) * 0.2, 0.0008)
+        south -= padLatitude
+        north += padLatitude
+        west -= padLongitude
+        east += padLongitude
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: (south + north) / 2,
+            centerLongitude: (west + east) / 2,
+            latitudeDelta: max(north - south, 0.001),
+            longitudeDelta: max(east - west, 0.001)
+        )
+        visibleBounds = GeoBounds(south: south, west: west, north: north, east: east)
+        refreshVisibleControlPoints()
+    }
+
+    private func adoptControlCatalog(_ points: [ControlPoint], data: Data) {
+        guard let project = drawing.project else { return }
+        controlPoints = points
+        try? data.write(to: siteDirectory.appendingPathComponent("control-points.csv"), options: .atomic)
+        refreshVisibleControlPoints()
+        let entries = points.map { point in
+            CoordinateBookEntry(
+                name: point.name,
+                latitudeDegrees: point.latitudeDegrees,
+                longitudeDegrees: point.longitudeDegrees,
+                ellipsoidalHeightMeters: point.comparableEllipsoidalHeightMeters,
+                horizontalAccuracyMeters: 0,
+                verticalAccuracyMeters: nil,
+                satelliteCount: nil,
+                fixDurationSeconds: 0,
+                recordedAt: Date(),
+                kind: point.kind,
+                source: "基準点"
+            )
+        }
+        do {
+            try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
+            basicRevision += 1
+            showSurveyMarks(entries)
+            let total = basicPoints().count
+            let note = trustedZone.map { "\(total)点・\($0)系" } ?? "\(total)点"
+            exportMessage = note
+            bookNote = note
+        } catch {
+            exportMessage = "読み込めませんでした。"
+            bookNote = exportMessage
+        }
+    }
+
+    private func placementSample() -> (latitude: Double?, longitude: Double?) {
+        let args = ProcessInfo.processInfo.arguments
+        func value(_ flag: String) -> Double? {
+            guard let index = args.firstIndex(of: flag), args.indices.contains(index + 1) else { return nil }
+            return Double(args[index + 1])
+        }
+        if let latitude = value("-uitestLatitude"), let longitude = value("-uitestLongitude") {
+            return (latitude, longitude)
+        }
+        let position = navigationReading.position ?? reading.position
+        if let position, position.isPlottable {
+            return (position.latitudeDegrees, position.longitudeDegrees)
+        }
+        return (nil, nil)
+    }
+
+    private func loadVIPackIfRequested() {
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uitestField"),
+              args.indices.contains(flag + 1), args[flag + 1] == "vi" else { return }
+        if drawing.project == nil {
+            drawing.createProject(named: "六系")
+        }
+        drawing.zone = 16
+        importProjectSheet(
+            data: VIPack.dxf,
+            fileName: "nara-vi.dxf",
+            sidecar: VIPack.meta,
+            books: [(VIPack.csv, "control-points.csv"), (VIPack.sima, "points.sima")]
+        )
     }
 
     func refreshInstrument() {
@@ -3183,6 +3451,7 @@ final class FieldModel: ObservableObject {
         let ext = (fileName as NSString).pathExtension.lowercased()
         if ext == "pdf" || data.starts(with: Data("%PDF".utf8)) { return "pdf" }
         if ext == "dxf" { return "dxf" }
+        if ext == "sfc" { return "sfc" }
         if ["png", "jpg", "jpeg", "heic", "gif", "webp", "tif", "tiff"].contains(ext) { return "image" }
         return "unknown"
     }
@@ -3213,22 +3482,42 @@ final class FieldModel: ObservableObject {
     }
 
     func importBasic(data: Data, filename: String) {
-        guard let project = drawing.project else {
+        guard drawing.project != nil else {
             exportMessage = "先にプロジェクトを作ってください。"
+            bookNote = exportMessage
             return
         }
-        let entries = CoordinateExchange.parse(data: data, filename: filename, zone: drawing.zone)
-        guard !entries.isEmpty else {
-            exportMessage = "読める点がありません。"
+        if let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .shiftJIS),
+           text.contains("latitude_deg"),
+           let points = try? ControlPointCatalog.loadCSV(text),
+           !points.isEmpty {
+            adoptControlCatalog(points, data: data)
             return
         }
-        do {
-            try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
-            basicRevision += 1
-            exportMessage = "\(entries.count)点を読みました。"
-        } catch {
-            exportMessage = "読み込めませんでした。"
+        guard let sample = CoordinateExchange.firstPlane(data: data, filename: filename) else {
+            commitPlaneBook(data, filename: filename, zone: trustedZone ?? drawing.zone, adoptZone: false)
+            return
         }
+        if let trustedZone {
+            commitPlaneBook(data, filename: filename, zone: trustedZone, adoptZone: true)
+            return
+        }
+        let here = placementSample()
+        let decision = FieldPackPlacement.zoneForPlane(
+            northing: sample.northing,
+            easting: sample.easting,
+            latitude: here.latitude,
+            longitude: here.longitude,
+            trustedZone: trustedZone
+        )
+        guard let zone = decision.zone else {
+            pendingBook = (data, filename)
+            bookZoneChoices = decision.choices
+            bookNote = "系を選んでください。"
+            exportMessage = bookNote
+            return
+        }
+        commitPlaneBook(data, filename: filename, zone: zone, adoptZone: true)
     }
 
     func makeBasicBackup() {

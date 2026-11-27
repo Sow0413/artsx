@@ -309,6 +309,19 @@ struct BasicDesk: View {
             Text("座標簿")
                 .font(SurveyType(18, .heavy))
                 .accessibilityIdentifier("basic-book")
+            if let note = field.bookNote {
+                Text(note)
+                    .font(SurveyType(18, .heavy))
+                    .accessibilityIdentifier("book-count")
+            }
+            if !field.bookZoneChoices.isEmpty {
+                Text("系を選んでください。")
+                    .font(SurveyType(16, .semibold))
+                ForEach(field.bookZoneChoices, id: \.self) { zone in
+                    Button("\(zone)系") { field.acceptBookZone(zone) }
+                        .accessibilityIdentifier("book-zone-\(zone)")
+                }
+            }
             let points = field.basicPoints()
             if points.isEmpty {
                 Text("このプロジェクトの点はまだありません。")

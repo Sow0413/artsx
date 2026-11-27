@@ -32,8 +32,16 @@ struct SheetImportPage: View {
                 if let message = field.sheetMessage {
                     Text(message)
                         .font(SurveyType(18, .heavy))
-                        .lineLimit(3)
+                        .lineLimit(4)
                         .accessibilityIdentifier("draw-result")
+                }
+                if !field.sheetZoneChoices.isEmpty {
+                    Text("系を選んでください。")
+                        .font(SurveyType(16, .semibold))
+                    ForEach(field.sheetZoneChoices, id: \.self) { zone in
+                        Button("\(zone)系") { field.acceptSheetZone(zone) }
+                            .accessibilityIdentifier("sheet-zone-\(zone)")
+                    }
                 }
                 if let sheet = field.projectSheet, let data = field.projectSheetData() {
                     SheetPreview(data: data, sheet: sheet)
@@ -58,15 +66,42 @@ struct SheetImportPage: View {
         .accessibilityIdentifier("screen-draw")
         .background(SurveyColor.background)
         .onAppear { field.refreshProjectSheet() }
-        .fileImporter(isPresented: $picking, allowedContentTypes: Self.types) { result in
-            guard case let .success(url) = result else { return }
+        .fileImporter(isPresented: $picking, allowedContentTypes: Self.types, allowsMultipleSelection: true) { result in
+            guard case let .success(urls) = result else { return }
+            Self.importFiles(urls, into: field)
+        }
+    }
+
+    private static func importFiles(_ urls: [URL], into field: FieldModel) {
+        var sheet: (Data, String, URL)?
+        var meta: Data?
+        var books: [(Data, String)] = []
+        for url in urls {
             let allowed = url.startAccessingSecurityScopedResource()
             defer { if allowed { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url) else {
-                field.importProjectSheet(data: Data(), fileName: "empty.txt")
-                return
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let name = url.lastPathComponent
+            let lower = name.lowercased()
+            if lower.hasSuffix("meta.json") {
+                meta = data
+            } else if lower.hasSuffix("csv") || lower.hasSuffix("sima") {
+                books.append((data, name))
+            } else if lower.hasSuffix("dxf") || lower.hasSuffix("sfc") || lower.hasSuffix("pdf")
+                        || lower.hasSuffix("png") || lower.hasSuffix("jpg") || lower.hasSuffix("jpeg") {
+                sheet = (data, name, url)
             }
-            field.importProjectSheet(data: data, fileName: url.lastPathComponent)
+        }
+        if meta == nil, let sheet {
+            let sibling = sheet.2.appendingPathExtension("meta.json")
+            meta = try? Data(contentsOf: sibling)
+        }
+        if let sheet {
+            field.importProjectSheet(data: sheet.0, fileName: sheet.1, sidecar: meta, books: books)
+        } else if let meta {
+            field.holdSidecar(meta)
+            for book in books { field.importBasic(data: book.0, filename: book.1) }
+        } else {
+            for book in books { field.importBasic(data: book.0, filename: book.1) }
         }
     }
 
@@ -75,6 +110,10 @@ struct SheetImportPage: View {
     private static var types: [UTType] {
         var list: [UTType] = [.pdf, .image]
         if let dxf = UTType(filenameExtension: "dxf") { list.append(dxf) }
+        if let sfc = UTType(filenameExtension: "sfc") { list.append(sfc) }
+        if let json = UTType(filenameExtension: "json") { list.append(json) }
+        if let csv = UTType(filenameExtension: "csv") { list.append(csv) }
+        list.append(.commaSeparatedText)
         return list
     }
 }

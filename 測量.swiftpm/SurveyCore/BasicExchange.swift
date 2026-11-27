@@ -55,6 +55,33 @@ public enum CoordinateExchange {
         }
     }
 
+    /// 最初の平面点。緯度経度だけの CSV は nil。
+    public static func firstPlane(data: Data, filename: String) -> (northing: Double, easting: Double)? {
+        guard let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .shiftJIS) else { return nil }
+        if text.contains("latitude_deg") { return nil }
+        if filename.lowercased().hasSuffix("sima") || text.contains("A01,") {
+            for raw in text.split(whereSeparator: \.isNewline) {
+                let fields = split(String(raw))
+                guard fields.first == "A01", fields.count >= 5,
+                      let north = Double(fields[3]), let east = Double(fields[4]) else { continue }
+                return (north, east)
+            }
+            return nil
+        }
+        let rows = text.split(whereSeparator: \.isNewline).map(String.init).filter { !$0.isEmpty }
+        guard let header = rows.first else { return nil }
+        let columns = split(header)
+        let index = Dictionary(uniqueKeysWithValues: columns.enumerated().map { ($1, $0) })
+        guard let northIndex = index["北"], let eastIndex = index["東"] else { return nil }
+        for row in rows.dropFirst() {
+            let fields = split(row)
+            guard northIndex < fields.count, eastIndex < fields.count,
+                  let north = Double(fields[northIndex]), let east = Double(fields[eastIndex]) else { continue }
+            return (north, east)
+        }
+        return nil
+    }
+
     public static func parseSIMA(_ text: String, zone: Int) -> [CoordinateBookEntry] {
         text.split(whereSeparator: \.isNewline).compactMap { raw in
             let fields = split(String(raw))
@@ -66,7 +93,7 @@ public enum CoordinateExchange {
                 name: name,
                 latitudeDegrees: geo.latitudeDegrees,
                 longitudeDegrees: geo.longitudeDegrees,
-                ellipsoidalHeightMeters: Double(fields[5]),
+                ellipsoidalHeightMeters: nil,
                 horizontalAccuracyMeters: 0,
                 verticalAccuracyMeters: nil,
                 satelliteCount: nil,
@@ -168,7 +195,7 @@ public struct BasicStakeoutGuide: Equatable, Sendable {
         if let heightMeters {
             height = String(format: " 高 %+.2fm", heightMeters)
         } else {
-            height = " 高 —"
+            height = " 高さは比較しません"
         }
         let quality: String
         switch solution {

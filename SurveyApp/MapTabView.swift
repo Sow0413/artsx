@@ -274,6 +274,20 @@ struct MapTabView: View {
                     field.recenter()
                 }
             }
+            if SurveyBuild.basicMode, !field.drawing.mapPaths.isEmpty {
+                Text("\(field.drawing.zone)系")
+                    .font(SurveyType(18, .heavy))
+                    .foregroundStyle(SurveyColor.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("map-zone")
+            }
+            if SurveyBuild.basicMode, !field.visibleControlPoints.isEmpty {
+                Text("測点 \(field.visibleControlPoints.count)")
+                    .font(SurveyType(18, .heavy))
+                    .foregroundStyle(SurveyColor.text)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("survey-points")
+            }
             if SurveyBuild.basicMode {
                 Button(action: appearance.cycle) {
                     Text(appearance.label)
