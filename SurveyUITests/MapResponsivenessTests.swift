@@ -99,6 +99,9 @@ final class MapResponsivenessTests: XCTestCase {
         XCTAssertTrue(load.waitForExistence(timeout: 8), "座標を読み込むが無い")
         shot("53-coord-button")
         load.tap()
+        if app.buttons["coord-zone-6"].waitForExistence(timeout: 3) {
+            app.buttons["coord-zone-6"].tap()
+        }
         let marks = app.staticTexts["survey-points"]
         XCTAssertTrue(marks.waitForExistence(timeout: 10), "測点が出ない")
         XCTAssertGreaterThanOrEqual(Int(marks.label.replacingOccurrences(of: "測点 ", with: "")) ?? 0, 34)
@@ -112,7 +115,7 @@ final class MapResponsivenessTests: XCTestCase {
         stake.tap()
         let guide = app.staticTexts["stakeout-guide"]
         XCTAssertTrue(guide.waitForExistence(timeout: 20), "測設の案内が無い")
-        let ready = expectation(for: NSPredicate(format: "label CONTAINS '未確認' AND label CONTAINS '北'"), evaluatedWith: guide)
+        let ready = expectation(for: NSPredicate(format: "label CONTAINS '未確認' AND label CONTAINS '北' AND label CONTAINS '系'"), evaluatedWith: guide)
         XCTAssertEqual(XCTWaiter().wait(for: [ready], timeout: 25), .completed, "水平の測設が出ない。表示は \(guide.label)")
         shot("56-stakeout")
     }

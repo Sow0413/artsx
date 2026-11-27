@@ -99,6 +99,11 @@ public enum PlaneZoneCatalog {
         named(name)?.zones ?? []
     }
 
+    /// 現在地に一番近い平面直角の系。奈良付近は 6。
+    public static func nearestZone(latitude: Double, longitude: Double) -> Int? {
+        zones(nearLatitude: latitude, longitude: longitude).first
+    }
+
     /// 現在地から、原点までの距離が近い系。県境では複数残す。
     public static func zones(nearLatitude latitude: Double, longitude: Double) -> [Int] {
         var ranked: [(zone: Int, distance: Double)] = []

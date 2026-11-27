@@ -18,6 +18,7 @@ final class FieldPackTests: XCTestCase {
             XCTAssertEqual(decision.axis, .cadEastNorth)
         }
         XCTAssertEqual(SiteDXF.zone(forEPSG: 6674), 6)
+        XCTAssertEqual(PlaneZoneCatalog.nearestZone(latitude: 34.6, longitude: 135.8), 6)
         XCTAssertEqual(SiteDXF.zone, 16)
     }
 

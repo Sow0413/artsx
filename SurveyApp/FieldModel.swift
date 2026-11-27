@@ -86,6 +86,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var bookNote: String?
     @Published private(set) var bookZoneChoices: [Int] = []
     @Published private(set) var canPlaceOnSite = false
+    @Published private(set) var coordinateZoneChoices: [Int] = []
+    private var zoneIsExplicit = false
     /// 図面フィクスチャを地図へ重ねた結果。`-surveyUITestDrawings` のときだけ書く。
     @Published var uiTestDrawingStatus: String?
     private var uiTestDrawingStep = 0
@@ -2550,8 +2552,33 @@ final class FieldModel: ObservableObject {
             failSheet("先に現場を作ってください。")
             return
         }
+        if trustedZone == nil {
+            if let here = placementSample(),
+               let zone = PlaneZoneCatalog.nearestZone(latitude: here.latitude, longitude: here.longitude) {
+                applyExplicitZone(zone)
+            }
+        }
         importBasic(data: data, filename: filename)
+        if trustedZone == nil {
+            coordinateZoneChoices = PlaneZoneLabel.pickerZones()
+            bookNote = "系を選んでください。奈良の現場は第VI系です。"
+            zoneIsExplicit = false
+        }
         focusImportedPoints()
+    }
+
+    func chooseCoordinateZone(_ zone: Int) {
+        guard (1...19).contains(zone) else { return }
+        applyExplicitZone(zone)
+        coordinateZoneChoices = []
+        let count = basicPoints().count
+        bookNote = count > 0 ? "\(count)点・\(PlaneZoneLabel.button(zone))" : PlaneZoneLabel.button(zone)
+    }
+
+    private func applyExplicitZone(_ zone: Int) {
+        trustedZone = zone
+        zoneIsExplicit = true
+        drawing.zone = zone
     }
 
     func stakeSelectedControlPoint() {
@@ -2598,11 +2625,14 @@ final class FieldModel: ObservableObject {
 
     var basicStakeoutLine: String? {
         guard SurveyBuild.basicMode, let target = basicTarget else { return nil }
+        guard zoneIsExplicit else {
+            return "\(target.name) 系を選んでください。奈良の現場は第VI系です。"
+        }
         guard let position = navigationReading.position, position.isPlottable else {
-            return "\(target.name) 位置を待っています"
+            return "\(PlaneZoneLabel.button(drawing.zone)) \(target.name) 位置を待っています"
         }
         guard let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else { return nil }
-        return "\(target.name) \(guide.line)"
+        return "\(PlaneZoneLabel.button(drawing.zone)) \(target.name) \(guide.line)"
     }
 
     @discardableResult
@@ -3111,7 +3141,7 @@ final class FieldModel: ObservableObject {
 
     private func stageForPlacement(_ pending: PendingDrawingSheet, zone: Int) {
         pendingSheet = pending
-        trustedZone = zone
+        applyExplicitZone(zone)
         canPlaceOnSite = true
         sheetZoneChoices = []
         if let name = drawing.project?.name,

@@ -123,8 +123,8 @@ struct SheetImportPage: View {
         var failures: [String] = []
         for url in urls {
             switch PickedFileBytes.read(url) {
-            case let .failure(reason):
-                failures.append(reason)
+            case let .failure(error):
+                failures.append(error.message)
             case let .success(data):
                 var name = url.lastPathComponent
                 if !name.lowercased().hasSuffix("dxf"), !name.lowercased().hasSuffix("meta.json"), looksLikeDXF(data) {
@@ -209,8 +209,8 @@ enum CoordinateImport {
                 case let .success(data):
                     field.importCoordinateFile(data: data, filename: url.lastPathComponent)
                     opened = true
-                case let .failure(reason):
-                    field.failSheet(reason)
+                case let .failure(error):
+                    field.failSheet(error.message)
                 }
             }
             if !opened {
@@ -223,8 +223,12 @@ enum CoordinateImport {
 }
 
 /// ファイルアプリの OneDrive は、選んだ直後は中身が端末に無いことがある。
+struct PickError: Error {
+    let message: String
+}
+
 enum PickedFileBytes {
-    static func read(_ url: URL) -> Result<Data, String> {
+    static func read(_ url: URL) -> Result<Data, PickError> {
         let name = url.lastPathComponent.isEmpty ? "ファイル" : url.lastPathComponent
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
@@ -237,8 +241,8 @@ enum PickedFileBytes {
         if case .failure = copied {
             copied = copyIntoSandbox(url, sandbox: sandbox, options: [])
         }
-        if case let .failure(reason) = copied {
-            return .failure("ファイルを開けませんでした（OneDriveなどは一度ダウンロードしてください）: \(reason)")
+        if case let .failure(error) = copied {
+            return .failure(PickError(message: "ファイルを開けませんでした（OneDriveなどは一度ダウンロードしてください）: \(error.message)"))
         }
         return copied
     }
@@ -247,9 +251,9 @@ enum PickedFileBytes {
         _ url: URL,
         sandbox: URL,
         options: NSFileCoordinator.ReadingOptions
-    ) -> Result<Data, String> {
+    ) -> Result<Data, PickError> {
         let name = url.lastPathComponent.isEmpty ? "ファイル" : url.lastPathComponent
-        var copied: Result<Data, String> = .failure("\(name) をコピーできませんでした。")
+        var copied = Result<Data, PickError>.failure(PickError(message: "\(name) をコピーできませんでした。"))
         var coordinationError: NSError?
         NSFileCoordinator().coordinate(readingItemAt: url, options: options, error: &coordinationError) { coordinated in
             do {
@@ -258,13 +262,15 @@ enum PickedFileBytes {
                 }
                 try FileManager.default.copyItem(at: coordinated, to: sandbox)
                 let data = try Data(contentsOf: sandbox)
-                copied = data.isEmpty ? .failure("\(name) は空です。") : .success(data)
+                copied = data.isEmpty
+                    ? .failure(PickError(message: "\(name) は空です。"))
+                    : .success(data)
             } catch {
-                copied = .failure(error.localizedDescription)
+                copied = .failure(PickError(message: error.localizedDescription))
             }
         }
         if let coordinationError, case .failure = copied {
-            return .failure(coordinationError.localizedDescription)
+            return .failure(PickError(message: coordinationError.localizedDescription))
         }
         return copied
     }

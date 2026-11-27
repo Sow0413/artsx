@@ -281,6 +281,18 @@ struct MapTabView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("import-coordinates")
+            if !field.coordinateZoneChoices.isEmpty {
+                Text("系を選んでください。奈良の現場は第VI系です。")
+                    .font(SurveyType(16, .heavy))
+                    .accessibilityIdentifier("coord-zone-prompt")
+                ForEach(field.coordinateZoneChoices, id: \.self) { zone in
+                    Button(PlaneZoneLabel.button(zone)) {
+                        field.chooseCoordinateZone(zone)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("coord-zone-\(zone)")
+                }
+            }
             if let point = field.visibleControlPoints.first {
                 Button {
                     field.selectControlPoint(point.id)
