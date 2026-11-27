@@ -97,6 +97,152 @@ final class DrawingConditionTests: XCTestCase {
         XCTAssertEqual(DrawingReadiness.notice(origin), "座標がすべて原点です。位置を決められません。")
     }
 
+    func testAci7ByLayerAndByBlockStayDarkOnALightMap() throws {
+        XCTAssertLessThan(DrawingColor.aci(7).onLightMap().red, 0.2)
+        XCTAssertLessThan(DrawingColor.aci(255).onLightMap().red, 0.2)
+        XCTAssertEqual(DrawingColor.aci(250).onLightMap().red, 51.0 / 255, accuracy: 0.01)
+        XCTAssertEqual(DrawingColor.trueColor(0xFFFFFF).onLightMap().red, 0.12, accuracy: 0.001)
+
+        let document = try DXFParser.parse(Data(colorDXF.utf8))
+        let byLayer = try line(on: "赤", from: PlanarPoint(x: 0, y: 0), in: document)
+        XCTAssertEqual(byLayer.color, DrawingColor.aci(1))
+        let white = try line(on: "白", from: PlanarPoint(x: 0, y: 1), in: document)
+        XCTAssertLessThan(white.color.red, 0.2)
+        XCTAssertLessThan(white.color.green, 0.2)
+        let byBlockBlue = try line(on: "赤", from: PlanarPoint(x: 10, y: 0), in: document)
+        XCTAssertEqual(byBlockBlue.color, DrawingColor.aci(5))
+        let byBlockLayer = try line(on: "赤", from: PlanarPoint(x: 20, y: 0), in: document)
+        XCTAssertEqual(byBlockLayer.color, DrawingColor.aci(1))
+    }
+
+    private func line(on layer: String, from origin: PlanarPoint, in document: DrawingDocument) throws -> DrawingEntity {
+        let found = document.entities.first { entity in
+            guard entity.layer == layer, case let .line(start, _) = entity.primitive else { return false }
+            return start.distance(to: origin) < 1e-6
+        }
+        return try XCTUnwrap(found)
+    }
+
+    private var colorDXF: String {
+        """
+        0
+        SECTION
+        2
+        TABLES
+        0
+        TABLE
+        2
+        LAYER
+        0
+        LAYER
+        2
+        赤
+        62
+        1
+        0
+        LAYER
+        2
+        白
+        62
+        7
+        0
+        ENDTAB
+        0
+        ENDSEC
+        0
+        SECTION
+        2
+        BLOCKS
+        0
+        BLOCK
+        2
+        MARK
+        10
+        0
+        20
+        0
+        0
+        LINE
+        8
+        0
+        62
+        0
+        10
+        0
+        20
+        0
+        11
+        1
+        21
+        0
+        0
+        ENDBLK
+        0
+        ENDSEC
+        0
+        SECTION
+        2
+        ENTITIES
+        0
+        LINE
+        8
+        赤
+        62
+        256
+        10
+        0
+        20
+        0
+        11
+        1
+        21
+        0
+        0
+        LINE
+        8
+        白
+        62
+        7
+        10
+        0
+        20
+        1
+        11
+        1
+        21
+        1
+        0
+        INSERT
+        8
+        赤
+        62
+        5
+        2
+        MARK
+        10
+        10
+        20
+        0
+        0
+        INSERT
+        8
+        赤
+        62
+        256
+        2
+        MARK
+        10
+        20
+        20
+        0
+        0
+        ENDSEC
+        0
+        EOF
+
+        """
+    }
+
     func testBlocksPolylinesHatchesAndFrozenLayersStayOnTheDrawing() throws {
         let document = try DXFParser.parse(Data(planDXF.utf8))
         XCTAssertTrue(document.layers.allSatisfy(\.isVisible), "凍結レイヤを消している")

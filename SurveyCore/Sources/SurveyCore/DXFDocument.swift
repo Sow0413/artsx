@@ -13,7 +13,7 @@ public struct DrawingColor: Sendable, Equatable, Codable {
 
     public static let white = DrawingColor(red: 1, green: 1, blue: 1)
 
-    /// ACI 1〜9 は AutoCAD の標準色。10 以降は表示用に色相を分ける。420 の真色が優先。
+    /// ACI 1〜9 は AutoCAD の標準色。250〜255 は灰色。7 と 255 は白で、明るい地では後から暗くする。
     public static func aci(_ index: Int) -> DrawingColor {
         switch abs(index) {
         case 1: return DrawingColor(red: 1, green: 0, blue: 0)
@@ -25,10 +25,32 @@ public struct DrawingColor: Sendable, Equatable, Codable {
         case 7: return white
         case 8: return DrawingColor(red: 0.5, green: 0.5, blue: 0.5)
         case 9: return DrawingColor(red: 0.75, green: 0.75, blue: 0.75)
+        case 250: return gray(51)
+        case 251: return gray(91)
+        case 252: return gray(132)
+        case 253: return gray(173)
+        case 254: return gray(214)
+        case 255: return white
         default:
             let hue = Double(abs(index) % 24) / 24
             return hsv(hue)
         }
+    }
+
+    /// 白や薄い色は、地理院の明るい地図の上では黒に近い色にする。
+    public func onLightMap() -> DrawingColor {
+        let y = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+        if y < 0.70 { return self }
+        if min(red, min(green, blue)) >= 0.80 {
+            return DrawingColor(red: 0.12, green: 0.12, blue: 0.12)
+        }
+        let scale = 0.28 / max(y, 0.01)
+        return DrawingColor(red: min(1, red * scale), green: min(1, green * scale), blue: min(1, blue * scale))
+    }
+
+    private static func gray(_ byte: Double) -> DrawingColor {
+        let channel = byte / 255
+        return DrawingColor(red: channel, green: channel, blue: channel)
     }
 
     public static func trueColor(_ value: Int) -> DrawingColor {
@@ -602,9 +624,9 @@ public enum DXFParser {
             if section == "TABLES", table == "LAYER", code == 0, value == "LAYER" {
                 let record = takeRecord(pairs, from: index)
                 if let name = first(record.pairs, 2) {
-                    let aci = firstInt(record.pairs, 62) ?? 7
-                    let colorCode = abs(aci)
-                    layers[name] = DrawingLayer(name: name, color: DrawingColor.aci(colorCode == 0 ? 7 : colorCode), isVisible: true)
+                    let aci = abs(firstInt(record.pairs, 62) ?? 7)
+                    let color = firstInt(record.pairs, 420).map(DrawingColor.trueColor) ?? DrawingColor.aci(aci == 0 ? 7 : aci)
+                    layers[name] = DrawingLayer(name: name, color: color, isVisible: true)
                 }
                 index = record.next
                 continue
@@ -823,7 +845,7 @@ private func expand(
     unsupported: inout [String: Int]
 ) -> [DrawingEntity] {
     var output: [DrawingEntity] = []
-    func append(_ raw: RawEntity, transform: ((PlanarPoint) -> PlanarPoint)?, depth: Int, stack: Set<String>) {
+    func append(_ raw: RawEntity, transform: ((PlanarPoint) -> PlanarPoint)?, depth: Int, stack: Set<String>, byblock: DrawingColor?) {
         if raw.type == "INSERT" {
             if isPaperSpace(raw.pairs) {
                 unsupported["PAPER", default: 0] += 1
@@ -852,14 +874,16 @@ private func expand(
             }
             var nextStack = stack
             nextStack.insert(name)
-            let insertLayer = first(raw.pairs, 8)
+            let insertLayerName = first(raw.pairs, 8) ?? "0"
+            let insertLayer = layers[insertLayerName] ?? DrawingLayer(name: insertLayerName, color: .white, isVisible: true)
+            let insertColor = resolveColor(raw.pairs, layer: insertLayer, byblock: byblock)
             for child in block.entities {
                 var nested = child
-                if let insertLayer, (first(nested.pairs, 8) ?? "0") == "0" {
+                if (first(nested.pairs, 8) ?? "0") == "0" {
                     nested.pairs.removeAll { $0.0 == 8 }
-                    nested.pairs.insert((8, insertLayer), at: 0)
+                    nested.pairs.insert((8, insertLayerName), at: 0)
                 }
-                append(nested, transform: local, depth: depth + 1, stack: nextStack)
+                append(nested, transform: local, depth: depth + 1, stack: nextStack, byblock: insertColor)
             }
             return
         }
@@ -879,7 +903,7 @@ private func expand(
                 output.append(entity(
                     id: output.count,
                     layer: layer.name,
-                    color: resolveColor(transformed.pairs, layer: layer),
+                    color: resolveColor(transformed.pairs, layer: layer, byblock: byblock),
                     primitive: .polyline(vertices: outline, closed: false, display: outline),
                     points: outline
                 ))
@@ -887,14 +911,14 @@ private func expand(
             return
         }
         let transformed = transform.map { mapRaw(raw, $0) } ?? raw
-        if let entity = makeEntity(transformed, id: output.count, layers: layers) {
+        if let entity = makeEntity(transformed, id: output.count, layers: layers, byblock: byblock) {
             output.append(entity)
         } else if raw.type != "INSERT" {
             unsupported[raw.type, default: 0] += 1
         }
     }
     for entity in entities {
-        append(entity, transform: nil, depth: 0, stack: [])
+        append(entity, transform: nil, depth: 0, stack: [], byblock: nil)
     }
     return output
 }
@@ -968,10 +992,10 @@ private func mappedAngle(
     return GeoMath.degrees(fromRadians: GeoMath.arctangent(moved.y - movedCenter.y, moved.x - movedCenter.x))
 }
 
-private func makeEntity(_ raw: RawEntity, id: Int, layers: [String: DrawingLayer]) -> DrawingEntity? {
+private func makeEntity(_ raw: RawEntity, id: Int, layers: [String: DrawingLayer], byblock: DrawingColor?) -> DrawingEntity? {
     let layerName = first(raw.pairs, 8) ?? "0"
     let layer = layers[layerName] ?? DrawingLayer(name: layerName, color: .white, isVisible: true)
-    let color = resolveColor(raw.pairs, layer: layer)
+    let color = resolveColor(raw.pairs, layer: layer, byblock: byblock)
     switch raw.type {
     case "LINE":
         guard let start = point(raw.pairs, x: 10, y: 20), let end = point(raw.pairs, x: 11, y: 21) else { return nil }
@@ -1197,11 +1221,12 @@ private func mtext(_ pairs: [(Int, String)]) -> String {
     return (prefix + body).replacingOccurrences(of: "\\P", with: "\n")
 }
 
-private func resolveColor(_ pairs: [(Int, String)], layer: DrawingLayer) -> DrawingColor {
-    if let trueColor = firstInt(pairs, 420) { return DrawingColor.trueColor(trueColor) }
-    let aci = firstInt(pairs, 62) ?? 256
-    if aci == 0 || aci == 256 { return layer.color }
-    return DrawingColor.aci(aci)
+private func resolveColor(_ pairs: [(Int, String)], layer: DrawingLayer, byblock: DrawingColor?) -> DrawingColor {
+    if let trueColor = firstInt(pairs, 420) { return DrawingColor.trueColor(trueColor).onLightMap() }
+    let aci = abs(firstInt(pairs, 62) ?? 256)
+    if aci == 0 { return (byblock ?? DrawingColor.aci(7)).onLightMap() }
+    if aci == 256 { return layer.color.onLightMap() }
+    return DrawingColor.aci(aci).onLightMap()
 }
 
 private func point(_ pairs: [(Int, String)], x: Int, y: Int) -> PlanarPoint? {
@@ -1320,9 +1345,15 @@ public struct GeoCoord: Sendable, Equatable {
 
 public struct GeographicPath: Sendable, Equatable {
     public var coordinates: [GeoCoord]
+    public var red: Double
+    public var green: Double
+    public var blue: Double
 
-    public init(coordinates: [GeoCoord]) {
+    public init(coordinates: [GeoCoord], color: DrawingColor = DrawingColor(red: 0.12, green: 0.12, blue: 0.12)) {
         self.coordinates = coordinates
+        self.red = color.red
+        self.green = color.green
+        self.blue = color.blue
     }
 }
 
@@ -1420,7 +1451,7 @@ public enum DrawingPlacement {
                 coordinates.append(geo)
             }
             if coordinates.count >= 2 {
-                paths.append(GeographicPath(coordinates: coordinates))
+                paths.append(GeographicPath(coordinates: coordinates, color: entity.color))
                 count += coordinates.count
             }
         }

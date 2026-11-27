@@ -408,7 +408,9 @@ struct SurveyMapView: UIViewRepresentable {
                 let length = Self.meters(coordinates)
                 if length < metersPerPixel * 1.5 { return nil }
                 var copy = coordinates
-                return MKPolyline(coordinates: &copy, count: copy.count)
+                let line = DrawingStrokeOverlay(coordinates: &copy, count: copy.count)
+                line.stroke = UIColor(red: path.red, green: path.green, blue: path.blue, alpha: 1)
+                return line
             }
             if !drawingLines.isEmpty {
                 map.addOverlays(drawingLines, level: .aboveLabels)
@@ -581,9 +583,15 @@ struct SurveyMapView: UIViewRepresentable {
                 renderer.lineWidth = circle === cadInner ? 2 : 4
                 return renderer
             }
+            if let drawing = overlay as? DrawingStrokeOverlay {
+                let renderer = MKPolylineRenderer(polyline: drawing)
+                renderer.strokeColor = drawing.stroke
+                renderer.lineWidth = 1
+                return renderer
+            }
             if let line = overlay as? MKPolyline {
                 let renderer = MKPolylineRenderer(polyline: line)
-                renderer.strokeColor = UIColor(red: 0.15, green: 0.45, blue: 0.85, alpha: 0.9)
+                renderer.strokeColor = UIColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1)
                 renderer.lineWidth = 1
                 return renderer
             }
@@ -1011,6 +1019,10 @@ final class IncidentHeatOverlay: MKCircle {
 final class ReachAreaOverlay: MKPolygon {
     var stroke: UIColor = SurveyUIColor.red
     var fill: UIColor = SurveyUIColor.red.withAlphaComponent(0.22)
+}
+
+final class DrawingStrokeOverlay: MKPolyline {
+    var stroke = UIColor(red: 0.12, green: 0.12, blue: 0.12, alpha: 1)
 }
 
 final class ReachLineOverlay: MKPolyline {
