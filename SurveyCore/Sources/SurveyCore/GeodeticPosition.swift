@@ -97,6 +97,8 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
     /// 系統ごとの衛星数。無い受信機は nil。
     public var satellites: [SatelliteCount]?
     public var pdop: Double?
+    public var hdop: Double?
+    public var vdop: Double?
     /// 補正が届いてからの秒。補正が無いときは nil。
     public var correctionAgeSeconds: Double?
     /// VRS、基地局名など、補正の出どころ。
@@ -120,6 +122,8 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         satelliteCount: Int? = nil,
         satellites: [SatelliteCount]? = nil,
         pdop: Double? = nil,
+        hdop: Double? = nil,
+        vdop: Double? = nil,
         correctionAgeSeconds: Double? = nil,
         correctionSource: String? = nil,
         courseDegrees: Double? = nil,
@@ -138,6 +142,8 @@ public struct GeodeticPosition: Sendable, Equatable, Codable {
         self.satelliteCount = satelliteCount
         self.satellites = satellites
         self.pdop = pdop
+        self.hdop = hdop
+        self.vdop = vdop
         self.correctionAgeSeconds = correctionAgeSeconds
         self.correctionSource = correctionSource
         self.courseDegrees = courseDegrees

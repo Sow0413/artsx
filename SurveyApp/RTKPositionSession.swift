@@ -33,6 +33,12 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     @Published public private(set) var ntripConnected = false
     @Published public private(set) var message: String = ""
     @Published public private(set) var vidocLine = "未接続"
+    @Published public private(set) var firmwareVersion: String?
+    public var onDeviceTilt: ((Double) -> Void)?
+    public var onLaserDistance: ((Double) -> Void)?
+    public var onLaserFailed: (() -> Void)?
+    public var onLaserLamp: ((ViDocCommandPlan.Lamp) -> Void)?
+    public var onLaserNeedAim: (() -> Void)?
     @Published public private(set) var ntripLine = "未接続"
     @Published public private(set) var holdGCPUntilFix = false
 
@@ -61,9 +67,30 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
         self.readings = pair.stream
         self.continuation = pair.continuation
         super.init()
+        vidoc.onFirmware = { [weak self] version in
+            self?.setMain { self?.firmwareVersion = version }
+        }
+        vidoc.onTilt = { [weak self] degrees in
+            self?.setMain { self?.onDeviceTilt?(degrees) }
+        }
+        vidoc.onLaserMeters = { [weak self] meters in
+            self?.setMain { self?.onLaserDistance?(meters) }
+        }
+        vidoc.onLaserFailed = { [weak self] in
+            self?.setMain { self?.onLaserFailed?() }
+        }
+        vidoc.onLaserLamp = { [weak self] lamp in
+            self?.setMain { self?.onLaserLamp?(lamp) }
+        }
+        vidoc.onLaserNeedAim = { [weak self] in
+            self?.setMain { self?.onLaserNeedAim?() }
+        }
         vidoc.onLink = { [weak self] line in
             self?.setMain {
                 self?.vidocLine = line
+                if let version = ViDocFirmware.version(in: line), self?.firmwareVersion?.contains("build") != true {
+                    self?.firmwareVersion = version
+                }
                 self?.deviceConnected = line.hasPrefix("接続しました") || line.hasPrefix("NMEA")
                 if line.hasPrefix("再接続中") { self?.holdGCPUntilFix = true }
             }
@@ -71,6 +98,30 @@ public final class RTKPositionSession: NSObject, PositionSource, ObservableObjec
     }
 
     // MARK: PositionSource
+    public func setObserving(_ on: Bool) { vidoc.setObserving(on) }
+    public func setPPKBase(_ url: URL?) { vidoc.setPPKBase(url) }
+    public var onRawStatus: ((String) -> Void)? {
+        get { vidoc.onRawStatus }
+        set { vidoc.onRawStatus = newValue }
+    }
+    public var onRawFinished: ((Bool) -> Void)? {
+        get { vidoc.onRawFinished }
+        set { vidoc.onRawFinished = newValue }
+    }
+    public func beginRawCapture(at base: URL) { vidoc.beginRawCapture(at: base) }
+    public func endRawCapture() { vidoc.endRawCapture() }
+    public func abandonRawCapture() { vidoc.abandonRawCapture() }
+    public func lightFrontLaser() { vidoc.lightFrontLaser() }
+    public func measureFrontLaser() { vidoc.measureFrontLaser() }
+
+    public func lightLowerLaser() {
+        vidoc.lightLowerLaser()
+    }
+
+    public func measureLowerLaser() {
+        vidoc.measureLowerLaser()
+    }
+
     public func start() {
         if !armed {
             armed = true

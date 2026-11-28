@@ -89,12 +89,32 @@ public enum ControlPointCatalog {
 
     /// 1行目は見出し。`id,name,kind,grade,latitude_deg,longitude_deg,height_m,height_kind,source_note`
     /// 任意列 `ellipsoidal_height_m`。
+    public static func loadCSVData(_ data: Data) throws -> [ControlPoint] {
+        try loadCSV(text(from: data))
+    }
+
+    /// UTF-8（BOM 付きも）、だめなら Shift_JIS。
+    public static func text(from data: Data) -> String {
+        var body = data
+        if body.starts(with: Data([0xEF, 0xBB, 0xBF])) { body.removeFirst(3) }
+        if let utf = String(data: body, encoding: .utf8), !utf.contains("\u{FFFD}") {
+            return utf
+        }
+        if let shift = String(data: body, encoding: .shiftJIS) { return shift }
+        return String(decoding: body, as: UTF8.self)
+    }
+
     public static func loadCSV(_ text: String) throws -> [ControlPoint] {
-        let rows = CSVTable.rows(text).filter { row in
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let rows = CSVTable.rows(normalized).filter { row in
             row.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         }
         guard let header = rows.first else { return [] }
-        let titles = header.map { $0.trimmingCharacters(in: .whitespaces) }
+        let titles = header.map {
+            $0.replacingOccurrences(of: "\u{FEFF}", with: "").trimmingCharacters(in: .whitespaces)
+        }
         func index(_ name: String) throws -> Int {
             guard let found = titles.firstIndex(of: name) else { throw ControlPointError.missingColumn(name) }
             return found

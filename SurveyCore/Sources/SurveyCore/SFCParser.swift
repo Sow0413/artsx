@@ -12,17 +12,112 @@ public enum SFCError: Error, Equatable, CustomStringConvertible {
     }
 }
 
+public struct SFCPartialFigure: Equatable, Sendable {
+    public var name: String
+    public var figureCount: Int
+    public var scale: String
+    public var minX: Double
+    public var minY: Double
+    public var maxX: Double
+    public var maxY: Double
+    public var isOn: Bool
+}
+
+public struct SFCBookPoint: Equatable, Sendable {
+    public var name: String
+    /// 座標表の X。北。
+    public var northing: Double
+    /// 座標表の Y。東。
+    public var easting: Double
+    public var zone: Int?
+}
+
+public struct SFCSurvey: Equatable, Sendable {
+    public var figures: [SFCPartialFigure]
+    /// オンの部分図だけ。いちばん図形の多いものを既定にする。
+    public var document: DrawingDocument
+    public var book: [SFCBookPoint]
+    public var placementNote: String
+}
+
+public struct SFCAlignment: Equatable, Sendable {
+    public var transform: Similarity2D
+    public var rmsMeters: Double
+    public var names: [String]
+}
+
+public enum SFCPointFit {
+    /// 点名が座標表と合う組を先に使う。残差が 3 cm を超えるときは、先頭の2点だけで合わせる。
+    public static func align(document: DrawingDocument, book: [SFCBookPoint]) -> SFCAlignment? {
+        let markers = document.entities.compactMap { entity -> PlanarPoint? in
+            if case let .point(point) = entity.primitive { return point }
+            return nil
+        }
+        var pairs: [(PlanarPoint, PlanarPoint)] = []
+        var names: [String] = []
+        for item in book {
+            guard let label = document.entities.first(where: { entity in
+                if case let .text(_, string, _, _) = entity.primitive { return string == item.name }
+                return false
+            }), case let .text(origin, _, _, _) = label.primitive else { continue }
+            guard let marker = markers.min(by: { origin.distance(to: $0) < origin.distance(to: $1) }) else { continue }
+            pairs.append((marker, PlanarPoint(x: item.easting, y: item.northing)))
+            names.append(item.name)
+        }
+        guard pairs.count >= 2 else { return nil }
+        if let fit = SimilaritySolver.fit(pairs, lockScale: true), fit.rmsMeters <= 0.03 {
+            return SFCAlignment(transform: fit.transform, rmsMeters: fit.rmsMeters, names: names)
+        }
+        let two = Array(pairs.prefix(2))
+        guard let fit = SimilaritySolver.fit(two, lockScale: true) else { return nil }
+        return SFCAlignment(transform: fit.transform, rmsMeters: fit.rmsMeters, names: Array(names.prefix(2)))
+    }
+}
+
+public struct SFCPlacementRecord: Codable, Equatable, Sendable {
+    public var fileName: String
+    public var enabled: [String]
+    public var eastingOrigin: Double?
+    public var northingOrigin: Double?
+    public var rmsMeters: Double?
+}
+
+public enum SFCPlacementStore {
+    public static func save(_ record: SFCPlacementRecord, in directory: URL) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(record)
+        let safe = record.fileName.replacingOccurrences(of: "/", with: "_")
+        try data.write(to: directory.appendingPathComponent(safe + ".placement.json"), options: .atomic)
+    }
+
+    public static func load(fileName: String, in directory: URL) -> SFCPlacementRecord? {
+        let safe = fileName.replacingOccurrences(of: "/", with: "_")
+        guard let data = try? Data(contentsOf: directory.appendingPathComponent(safe + ".placement.json")) else { return nil }
+        return try? JSONDecoder().decode(SFCPlacementRecord.self, from: data)
+    }
+}
+
 /// SXF Ver.2 / Ver.3 のテキスト形式（SFC）。ISO-10303-21 の注釈 `/*SXF … SXF*/` に入ったフィーチャを読む。
 /// 公共座標の数値はそのまま残す。系は読み込んだ側で選ぶ。原本のバイト列は書き換えない。
 public enum SFCParser {
     public static func parse(_ data: Data) throws -> DrawingDocument {
+        try open(data).document
+    }
+
+    /// 部分図に分けて読む。sfig_org が無いファイルは、いままでどおり1枚。
+    public static func open(_ data: Data) throws -> SFCSurvey {
         let decoded = try decode(data)
         guard decoded.text.contains("SXF") || decoded.text.contains("ISO-10303-21") else {
             throw SFCError.notSFC
         }
         let calls = featureCalls(in: decoded.text)
         guard !calls.isEmpty else { throw SFCError.notSFC }
-        return assemble(calls, codePage: decoded.codePage, version: version(in: decoded.text))
+        let version = version(in: decoded.text)
+        if calls.contains(where: { $0.name == "sfig_org_feature" }) {
+            return assemblePartial(calls, codePage: decoded.codePage, version: version)
+        }
+        let document = assemble(calls, codePage: decoded.codePage, version: version)
+        return SFCSurvey(figures: [], document: document, book: book(in: document), placementNote: document.unitWarning ?? "")
     }
 
     static func decode(_ data: Data) throws -> (text: String, codePage: String) {
@@ -53,6 +148,218 @@ public enum SFCParser {
         if head.contains("SCADEC_API_Ver2") || head.contains("$$2") { return "2" }
         if head.contains("level2") { return "3" }
         return "不明"
+    }
+
+    private static func assemblePartial(_ calls: [FeatureCall], codePage: String, version: String) -> SFCSurvey {
+        let layers = layerList(calls)
+        var unsupported: [String: Int] = [:]
+        var locates: [String: Double] = [:]
+        var groups: [(name: String, calls: [FeatureCall])] = []
+        var bucket: [FeatureCall] = []
+        for call in calls {
+            switch call.name {
+            case "layer_feature":
+                break
+            case "sfig_org_feature":
+                let name = call.args.first?.text ?? "図\(groups.count + 1)"
+                groups.append((name, bucket))
+                bucket = []
+                unsupported["sfig_org_feature", default: 0] += 1
+            case "sfig_locate_feature":
+                let name = call.args.count > 1 ? call.args[1].text : ""
+                let scale = call.args.count > 5 ? (call.args[5].number ?? 1) : 1
+                if !name.isEmpty { locates[name] = scale }
+                unsupported["sfig_locate_feature", default: 0] += 1
+            case "drawing_sheet_feature":
+                unsupported["drawing_sheet_feature", default: 0] += 1
+            default:
+                bucket.append(call)
+            }
+        }
+        let counted = groups.map { group -> (name: String, calls: [FeatureCall], count: Int) in
+            let count = group.calls.filter { supported.contains($0.name) }.count
+            return (group.name, group.calls, count)
+        }
+        let activeIndex = counted.enumerated().max { $0.element.count < $1.element.count }?.offset ?? 0
+        var figures: [SFCPartialFigure] = []
+        var built: [DrawingDocument] = []
+        for (index, group) in counted.enumerated() {
+            let document = figureDocument(
+                group.calls,
+                layers: layers,
+                codePage: codePage,
+                version: version,
+                unsupported: &unsupported
+            )
+            built.append(document)
+            let on = index == activeIndex
+            figures.append(SFCPartialFigure(
+                name: group.name,
+                figureCount: group.count,
+                scale: scaleLabel(locates[group.name]),
+                minX: document.bounds.minX,
+                minY: document.bounds.minY,
+                maxX: document.bounds.maxX,
+                maxY: document.bounds.maxY,
+                isOn: on
+            ))
+        }
+        let active = built.indices.contains(activeIndex) ? built[activeIndex] : DrawingDocument(
+            layers: layers,
+            entities: [],
+            bounds: .empty,
+            unsupportedCounts: unsupported,
+            codePage: "SFC Ver\(version) \(codePage)",
+            unitWarning: nil,
+            index: DrawingSpatialIndex(entities: [])
+        )
+        let local = isSiteLocal(active.bounds)
+        let scaled = active.unitCode == 1000
+        var warning = ""
+        if scaled {
+            warning += "座標はミリメートルだったので、メートルに直しました。"
+        }
+        warning += local
+            ? "位置合わせが必要。"
+            : "公共座標として読みました。系を選ぶと、そのまま地図に載ります。"
+        let notice = figures.map { figure in
+            let state = figure.isOn ? "オン" : "オフ"
+            return "\(figure.name) は\(state)。\(figure.figureCount)図形、縮尺 \(figure.scale)、範囲 X \(format(figure.minX))〜\(format(figure.maxX)) Y \(format(figure.minY))〜\(format(figure.maxY))。"
+        }.joined()
+        var document = active
+        document.unitWarning = warning
+        document.readNotice = notice
+        document.unsupportedCounts = unsupported
+        let whole = DrawingDocument(
+            layers: layers,
+            entities: built.flatMap(\.entities),
+            bounds: built.reduce(DrawingBounds.empty) { $0.union($1.bounds) },
+            unsupportedCounts: unsupported,
+            codePage: document.codePage,
+            unitWarning: warning,
+            index: DrawingSpatialIndex(entities: built.flatMap(\.entities))
+        )
+        return SFCSurvey(
+            figures: figures,
+            document: document,
+            book: book(in: whole),
+            placementNote: warning
+        )
+    }
+
+    private static func figureDocument(
+        _ calls: [FeatureCall],
+        layers: [DrawingLayer],
+        codePage: String,
+        version: String,
+        unsupported: inout [String: Int]
+    ) -> DrawingDocument {
+        var entities: [DrawingEntity] = []
+        var used = layers
+        for call in calls where supported.contains(call.name) {
+            guard let entity = entity(from: call, id: entities.count, layers: used) else {
+                unsupported[call.name, default: 0] += 1
+                continue
+            }
+            if !used.contains(where: { $0.name == entity.layer }) {
+                used.append(DrawingLayer(name: entity.layer, color: entity.color, isVisible: true, role: .design))
+            }
+            entities.append(entity)
+        }
+        let rawBounds = entities.reduce(DrawingBounds.empty) { $0.union($1.bounds) }
+        let divisor = partialUnitsPerMeter(rawBounds)
+        if divisor != 1 {
+            entities = entities.map { scaled($0, by: 1 / divisor) }
+        }
+        let bounds = entities.reduce(DrawingBounds.empty) { $0.union($1.bounds) }
+        return DrawingDocument(
+            layers: used,
+            entities: entities,
+            bounds: bounds,
+            unsupportedCounts: [:],
+            codePage: "SFC Ver\(version) \(codePage)",
+            unitWarning: nil,
+            index: DrawingSpatialIndex(entities: entities),
+            unitCode: Int(divisor)
+        )
+    }
+
+    /// 部分図の中は、10 m を超える数値をミリメートルとみる。紙の上の表はそのまま。
+    private static func partialUnitsPerMeter(_ bounds: DrawingBounds) -> Double {
+        guard !bounds.isEmpty else { return 1 }
+        let magnitude = max(abs(bounds.minX), abs(bounds.maxX), abs(bounds.minY), abs(bounds.maxY))
+        if magnitude >= 1_000 { return 1000 }
+        return 1
+    }
+
+    private static func isSiteLocal(_ bounds: DrawingBounds) -> Bool {
+        guard !bounds.isEmpty else { return true }
+        let magnitude = max(abs(bounds.minX), abs(bounds.maxX), abs(bounds.minY), abs(bounds.maxY))
+        let span = max(bounds.width, bounds.height)
+        if magnitude >= 10_000 && span >= 50 { return false }
+        return true
+    }
+
+    private static func scaleLabel(_ scale: Double?) -> String {
+        guard let scale, scale > 0 else { return "不明" }
+        let denom = (1 / scale).rounded()
+        if abs((1 / scale) - denom) < 0.05, denom >= 1 { return "1/\(Int(denom))" }
+        return String(format: "%.4f", scale)
+    }
+
+    private static func format(_ value: Double) -> String {
+        if value.isNaN || !value.isFinite { return "—" }
+        return String(format: "%.0f", value)
+    }
+
+    private static func layerList(_ calls: [FeatureCall]) -> [DrawingLayer] {
+        var names: [String] = []
+        var visible: [Bool] = []
+        for call in calls where call.name == "layer_feature" {
+            names.append(call.args.first?.text ?? "レイヤ\(names.count + 1)")
+            visible.append((call.args.dropFirst().first?.text ?? "1") != "0")
+        }
+        if names.isEmpty {
+            names = ["0"]
+            visible = [true]
+        }
+        return names.enumerated().map { index, name in
+            DrawingLayer(
+                name: name,
+                color: .white,
+                isVisible: visible[index],
+                role: DrawingLayerRole.classify(layerName: name)
+            )
+        }
+    }
+
+    private static func book(in document: DrawingDocument) -> [SFCBookPoint] {
+        var zone: Int?
+        var points: [SFCBookPoint] = []
+        for entity in document.entities {
+            guard case let .text(_, string, _, _) = entity.primitive else { continue }
+            if zone == nil { zone = zoneNumber(in: string) }
+            let parts = string.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "," }).map(String.init)
+            guard parts.count >= 3,
+                  parts[0].range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil,
+                  let north = Double(parts[1]),
+                  let east = Double(parts[2]) else { continue }
+            points.append(SFCBookPoint(name: parts[0], northing: north, easting: east, zone: zone))
+        }
+        if let zone {
+            points = points.map { SFCBookPoint(name: $0.name, northing: $0.northing, easting: $0.easting, zone: zone) }
+        }
+        return points
+    }
+
+    private static func zoneNumber(in text: String) -> Int? {
+        let romans = ["XIX", "XVIII", "XVII", "XVI", "XV", "XIV", "XIII", "XII", "XI", "X", "IX", "VIII", "VII", "VI", "V", "IV", "III", "II", "I"]
+        for (offset, roman) in romans.enumerated() {
+            if text.contains("第\(roman)系") || text.contains("\(roman)系") {
+                return romans.count - offset
+            }
+        }
+        return nil
     }
 
     private static func assemble(_ calls: [FeatureCall], codePage: String, version: String) -> DrawingDocument {

@@ -2,6 +2,30 @@ import Combine
 import Foundation
 import SurveyCore
 
+struct CadPick: Equatable {
+    var name: String
+    var latitude: Double
+    var longitude: Double
+}
+
+struct NamedStakePoint: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var latitude: Double
+    var longitude: Double
+    var distance: String
+    var meters: Double = .greatestFiniteMagnitude
+}
+
+struct StakeoutLines: Equatable {
+    var zone: String
+    var name: String
+    var distance: String
+    var north: String
+    var east: String
+    var height: String
+}
+
 struct SealedIncidentRow: Identifiable, Equatable {
     var id: UUID
     var title: String
@@ -47,6 +71,8 @@ final class FieldModel: ObservableObject {
     @Published private(set) var reading: PositionReading
     @Published private(set) var viewport: MapViewport
     @Published var followUser: Bool
+    /// 測設中は、現在地と目標が両方入る範囲に地図を固定する。
+    @Published var stakeoutCamera = false
     @Published var tab: FieldTab
     @Published private(set) var isDownloading = false
     @Published private(set) var downloadMessage = "表示中の範囲を、圏外用に保存します。"
@@ -79,6 +105,67 @@ final class FieldModel: ObservableObject {
     @Published var enclosingBook = false
     @Published private(set) var exportMessage: String?
     @Published private(set) var exportURL: URL?
+    /// 出すの1段目。現場の下敷きに置いた図面。
+    @Published private(set) var projectSheet: ProjectSheet?
+    @Published private(set) var sheetMessage: String?
+    @Published private(set) var sheetZoneChoices: [Int] = []
+    @Published private(set) var bookNote: String?
+    @Published private(set) var bookZoneChoices: [Int] = []
+    @Published private(set) var canPlaceOnSite = false
+    /// meta の EPSG か、選んだ系で地図に置ける図面。縮尺設定には進まない。
+    @Published private(set) var sheetUsesCoordinates = false
+    @Published private(set) var coordinateZoneChoices: [Int] = []
+    @Published var coordinateMessage: String?
+    @Published var showDrawing = true
+    @Published var showMapTiles = true
+    @Published var cadPick: CadPick?
+    @Published var cadStaking = false
+    private var zoneIsExplicit = false
+    /// 図面フィクスチャを地図へ重ねた結果。`-surveyUITestDrawings` のときだけ書く。
+    @Published var uiTestDrawingStatus: String?
+    private var uiTestDrawingStep = 0
+    private var heldSidecarData: Data?
+    private var trustedZone: Int?
+    private var pendingSheet: PendingDrawingSheet?
+    private var pendingBook: (data: Data, filename: String)?
+
+    private struct PendingDrawingSheet {
+        var data: Data
+        var fileName: String
+        var document: DrawingDocument
+        var kind: String
+        var axis: DrawingAxis
+        var books: [(Data, String)]
+    }
+    @Published var scaleMessage: String?
+    @Published var localizeMessage: String?
+    @Published var cadMessage: String?
+    struct LocalizeDraft: Identifiable, Equatable {
+        var id = UUID()
+        var name: String
+        var designEast: Double
+        var designNorth: Double
+        var measuredEast: Double
+        var measuredNorth: Double
+    }
+    @Published var localizeDrafts: [LocalizeDraft] = []
+    @Published var instrument = SiteInstrument()
+    @Published var instrumentMessage: String?
+    @Published var tiltDegrees: Double?
+    @Published var tiltMeanDegrees: Double?
+    @Published var tiltMaxDegrees: Double?
+    @Published var deviceTiltLive = false
+    @Published var laserReadingMeters: Double?
+    @Published var laserLamp: ViDocCommandPlan.Lamp = .off
+    @Published var rawCaptureEnabled = true
+    @Published var rawCaptureStatus = "停止"
+    private var rawObservationID: UUID?
+    private let rawCaptureKey = "arts.raw-capture"
+    @Published var ppkStatus = "停止"
+    @Published var ppkShare: URL?
+    private var ppkBase: URL?
+    private var tiltWindow: [(TimeInterval, Double)] = []
+    @Published var receiverFirmware: String?
     @Published var operation = OperationDesk.load()
     @Published var showsToolOrder = false
     @Published var stature = StatureProfile.load()
@@ -190,7 +277,7 @@ final class FieldModel: ObservableObject {
     private let statsRelay = IncidentStatsRelayStub(reachable: false)
     private var incidentTimer: Timer?
     private var restoredIncidentProject: String?
-    let controlPoints: [ControlPoint]
+    private(set) var controlPoints: [ControlPoint]
     let journal: FieldJournal
     let gnss: GNSSLink
     let gnssAvailable: Bool
@@ -334,6 +421,37 @@ final class FieldModel: ObservableObject {
         gnss.onState = { [weak self] state in
             self?.gnssState = state
         }
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.onDeviceTilt = { [weak self] degrees in
+            self?.noteTilt(degrees, fromDevice: true)
+        }
+        rtkSession?.onLaserDistance = { [weak self] meters in
+            self?.instrument.laserMeters = meters
+            self?.instrument.antennaMethod = "laser"
+            self?.laserReadingMeters = meters
+            self?.instrumentMessage = String(format: "下レーザー %.3f m", meters)
+        }
+        rtkSession?.onLaserFailed = { [weak self] in
+            self?.instrumentMessage = "測れず"
+        }
+        rtkSession?.onLaserLamp = { [weak self] lamp in
+            self?.laserLamp = lamp
+        }
+        rtkSession?.onLaserNeedAim = { [weak self] in
+            self?.instrumentMessage = "先に点灯してください。"
+        }
+        if UserDefaults.standard.object(forKey: rawCaptureKey) == nil {
+            rawCaptureEnabled = true
+        } else {
+            rawCaptureEnabled = UserDefaults.standard.bool(forKey: rawCaptureKey)
+        }
+        rtkSession?.onRawStatus = { [weak self] text in
+            self?.rawCaptureStatus = text
+        }
+        rtkSession?.onRawFinished = { [weak self] unverified in
+            self?.noteRawRestore(unverified: unverified)
+        }
+        #endif
         gnss.onDiscover = { [weak self] choice in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -951,6 +1069,7 @@ final class FieldModel: ObservableObject {
 
     /// 地図と共有に出す位置。GNSS が弱いあいだは歩行推測。観測の記録は workingReading のまま。
     var navigationReading: PositionReading {
+        if let uiTestPin { return uiTestPin }
         let base = workingReading
         guard walkMode == .bridge, let bridge = deadReckon else { return base }
         let fix = bridgeFix
@@ -1238,22 +1357,36 @@ final class FieldModel: ObservableObject {
     }
 
     private func stageCurrentPoint(asGCP: Bool) -> Bool {
+        rtkSession?.setObserving(true)
+        defer { rtkSession?.setObserving(false) }
         guard basicProjectReady() else { return false }
         guard let position = reading.position, position.isPlottable, position.hasValidHorizontalAccuracy else {
             captureMessage = "位置が無いので残せません。"
             return false
         }
         guard !asGCP || position.fixQuality == .rtkFix else { return false }
+        if !PrecisionGate.tiltAllowsStart(degrees: tiltDegrees) {
+            captureMessage = "鉛直から 0.5° を超えているので、観測を始めません。"
+            return false
+        }
+        if instrument.complianceEnabled {
+            let duration = epochWatch.duration(at: position.timestamp) ?? 0
+            if !PrecisionGate.complianceAllowsStart(fix: position.fixQuality == .rtkFix, durationSeconds: duration) {
+                captureMessage = "準拠モードは FIX が 10 秒以上のときだけ仮置きできます。"
+                return false
+            }
+        }
         guard let name = nextPointName else {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
-        let condition = ObservationCondition.snapshot(
+        var condition = ObservationCondition.snapshot(
             position: position,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
             epochCount: epochWatch.count
         )
+        annotate(&condition, position: position)
         let observation = FieldObservation(
             name: name,
             workID: asGCP ? "boundary" : workCatalog.selected.id,
@@ -1261,6 +1394,10 @@ final class FieldModel: ObservableObject {
             condition: condition
         )
         store(observation)
+        if let base = ppkBase { PPKLog.noteObservation(observation.name, base: base) }
+        if rawCaptureEnabled {
+            startRawCapture(observation)
+        }
         let accuracy = CoordinateText.accuracyMeters(position.horizontalAccuracyMeters)
         captureMessage = asGCP
             ? "\(name)を仮置きしました。GCP \(position.solutionLabel) \(accuracy)。"
@@ -1747,6 +1884,8 @@ final class FieldModel: ObservableObject {
     }
 
     func start() {
+        loadUITestDrawingIfRequested()
+        loadVIPackIfRequested()
         if !SurveyBuild.basicMode,
            stature.statureMeters == nil,
            !ProcessInfo.processInfo.arguments.contains("-skipStatureAsk") {
@@ -2317,6 +2456,15 @@ final class FieldModel: ObservableObject {
                 let folder = try Self.deliveryFolder(projectName: projectName, root: root, site: site)
                 let url = folder.appendingPathComponent(format.filename)
                 try bytes.write(to: url, options: .atomic)
+                let rawFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("raw", isDirectory: true)
+                if let files = try? FileManager.default.contentsOfDirectory(at: rawFolder, includingPropertiesForKeys: nil) {
+                    for file in files where ["ubx", "json"].contains(file.pathExtension.lowercased()) {
+                        let dest = folder.appendingPathComponent(file.lastPathComponent)
+                        try? FileManager.default.removeItem(at: dest)
+                        try? FileManager.default.copyItem(at: file, to: dest)
+                    }
+                }
                 DispatchQueue.main.async {
                     self.exportURL = url
                     self.exportMessage = "\(format.label)を \(entries.count) 点、\(format.filename) に書きました。"
@@ -2418,24 +2566,309 @@ final class FieldModel: ObservableObject {
             kind: "設計"
         )
         captureMessage = "\(basicTarget?.name ?? "入力") へ測設します。"
+        followCad()
     }
 
     func aimBasic(_ entry: CoordinateBookEntry) {
-        basicTarget = entry
-        captureMessage = "\(entry.name) へ測設します。"
+        var horizontal = entry
+        horizontal.ellipsoidalHeightMeters = nil
+        basicTarget = horizontal
+        captureMessage = "\(entry.name) へ測設します。高さは未確認。"
+        followCad()
+    }
+
+    func importCoordinateFile(data: Data, filename: String) {
+        if drawing.project == nil {
+            drawing.createProject(named: "座標")
+        }
+        if drawing.project == nil, let existing = drawing.projects.first {
+            drawing.select(existing)
+        }
+        guard drawing.project != nil else {
+            failSheet("先に現場を作ってください。")
+            return
+        }
+        importBasic(data: data, filename: filename)
+        coordinateMessage = bookNote ?? exportMessage
+        if trustedZone == nil {
+            coordinateZoneChoices = PlaneZoneLabel.pickerZones()
+            bookNote = "系を選んでください。奈良の現場は第VI系です。"
+            zoneIsExplicit = false
+        }
+        focusImportedPoints()
+    }
+
+    func chooseCoordinateZone(_ zone: Int) {
+        guard (1...19).contains(zone) else { return }
+        applyExplicitZone(zone)
+        coordinateZoneChoices = []
+        let count = basicPoints().count
+        let note = count > 0 ? Self.readNote(count: count, zone: zone) : PlaneZoneLabel.button(zone)
+        bookNote = note
+        exportMessage = note
+        coordinateMessage = note
+    }
+
+    private static func placedNote(zone: Int) -> String {
+        let name = zone == 6 ? "第VI系" : "第\(zone)系"
+        return "図面を座標で置きました（\(name)）"
+    }
+
+    private static func readNote(count: Int, zone: Int) -> String {
+        let name = zone == 6 ? "第VI系" : "第\(zone)系"
+        return "\(count)点を読みました（\(name)）"
+    }
+
+    private func applyExplicitZone(_ zone: Int) {
+        trustedZone = zone
+        zoneIsExplicit = true
+        drawing.zone = zone
+    }
+
+    var zoneChoiceLabel: String {
+        zoneIsExplicit ? PlaneZoneLabel.button(drawing.zone) : "系を選ぶ"
+    }
+
+    var mapTargetVisible: Bool {
+        guard SurveyBuild.basicMode else { return false }
+        return cadStaking || cadPick != nil || basicTarget != nil || selectedControlPoint != nil
+    }
+
+    func dismissMapTarget() {
+        cadStaking = false
+        cadPick = nil
+        basicTarget = nil
+        selectedControlPointID = nil
+        stakeoutCamera = false
+    }
+
+    func snapDrawingVertex() {
+        guard let coordinate = drawing.mapPaths.first?.coordinates.first else { return }
+        handleMapTap(latitude: coordinate.latitudeDegrees, longitude: coordinate.longitudeDegrees, free: false, forced: true)
+    }
+
+    func handleMapTap(latitude: Double, longitude: Double, free: Bool, forced: Bool = false) {
+        let zone = trustedZone ?? drawing.zone
+        guard let projected = PlaneRectangular.forward(
+            latitudeDegrees: latitude,
+            longitudeDegrees: longitude,
+            zone: zone
+        ) else { return }
+        let local = drawing.axis.drawing(easting: projected.eastingMeters, northing: projected.northingMeters)
+        let width = 390.0
+        let metersPerPoint = viewport.longitudeDelta * 111_320 * max(0.2, abs(cos(latitude * .pi / 180))) / width
+        let tolerance = max(metersPerPoint * 30, 0.3)
+        if !free {
+            if let document = drawing.document,
+               let hit = DrawingSnap.nearest(in: document, to: local, tolerance: forced ? max(tolerance, 1_000_000) : tolerance) {
+                let plane = drawing.axis.plane(drawingX: hit.point.x, drawingY: hit.point.y)
+                guard let geo = PlaneRectangular.inverse(
+                    northingMeters: plane.northing,
+                    eastingMeters: plane.easting,
+                    zone: zone
+                ) else { return }
+                let named = label(near: hit.point, in: document).flatMap { StakeTargetNames.isName($0) ? $0 : nil }
+                cadPick = CadPick(name: named ?? "図面の点", latitude: geo.latitudeDegrees, longitude: geo.longitudeDegrees)
+                return
+            }
+            if let point = controlPoints.min(by: { lhs, rhs in
+                hypot(lhs.latitudeDegrees - latitude, lhs.longitudeDegrees - longitude)
+                    < hypot(rhs.latitudeDegrees - latitude, rhs.longitudeDegrees - longitude)
+            }) {
+                let north = (point.latitudeDegrees - latitude) * 111_320
+                let east = (point.longitudeDegrees - longitude) * 111_320 * max(0.2, abs(cos(latitude * .pi / 180)))
+                if (north * north + east * east).squareRoot() <= tolerance {
+                    cadPick = CadPick(name: point.name, latitude: point.latitudeDegrees, longitude: point.longitudeDegrees)
+                    return
+                }
+            }
+        }
+        guard free else { return }
+        cadPick = CadPick(name: "自由点", latitude: latitude, longitude: longitude)
+    }
+
+    func stakeCadPick() {
+        guard let pick = cadPick else { return }
+        aimBasic(name: pick.name, latitude: String(pick.latitude), longitude: String(pick.longitude), height: "")
+        cadStaking = true
+        followCad()
+    }
+
+    var cadHeadline: String? {
+        guard cadStaking, let lines = basicStakeoutLines else { return nil }
+        if lines.distance == "位置を待っています" { return lines.distance }
+        if let meters = cadDistanceMeters, meters < 0.03 { return "到達" }
+        return "あと \(lines.distance)"
+    }
+
+    var cadHint: String {
+        guard let position = navigationReading.position, position.isPlottable,
+              let target = basicTarget,
+              let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else { return "" }
+        if let heading = position.headingDegrees ?? position.courseDegrees {
+            let rad = (heading - guide.azimuthDegrees) * .pi / 180
+            let forward = cos(rad)
+            let right = sin(rad)
+            if abs(forward) >= abs(right) { return forward >= 0 ? "前へ" : "後ろへ" }
+            return right >= 0 ? "右へ" : "左へ"
+        }
+        if abs(guide.northMeters) >= abs(guide.eastMeters) {
+            return guide.northMeters >= 0 ? "北へ" : "南へ"
+        }
+        return guide.eastMeters >= 0 ? "東へ" : "西へ"
+    }
+
+    var cadDistanceMeters: Double? {
+        guard let position = navigationReading.position, position.isPlottable, let target = basicTarget,
+              let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else { return nil }
+        return guide.distanceMeters
+    }
+
+    private func label(near point: PlanarPoint, in document: DrawingDocument) -> String? {
+        var best: (String, Double)?
+        for entity in document.entities {
+            guard case let .text(origin, string, _, _) = entity.primitive else { continue }
+            let distance = origin.distance(to: point)
+            if distance <= 3, best == nil || distance < best!.1 {
+                best = (string, distance)
+            }
+        }
+        return best?.0
+    }
+
+    private func followCad() {
+        guard let target = basicTarget else {
+            stakeoutCamera = false
+            return
+        }
+        stakeoutCamera = true
+        followUser = false
+        guard let position = navigationReading.position, position.isPlottable else { return }
+        let south = min(position.latitudeDegrees, target.latitudeDegrees)
+        let north = max(position.latitudeDegrees, target.latitudeDegrees)
+        let west = min(position.longitudeDegrees, target.longitudeDegrees)
+        let east = max(position.longitudeDegrees, target.longitudeDegrees)
+        let midLatitude = (south + north) / 2
+        let cosine = max(0.2, abs(cos(midLatitude * .pi / 180)))
+        let minimumLatitude = 20.0 / 111_320
+        let minimumLongitude = 20.0 / (111_320 * cosine)
+        let latitudeDelta = max((north - south) * 1.8, minimumLatitude)
+        let longitudeDelta = max((east - west) * 1.8, minimumLongitude)
+        viewport = MapViewport(
+            centerLatitude: midLatitude - latitudeDelta * 0.18,
+            centerLongitude: (west + east) / 2,
+            latitudeDelta: latitudeDelta,
+            longitudeDelta: longitudeDelta
+        )
+    }
+
+    func stakeSelectedControlPoint() {
+        guard let point = selectedControlPoint else {
+            captureMessage = "先に点を選んでください。"
+            return
+        }
+        if let entry = basicPoints().first(where: { $0.name == point.name }) {
+            aimBasic(entry)
+        } else {
+            aimBasic(
+                name: point.name,
+                latitude: String(point.latitudeDegrees),
+                longitude: String(point.longitudeDegrees),
+                height: ""
+            )
+        }
+        tab = .map
+    }
+
+    private func focusImportedPoints() {
+        guard !controlPoints.isEmpty else { return }
+        var south = controlPoints.map(\.latitudeDegrees).min() ?? 0
+        var north = controlPoints.map(\.latitudeDegrees).max() ?? 0
+        var west = controlPoints.map(\.longitudeDegrees).min() ?? 0
+        var east = controlPoints.map(\.longitudeDegrees).max() ?? 0
+        let padLatitude = max((north - south) * 0.35, 0.0012)
+        let padLongitude = max((east - west) * 0.35, 0.0012)
+        south -= padLatitude
+        north += padLatitude
+        west -= padLongitude
+        east += padLongitude
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: (south + north) / 2,
+            centerLongitude: (west + east) / 2,
+            latitudeDelta: max(north - south, 0.002),
+            longitudeDelta: max(east - west, 0.002)
+        )
+        visibleBounds = GeoBounds(south: south, west: west, north: north, east: east)
+        refreshVisibleControlPoints()
+        tab = .map
     }
 
     var basicStakeoutLine: String? {
+        basicStakeoutLines.map { "\($0.zone) \($0.name) \($0.distance) \($0.north) \($0.east) \($0.height)" }
+    }
+
+    var basicStakeoutLines: StakeoutLines? {
         guard SurveyBuild.basicMode, let target = basicTarget else { return nil }
-        guard let position = navigationReading.position, position.isPlottable else {
-            return "\(target.name) 位置を待っています"
+        guard zoneIsExplicit else {
+            return StakeoutLines(
+                zone: "系を選んでください",
+                name: target.name,
+                distance: "奈良の現場は第VI系です。",
+                north: "",
+                east: "",
+                height: "高さは未確認"
+            )
         }
-        guard let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else { return nil }
-        return "\(target.name) \(guide.line)"
+        let zone = PlaneZoneLabel.button(drawing.zone)
+        guard let position = navigationReading.position, position.isPlottable,
+              let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else {
+            return StakeoutLines(zone: zone, name: target.name, distance: "位置を待っています", north: "", east: "", height: "高さは未確認")
+        }
+        let height = CoordinateText.cutFill(
+            current: position.ellipsoidalHeightMeters,
+            design: target.ellipsoidalHeightMeters
+        ) ?? "高さは未確認"
+        return StakeoutLines(
+            zone: zone,
+            name: target.name,
+            distance: Self.horizontalText(guide.distanceMeters),
+            north: Self.offsetText(guide.northMeters, positive: "北", negative: "南"),
+            east: Self.offsetText(guide.eastMeters, positive: "東", negative: "西"),
+            height: height
+        )
+    }
+
+    /// 設計の楕円体高があるときだけ。ジオイドは作らない。
+    var stakeoutCutFill: String? {
+        guard let target = basicTarget, let position = navigationReading.position else { return nil }
+        return CoordinateText.cutFill(current: position.ellipsoidalHeightMeters, design: target.ellipsoidalHeightMeters)
+    }
+
+    private static func horizontalText(_ meters: Double) -> String {
+        let magnitude = abs(meters)
+        if magnitude < 1 {
+            return String(format: "%.0f cm", magnitude * 100)
+        }
+        if magnitude >= 1000 {
+            return String(format: "%.2f km", magnitude / 1000)
+        }
+        return String(format: "%.2f m", magnitude)
+    }
+
+    private static func offsetText(_ meters: Double, positive: String, negative: String) -> String {
+        let word = meters < 0 ? negative : positive
+        let magnitude = abs(meters)
+        if magnitude < 1 {
+            return String(format: "%@ %.0f cm", word, magnitude * 100)
+        }
+        return String(format: "%@ %.2f m", word, magnitude)
     }
 
     @discardableResult
     func recordStake() -> Bool {
+        if rawCaptureStatus == "記録中" { rawCaptureStatus = "停止" }
+        endRawCapture()
         guard basicProjectReady() else { return false }
         guard let target = basicTarget else {
             captureMessage = "先に測設する座標を選んでください。"
@@ -2445,6 +2878,17 @@ final class FieldModel: ObservableObject {
             captureMessage = "位置が無いので残せません。"
             return false
         }
+        if !PrecisionGate.tiltAllowsStart(degrees: tiltDegrees) {
+            captureMessage = "鉛直から 0.5° を超えているので、観測を始めません。"
+            return false
+        }
+        if instrument.complianceEnabled {
+            let duration = epochWatch.duration(at: position.timestamp) ?? 0
+            if !PrecisionGate.complianceAllowsStart(fix: position.fixQuality == .rtkFix, durationSeconds: duration) {
+                captureMessage = "準拠モードは FIX が 10 秒以上のときだけ仮置きできます。"
+                return false
+            }
+        }
         guard let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else {
             captureMessage = "目標までの距離を出せません。"
             return false
@@ -2453,7 +2897,7 @@ final class FieldModel: ObservableObject {
             captureMessage = "点名の頭は半角アルファベットだけにしてください。"
             return false
         }
-        let condition = ObservationCondition.snapshot(
+        var condition = ObservationCondition.snapshot(
             position: position,
             stage: stageTransition.stage,
             durationSeconds: epochWatch.duration(at: position.timestamp),
@@ -2461,6 +2905,7 @@ final class FieldModel: ObservableObject {
             stature: stature,
             sight: liveSight
         )
+        annotate(&condition, position: position)
         let observation = FieldObservation(
             name: name,
             workID: "stakeout",
@@ -2476,6 +2921,1027 @@ final class FieldModel: ObservableObject {
         stakeResult = result
         captureMessage = result
         return true
+    }
+
+    func compareScale(drawingMeters: Double?, measuredMeters: Double?) {
+        guard let drawingMeters, let measuredMeters,
+              let result = ScaleCheck.compare(drawingMeters: drawingMeters, measuredMeters: measuredMeters) else {
+            scaleMessage = "2つの距離を、0より大きい数で入れてください。"
+            return
+        }
+        let millimetres = result.differenceMeters * 1000
+        let ratio = result.ratio > 0 ? Int((1 / result.ratio).rounded()) : 0
+        scaleMessage = String(
+            format: "%@。差 %+.1f mm。1/%d。",
+            result.passed ? "合格" : "不合格",
+            millimetres,
+            ratio
+        )
+    }
+
+    func addLocalizeDraft(name: String, designEast: Double?, designNorth: Double?, measuredEast: Double?, measuredNorth: Double?) {
+        guard let designEast, let designNorth, let measuredEast, let measuredNorth else {
+            localizeMessage = "設計と測定の東西南北を数で入れてください。"
+            return
+        }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        localizeDrafts.append(LocalizeDraft(
+            name: trimmed.isEmpty ? "点\(localizeDrafts.count + 1)" : trimmed,
+            designEast: designEast,
+            designNorth: designNorth,
+            measuredEast: measuredEast,
+            measuredNorth: measuredNorth
+        ))
+        localizeMessage = "\(localizeDrafts.count)点たまりました。3点以上で合わせます。"
+    }
+
+    func runLocalize() {
+        guard localizeDrafts.count >= PrecisionGate.minimumKnownPoints else {
+            localizeMessage = "既知点が3点に足りません。いま \(localizeDrafts.count) 点。"
+            return
+        }
+        let pairs = localizeDrafts.map {
+            (source: PlanarPoint(x: $0.measuredEast, y: $0.measuredNorth), target: PlanarPoint(x: $0.designEast, y: $0.designNorth))
+        }
+        guard let fit = SiteLocalize.fit(pairs) else {
+            localizeMessage = "点が重なっているので、合わせられません。"
+            return
+        }
+        localizeMessage = String(format: "合わせました。残差 %.1f mm。縮尺は1のまま。", fit.rmsMeters * 1000)
+    }
+
+    func refreshCadPoints() -> [NamedStakePoint] {
+        var byName: [String: NamedStakePoint] = [:]
+        for point in controlPoints where StakeTargetNames.isName(point.name) {
+            byName[point.name] = NamedStakePoint(
+                id: point.id,
+                name: point.name,
+                latitude: point.latitudeDegrees,
+                longitude: point.longitudeDegrees,
+                distance: ""
+            )
+        }
+        if let document = drawing.document {
+            let zone = trustedZone ?? drawing.zone
+            for entity in document.entities {
+                guard case let .point(vertex) = entity.primitive else { continue }
+                guard let name = label(near: vertex, in: document), StakeTargetNames.isName(name) else { continue }
+                if byName[name] != nil { continue }
+                let plane = drawing.axis.plane(drawingX: vertex.x, drawingY: vertex.y)
+                guard let geo = PlaneRectangular.inverse(
+                    northingMeters: plane.northing,
+                    eastingMeters: plane.easting,
+                    zone: zone
+                ) else { continue }
+                byName[name] = NamedStakePoint(
+                    id: "point-\(name)",
+                    name: name,
+                    latitude: geo.latitudeDegrees,
+                    longitude: geo.longitudeDegrees,
+                    distance: ""
+                )
+            }
+        }
+        let here = navigationReading.position
+        var list = Array(byName.values)
+        for index in list.indices {
+            list[index].distance = Self.distanceText(
+                from: here,
+                latitude: list[index].latitude,
+                longitude: list[index].longitude
+            )
+            list[index].meters = Self.distanceMeters(
+                from: here,
+                latitude: list[index].latitude,
+                longitude: list[index].longitude
+            )
+        }
+        list.sort {
+            if $0.meters != $1.meters { return $0.meters < $1.meters }
+            return $0.name < $1.name
+        }
+        cadMessage = list.isEmpty
+            ? "点名のある測点がありません。地図の図面をタップして測設します。"
+            : "点名のある測点が\(list.count)点あります。地図の図面をタップして測設します。"
+        return list
+    }
+
+    func aimNamedStakePoint(_ point: NamedStakePoint) {
+        aimBasic(
+            name: point.name,
+            latitude: String(point.latitude),
+            longitude: String(point.longitude),
+            height: ""
+        )
+        cadPick = CadPick(name: point.name, latitude: point.latitude, longitude: point.longitude)
+        cadStaking = true
+        cadMessage = "\(point.name) へ測設します。"
+        tab = .map
+        followCad()
+    }
+
+    private static func distanceMeters(from position: GeodeticPosition?, latitude: Double, longitude: Double) -> Double {
+        guard let position, position.isPlottable,
+              let gap = GRS80Geodesic.inverse(
+                latitude1: position.latitudeDegrees,
+                longitude1: position.longitudeDegrees,
+                latitude2: latitude,
+                longitude2: longitude
+              ) else { return .greatestFiniteMagnitude }
+        return gap.distanceMeters
+    }
+
+    private static func distanceText(from position: GeodeticPosition?, latitude: Double, longitude: Double) -> String {
+        let meters = distanceMeters(from: position, latitude: latitude, longitude: longitude)
+        guard meters < .greatestFiniteMagnitude else { return "" }
+        return horizontalText(meters)
+    }
+
+    func restoreExportedBook() {
+        guard let project = drawing.project else {
+            exportMessage = "先に現場を作ってください。"
+            return
+        }
+        if let folder = try? ProjectStore.exportDirectory(projectName: project.name, at: drawing.projectsRoot),
+           let file = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter({ ["csv", "sima"].contains($0.pathExtension.lowercased()) })
+            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+            .last,
+           let data = try? Data(contentsOf: file) {
+            importBasic(data: data, filename: file.lastPathComponent)
+            return
+        }
+        guard let url = exportURL, let data = try? Data(contentsOf: url) else {
+            exportMessage = "先にデータを書き出してください。"
+            return
+        }
+        if url.pathExtension.lowercased() == "json" {
+            restoreBasicBackup(data: data)
+        } else {
+            importBasic(data: data, filename: url.lastPathComponent)
+        }
+    }
+
+    private var didLoadUITestDrawing = false
+
+    /// `-uitestDrawing n` のとき、その番号の試験図面を1回だけ読む。
+    private func loadUITestDrawingIfRequested() {
+        guard !didLoadUITestDrawing else { return }
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uitestDrawing"),
+              args.indices.contains(flag + 1),
+              let step = Int(args[flag + 1]) else { return }
+        didLoadUITestDrawing = true
+        uiTestDrawingStep = step - 1
+        tab = .map
+        showNextUITestDrawing()
+    }
+
+    /// 東京付近の座標を、わざと 1 系で開く試験図面。
+    private static let wrongZoneSample = """
+    0
+    SECTION
+    2
+    HEADER
+    9
+    $ACADVER
+    1
+    AC1021
+    9
+    $INSUNITS
+    70
+    6
+    0
+    ENDSEC
+    0
+    SECTION
+    2
+    ENTITIES
+    0
+    LINE
+    8
+    図
+    10
+    -5992.920
+    20
+    -35363.238
+    11
+    -5982.920
+    21
+    -35363.238
+    0
+    ENDSEC
+    0
+    EOF
+    """
+
+    /// 試験の図面を順に読む。1、2、3、生成した 5、壊れた 6。
+    func showNextUITestDrawing() {
+        if drawing.project == nil {
+            drawing.createProject(named: "図面試験")
+        }
+        guard drawing.project != nil else {
+            uiTestDrawingStatus = drawing.message ?? "現場を作れません"
+            return
+        }
+        uiTestDrawingStep += 1
+        let step = uiTestDrawingStep
+        let data: Data
+        let fileName: String
+        let zone: Int?
+        let axis: DrawingAxis?
+        switch step {
+        case 1:
+            let sidecar = DrawingSidecar.load(UITestDrawingBytes.irabuMeta)
+            data = UITestDrawingBytes.irabu
+            fileName = "1_irabu_xvi_utf8.dxf"
+            zone = sidecar?.zone
+            axis = sidecar?.drawingAxis
+        case 2:
+            data = UITestDrawingBytes.nagoya
+            fileName = "2_nagoya_vii_ac1021_ansi932.dxf"
+            zone = 7
+            axis = .cadEastNorth
+        case 3:
+            data = UITestDrawingBytes.millimetres
+            fileName = "3_site_local_mm.dxf"
+            zone = nil
+            axis = nil
+        case 4:
+            data = Data()
+            fileName = "5_heavy_vii_150k_lines.dxf"
+            zone = HeavyDrawingFixture.zone
+            axis = .cadEastNorth
+        case 6:
+            data = Data()
+            fileName = "empty.dxf"
+            zone = nil
+            axis = nil
+        case 7:
+            data = Data(Self.wrongZoneSample.utf8)
+            fileName = "wrong-zone.dxf"
+            zone = 1
+            axis = .cadEastNorth
+        case 8, 9, 10, 11, 12, 13:
+            data = UITestDrawingBytes.sfig
+            fileName = "7_local_origin_mm_sfig.sfc"
+            zone = 2
+            axis = .cadEastNorth
+        default:
+            data = UITestDrawingBytes.broken
+            fileName = "6_broken.dxf"
+            zone = nil
+            axis = nil
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let bytes = step == 4 ? HeavyDrawingFixture.makeDXF() : data
+            let parsed = Result { try DrawingImport.load(bytes, fileName: fileName) }
+            DispatchQueue.main.async {
+                self.tab = .map
+                switch parsed {
+                case let .success(document):
+                    var note = self.drawing.installParsed(
+                        document,
+                        data: bytes,
+                        fileName: fileName,
+                        zone: zone,
+                        axis: axis
+                    )
+                    if step == 9 || (10...13).contains(step), let survey = try? SFCParser.open(bytes),
+                       let fit = SFCPointFit.align(document: survey.document, book: survey.book) {
+                        self.drawing.placeAligned(survey.document, transform: fit.transform, zone: 2)
+                        note = note.replacingOccurrences(of: "仮置き。", with: "")
+                        note += "点名で合わせました。残差 \(String(format: "%.3f", fit.rmsMeters)) m。"
+                    }
+                    if step == 7 {
+                        let warning = ZoneAdvisor.placement(
+                            drawingX: -5992.920,
+                            drawingY: -35363.238,
+                            zone: 1,
+                            axis: .cadEastNorth,
+                            referenceLatitude: 35.681236,
+                            referenceLongitude: 139.767125,
+                            referenceName: "現在地"
+                        )
+                        if let message = warning.message { note += message }
+                    }
+                    self.uiTestDrawingStatus = note
+                    self.frameMapToDrawing()
+                    if let zoom = Self.previewZoom(step) {
+                        self.applyPreviewZoom(zoom)
+                    }
+                case let .failure(error):
+                    self.uiTestDrawingStatus = (error as? DXFError)?.description ?? "図面を読めませんでした。"
+                }
+            }
+        }
+    }
+
+    private static func previewZoom(_ step: Int) -> Int? {
+        switch step {
+        case 10: return 5
+        case 11: return 14
+        case 12: return 18
+        case 13: return MapTileOverzoom.appMaxZoom
+        default: return nil
+        }
+    }
+
+    private func applyPreviewZoom(_ zoom: Int) {
+        let longitude = MapZoom.longitudeDelta(forZoom: zoom, screenWidthPoints: 390)
+        var latitude = viewport.centerLatitude
+        var centerLongitude = viewport.centerLongitude
+        if zoom >= MapTileOverzoom.providerMaxZoom, let corner = drawing.mapPaths.first?.coordinates.first {
+            latitude = corner.latitudeDegrees
+            centerLongitude = corner.longitudeDegrees
+        }
+        let cosine = max(0.2, abs(cos(latitude * .pi / 180)))
+        let latitudeDelta = longitude * cosine
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: latitude - latitudeDelta * 0.15,
+            centerLongitude: centerLongitude,
+            latitudeDelta: latitudeDelta,
+            longitudeDelta: longitude
+        )
+    }
+
+    private func frameMapToDrawing() {
+        if let bounds = drawing.mapIndex.bounds {
+            followUser = false
+            let latitude = max(bounds.north - bounds.south, 0.002) * 1.8
+            let longitude = max(bounds.east - bounds.west, 0.002) * 1.8
+            viewport = MapViewport(
+                centerLatitude: (bounds.south + bounds.north) / 2,
+                centerLongitude: (bounds.west + bounds.east) / 2,
+                latitudeDelta: latitude,
+                longitudeDelta: longitude
+            )
+            return
+        }
+        var south = Double.greatestFiniteMagnitude
+        var north = -Double.greatestFiniteMagnitude
+        var west = Double.greatestFiniteMagnitude
+        var east = -Double.greatestFiniteMagnitude
+        var any = false
+        for path in drawing.mapPaths {
+            for coordinate in path.coordinates {
+                any = true
+                south = min(south, coordinate.latitudeDegrees)
+                north = max(north, coordinate.latitudeDegrees)
+                west = min(west, coordinate.longitudeDegrees)
+                east = max(east, coordinate.longitudeDegrees)
+            }
+        }
+        guard any else { return }
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: (south + north) / 2,
+            centerLongitude: (west + east) / 2,
+            latitudeDelta: max(north - south, 0.002) * 1.8,
+            longitudeDelta: max(east - west, 0.002) * 1.8
+        )
+    }
+
+    func refreshProjectSheet() {
+        guard let name = drawing.project?.name else {
+            projectSheet = nil
+            return
+        }
+        projectSheet = ProjectStore.loadSheet(projectName: name, at: drawing.projectsRoot)
+    }
+
+    func importProjectSheet(data: Data, fileName: String, sidecar: Data? = nil, books: [(Data, String)] = []) {
+        guard drawing.project?.name != nil else {
+            sheetMessage = "先に現場を作ってください。"
+            projectSheet = nil
+            return
+        }
+        let kind = Self.sheetKind(fileName: fileName, data: data)
+        guard kind != "unknown" else {
+            sheetMessage = "\(fileName) は図面として読めません。PDF、画像、DXF、SFC を選んでください。"
+            return
+        }
+        let meta = (sidecar ?? heldSidecarData).flatMap(DrawingSidecar.load)
+        if kind == "dxf" || kind == "sfc" {
+            sheetMessage = "図面を読んでいます。"
+            DispatchQueue.global(qos: .userInitiated).async {
+                let parsed = Result { try DrawingImport.load(data, fileName: fileName) }
+                DispatchQueue.main.async {
+                    self.finishDrawingSheet(parsed, data: data, fileName: fileName, kind: kind, meta: meta, books: books)
+                }
+            }
+            return
+        }
+        storeLooseSheet(data: data, fileName: fileName, kind: kind, note: nil)
+        importBooks(books)
+    }
+
+    func failSheet(_ reason: String) {
+        let text = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        sheetMessage = text.isEmpty ? "図面を読めませんでした。" : text
+    }
+
+    func holdSidecar(_ data: Data) {
+        heldSidecarData = data
+        if let sidecar = DrawingSidecar.load(data), let zone = sidecar.zone {
+            trustedZone = zone
+            sheetMessage = "\(zone)系（EPSG \(sidecar.epsg)）を覚えました。図面を選んでください。"
+        }
+    }
+
+    func acceptSheetZone(_ zone: Int) {
+        guard let pending = pendingSheet, (1...19).contains(zone) else { return }
+        stageForPlacement(pending, zone: zone)
+    }
+
+    func placeImportedSheet() {
+        guard let pending = pendingSheet, let zone = trustedZone else {
+            failSheet("置く図面がありません。先に図面を読んでください。")
+            return
+        }
+        let books = pending.books
+        let census = pending.document.importCensus
+        pendingSheet = nil
+        canPlaceOnSite = false
+        placeDrawing(pending, zone: zone, axis: pending.axis)
+        importBooks(books)
+        frameMapToSurvey()
+        if sheetUsesCoordinates {
+            sheetMessage = Self.placedNote(zone: zone) + "\n" + census
+        }
+    }
+
+    func acceptBookZone(_ zone: Int) {
+        guard let pending = pendingBook, (1...19).contains(zone) else { return }
+        trustedZone = zone
+        bookZoneChoices = []
+        pendingBook = nil
+        commitPlaneBook(pending.data, filename: pending.filename, zone: zone, adoptZone: true)
+    }
+
+    private func finishDrawingSheet(
+        _ parsed: Result<DrawingDocument, Error>,
+        data: Data,
+        fileName: String,
+        kind: String,
+        meta: DrawingSidecar?,
+        books: [(Data, String)]
+    ) {
+        switch parsed {
+        case let .failure(error):
+            let reason = (error as? DXFError)?.description
+                ?? (error as? SFCError)?.description
+                ?? error.localizedDescription
+            sheetUsesCoordinates = false
+            sheetMessage = "\(fileName) を読めませんでした。\(reason)"
+        case let .success(document):
+            let here = placementSample()
+            let decision = FieldPackPlacement.resolve(
+                sidecar: meta,
+                x: document.bounds.midX,
+                y: document.bounds.midY,
+                latitude: here.latitude,
+                longitude: here.longitude,
+                prefecture: drawing.project?.prefecture
+            )
+            let axis = decision.axis ?? .cadEastNorth
+            if meta == nil, kind == "dxf" {
+                pendingSheet = PendingDrawingSheet(
+                    data: data,
+                    fileName: fileName,
+                    document: document,
+                    kind: kind,
+                    axis: axis,
+                    books: books
+                )
+                sheetZoneChoices = PlaneZoneLabel.pickerZones()
+                canPlaceOnSite = false
+                sheetUsesCoordinates = false
+                sheetMessage = "meta.json が読めません。系を選んでください。奈良の現場は第VI系です。\n" + document.importCensus
+                return
+            }
+            guard let zone = decision.zone else {
+                pendingSheet = PendingDrawingSheet(
+                    data: data,
+                    fileName: fileName,
+                    document: document,
+                    kind: kind,
+                    axis: axis,
+                    books: books
+                )
+                sheetZoneChoices = decision.choices
+                sheetUsesCoordinates = false
+                sheetMessage = "系を選んでください。"
+                return
+            }
+            trustedZone = zone
+            stageForPlacement(
+                PendingDrawingSheet(data: data, fileName: fileName, document: document, kind: kind, axis: axis, books: books),
+                zone: zone
+            )
+        }
+    }
+
+    private func stageForPlacement(_ pending: PendingDrawingSheet, zone: Int) {
+        pendingSheet = pending
+        applyExplicitZone(zone)
+        canPlaceOnSite = true
+        sheetUsesCoordinates = true
+        sheetZoneChoices = []
+        if let name = drawing.project?.name,
+           let record = try? ProjectStore.saveSheet(
+            data: pending.data,
+            fileName: pending.fileName,
+            kind: pending.kind,
+            projectName: name,
+            at: drawing.projectsRoot
+           ) {
+            projectSheet = record
+        }
+        sheetMessage = Self.placedNote(zone: zone) + "\n" + pending.document.importCensus
+    }
+
+    private func placeDrawing(_ pending: PendingDrawingSheet, zone: Int, axis: DrawingAxis) {
+        let epsg = 6668 + zone
+        var note = drawing.installParsed(
+            pending.document,
+            data: pending.data,
+            fileName: pending.fileName,
+            zone: zone,
+            axis: axis
+        )
+        let names = SiteDXF.controlNames(in: pending.document)
+        let axisLabel = axis == .surveyNorthEast ? "X北 Y東" : "X東 Y北"
+        note += "\(zone)系（EPSG \(epsg)）。\(axisLabel)。"
+        if pending.kind == "dxf", !names.isEmpty {
+            let bad = SiteDXF.mismatches(drawing: names, ledger: basicPoints().map(\.name))
+            note += bad.isEmpty ? "測設_基準点は台帳と一致。" : "台帳と違う: \(bad.joined(separator: " "))。"
+        }
+        if let record = ProjectStore.loadSheet(projectName: drawing.project?.name ?? "", at: drawing.projectsRoot) {
+            projectSheet = record
+        }
+        if let name = drawing.project?.name,
+           let record = try? ProjectStore.saveSheet(
+            data: pending.data,
+            fileName: pending.fileName,
+            kind: pending.kind,
+            projectName: name,
+            at: drawing.projectsRoot
+           ) {
+            projectSheet = record
+        }
+        sheetMessage = note
+        sheetZoneChoices = []
+        if drawing.mapPaths.isEmpty {
+            sheetMessage = note + "地図には出ていません。"
+            return
+        }
+        frameMapToDrawing()
+        tab = .map
+    }
+
+    private func storeLooseSheet(data: Data, fileName: String, kind: String, note extra: String?) {
+        guard let name = drawing.project?.name else { return }
+        do {
+            let record = try ProjectStore.saveSheet(
+                data: data,
+                fileName: fileName,
+                kind: kind,
+                projectName: name,
+                at: drawing.projectsRoot
+            )
+            projectSheet = record
+            canPlaceOnSite = false
+            sheetUsesCoordinates = false
+            var note = "済。\(record.fileName)。\(record.byteCount) バイト。"
+            if let extra { note += extra }
+            sheetMessage = note
+        } catch {
+            sheetUsesCoordinates = false
+            sheetMessage = "図面を置けませんでした。"
+        }
+    }
+
+    private func importBooks(_ books: [(Data, String)]) {
+        for book in books {
+            importBasic(data: book.0, filename: book.1)
+        }
+    }
+
+    private func commitPlaneBook(_ data: Data, filename: String, zone: Int, adoptZone: Bool) {
+        guard let project = drawing.project else { return }
+        let entries = CoordinateExchange.parse(data: data, filename: filename, zone: zone)
+        guard !entries.isEmpty else {
+            noteCoordinate("0行です。")
+            return
+        }
+        do {
+            try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
+            if adoptZone {
+                applyExplicitZone(zone)
+            }
+            basicRevision += 1
+            showSurveyMarks(entries)
+            let total = basicPoints().count
+            let note = adoptZone ? Self.readNote(count: total, zone: zone) : "\(total)点を読みました"
+            exportMessage = note
+            bookNote = note
+        } catch {
+            exportMessage = "読み込めませんでした。"
+            bookNote = exportMessage
+        }
+    }
+
+    private func showSurveyMarks(_ entries: [CoordinateBookEntry]) {
+        var merged = controlPoints
+        for entry in entries {
+            let mark = ControlPoint(
+                id: entry.name,
+                name: entry.name,
+                kind: entry.kind ?? "測点",
+                latitudeDegrees: entry.latitudeDegrees,
+                longitudeDegrees: entry.longitudeDegrees,
+                heightMeters: nil,
+                ellipsoidalHeightMeters: nil,
+                heightKind: .orthometric,
+                sourceNote: entry.source ?? ""
+            )
+            if let index = merged.firstIndex(where: { $0.id == mark.id }) {
+                merged[index] = mark
+            } else {
+                merged.append(mark)
+            }
+        }
+        controlPoints = merged
+        refreshVisibleControlPoints()
+    }
+
+    private func frameMapToSurvey() {
+        frameMapToDrawing()
+        guard !controlPoints.isEmpty else { return }
+        var south = viewport.centerLatitude - viewport.latitudeDelta / 2
+        var north = viewport.centerLatitude + viewport.latitudeDelta / 2
+        var west = viewport.centerLongitude - viewport.longitudeDelta / 2
+        var east = viewport.centerLongitude + viewport.longitudeDelta / 2
+        for point in controlPoints {
+            south = min(south, point.latitudeDegrees)
+            north = max(north, point.latitudeDegrees)
+            west = min(west, point.longitudeDegrees)
+            east = max(east, point.longitudeDegrees)
+        }
+        let padLatitude = max((north - south) * 0.2, 0.0008)
+        let padLongitude = max((east - west) * 0.2, 0.0008)
+        south -= padLatitude
+        north += padLatitude
+        west -= padLongitude
+        east += padLongitude
+        followUser = false
+        viewport = MapViewport(
+            centerLatitude: (south + north) / 2,
+            centerLongitude: (west + east) / 2,
+            latitudeDelta: max(north - south, 0.001),
+            longitudeDelta: max(east - west, 0.001)
+        )
+        visibleBounds = GeoBounds(south: south, west: west, north: north, east: east)
+        refreshVisibleControlPoints()
+    }
+
+    private func adoptControlCatalog(_ points: [ControlPoint], data: Data) {
+        guard let project = drawing.project else { return }
+        controlPoints = points
+        try? data.write(to: siteDirectory.appendingPathComponent("control-points.csv"), options: .atomic)
+        refreshVisibleControlPoints()
+        let entries = points.map { point in
+            CoordinateBookEntry(
+                name: point.name,
+                latitudeDegrees: point.latitudeDegrees,
+                longitudeDegrees: point.longitudeDegrees,
+                ellipsoidalHeightMeters: point.comparableEllipsoidalHeightMeters,
+                horizontalAccuracyMeters: 0,
+                verticalAccuracyMeters: nil,
+                satelliteCount: nil,
+                fixDurationSeconds: 0,
+                recordedAt: Date(),
+                kind: point.kind,
+                source: "基準点"
+            )
+        }
+        do {
+            try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
+            basicRevision += 1
+            showSurveyMarks(entries)
+            let total = basicPoints().count
+            let note = trustedZone.map { Self.readNote(count: total, zone: $0) } ?? "\(total)点を読みました"
+            exportMessage = note
+            bookNote = note
+        } catch {
+            exportMessage = "読み込めませんでした。"
+            bookNote = exportMessage
+        }
+    }
+
+    /// 画面試験だけ。`-uitestLatitude` があるとき、地図と測設の現在地をその経緯度に固定する。
+    private let uiTestPin: PositionReading? = FieldModel.pinnedTestReading()
+
+    private static func pinnedTestReading() -> PositionReading? {
+        let args = ProcessInfo.processInfo.arguments
+        func value(_ flag: String) -> Double? {
+            guard let index = args.firstIndex(of: flag), args.indices.contains(index + 1) else { return nil }
+            return Double(args[index + 1])
+        }
+        guard let latitude = value("-uitestLatitude"), let longitude = value("-uitestLongitude") else { return nil }
+        return PositionReading(
+            position: IPhonePosition.make(
+                latitudeDegrees: latitude,
+                longitudeDegrees: longitude,
+                ellipsoidalHeightMeters: 45.2,
+                horizontalAccuracyMeters: 1,
+                verticalAccuracyMeters: nil,
+                timestamp: Date()
+            ),
+            availability: .available
+        )
+    }
+
+    private func placementSample() -> (latitude: Double?, longitude: Double?) {
+        let args = ProcessInfo.processInfo.arguments
+        func value(_ flag: String) -> Double? {
+            guard let index = args.firstIndex(of: flag), args.indices.contains(index + 1) else { return nil }
+            return Double(args[index + 1])
+        }
+        if let latitude = value("-uitestLatitude"), let longitude = value("-uitestLongitude") {
+            return (latitude, longitude)
+        }
+        let position = navigationReading.position ?? reading.position
+        if let position, position.isPlottable {
+            return (position.latitudeDegrees, position.longitudeDegrees)
+        }
+        return (nil, nil)
+    }
+
+    private func loadVIPackIfRequested() {
+        let args = ProcessInfo.processInfo.arguments
+        guard let flag = args.firstIndex(of: "-uitestField"),
+              args.indices.contains(flag + 1) else { return }
+        let mode = args[flag + 1]
+        guard mode == "vi" || mode == "vi-fail" || mode == "vi-nomet" else { return }
+        if drawing.project == nil {
+            drawing.createProject(named: "六系")
+        }
+        if mode == "vi-fail" {
+            importProjectSheet(data: Data("not-a-dxf".utf8), fileName: "broken.dxf")
+            return
+        }
+        if mode == "vi-nomet" {
+            importProjectSheet(data: VIPack.dxf, fileName: VIPack.dxfFileName)
+            return
+        }
+        // 試験は、伊良部の 16 系が残った状態から始める。meta の 6674 が上書きする。
+        drawing.zone = 16
+        importProjectSheet(
+            data: VIPack.dxf,
+            fileName: VIPack.dxfFileName,
+            sidecar: VIPack.meta,
+            books: [(VIPack.csv, "control-points.csv"), (VIPack.sima, "points.sima")]
+        )
+    }
+
+    func refreshInstrument() {
+        guard let name = drawing.project?.name else { return }
+        instrument = ProjectStore.loadInstrument(projectName: name, at: drawing.projectsRoot)
+    }
+
+    func saveInstrument() {
+        guard let name = drawing.project?.name else {
+            instrumentMessage = "先に現場を作ってください。"
+            return
+        }
+        let missingKBM = instrument.kbmSource.isEmpty || instrument.kbmVersion.isEmpty || instrument.kbmDate.isEmpty
+        if instrument.kbmH != nil, missingKBM {
+            instrumentMessage = "H の出典、版、日付を入れてください。"
+            return
+        }
+        if instrument.cameraKind == "spcPlus" {
+            instrument.cameraX = CameraOffset.spcPlus15ProMax.x
+            instrument.cameraY = CameraOffset.spcPlus15ProMax.y
+            instrument.cameraZ = CameraOffset.spcPlus15ProMax.z
+        }
+        do {
+            try ProjectStore.saveInstrument(instrument, projectName: name, at: drawing.projectsRoot)
+            let kbm = KBMCorrection.accepted(
+                first: instrument.kbmFirstN,
+                firstAt: instrument.kbmFirstAt,
+                second: instrument.kbmSecondN,
+                secondAt: instrument.kbmSecondAt
+            )
+            let firmware = receiverFirmware ?? rtkSession?.firmwareVersion ?? "未取得"
+            let height = instrument.antennaToGroundMeters.map { String(format: "%.3f m", $0) } ?? "—"
+            instrumentMessage = "残しました。カメラ \(CameraOffset.displayName(instrument.cameraKind)) \(instrument.antennaMethodLabel) \(height)。ファームウェア \(firmware)。"
+        } catch {
+            instrumentMessage = "設定を置けませんでした。"
+        }
+    }
+
+    func noteTilt(_ degrees: Double, fromDevice: Bool) {
+        guard degrees.isFinite else { return }
+        if fromDevice, !deviceTiltLive {
+            deviceTiltLive = true
+            tiltWindow.removeAll(keepingCapacity: true)
+        }
+        if !fromDevice, deviceTiltLive { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        tiltWindow.append((now, degrees))
+        tiltWindow.removeAll { now - $0.0 > 15 }
+        guard let stats = TiltMath.stats(tiltWindow.map(\.1)) else { return }
+        tiltDegrees = stats.median
+        tiltMeanDegrees = stats.mean
+        tiltMaxDegrees = stats.maximum
+    }
+
+    func setRawCapture(_ on: Bool) {
+        rawCaptureEnabled = on
+        UserDefaults.standard.set(on, forKey: rawCaptureKey)
+        if !on { endRawCapture() }
+    }
+
+    func endRawCapture() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.endRawCapture()
+        #endif
+    }
+
+    private func startRawCapture(_ observation: FieldObservation) {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        guard rawCaptureStatus != "記録中" else { return }
+        let started = observation.captured.timestamp
+        let name = RawObsFile.baseName(point: observation.name, started: started)
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("raw", isDirectory: true)
+        let base = folder.appendingPathComponent(name)
+        let formatter = ISO8601DateFormatter()
+        let sidecar = RawObsSidecar(
+            pointName: observation.name,
+            fileName: name + ".ubx",
+            startedAt: formatter.string(from: started),
+            solution: observation.captured.solutionLabel,
+            pdop: observation.captured.pdop,
+            hdop: observation.captured.hdop,
+            vdop: observation.captured.vdop,
+            tiltMedianDegrees: observation.condition?.tiltMedianDegrees,
+            tiltMeanDegrees: observation.condition?.tiltMeanDegrees,
+            tiltMaxDegrees: observation.condition?.tiltMaxDegrees,
+            latitudeDegrees: observation.captured.latitudeDegrees,
+            longitudeDegrees: observation.captured.longitudeDegrees,
+            restoreNote: nil
+        )
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        if let data = try? JSONEncoder().encode(sidecar) {
+            try? data.write(to: base.appendingPathExtension("json"), options: .atomic)
+        }
+        rawObservationID = observation.id
+        var stored = observation
+        stored.condition?.rawFileName = name + ".ubx"
+        observations = observations.replacing(stored)
+        try? journal.commit(stored)
+        rawCaptureStatus = "記録中"
+        rtkSession?.beginRawCapture(at: base)
+        #endif
+    }
+
+    private func noteRawRestore(unverified: Bool) {
+        guard let id = rawObservationID,
+              var stored = observations.observations.first(where: { $0.id == id }) else { return }
+        if unverified {
+            stored.condition?.rawRestoreNote = RawObsFile.restoreUnverified
+        }
+        observations = observations.replacing(stored)
+        try? journal.commit(stored)
+        if let file = stored.condition?.rawFileName {
+            let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("raw", isDirectory: true)
+                .appendingPathComponent(file.replacingOccurrences(of: ".ubx", with: ""))
+            if var sidecar = try? JSONDecoder().decode(RawObsSidecar.self, from: Data(contentsOf: base.appendingPathExtension("json"))) {
+                sidecar.restoreNote = unverified ? RawObsFile.restoreUnverified : nil
+                if let data = try? JSONEncoder().encode(sidecar) {
+                    try? data.write(to: base.appendingPathExtension("json"), options: .atomic)
+                }
+            }
+        }
+        rawObservationID = nil
+    }
+
+    func togglePPK() {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let base = ppkBase {
+            PPKLog.finish(base: base, observationIDs: [])
+            ppkShare = base.appendingPathExtension("json")
+            ppkBase = nil
+            ppkStatus = "停止"
+            rtkSession?.setPPKBase(nil)
+            return
+        }
+        guard let base = try? PPKLog.begin(
+            deviceName: "ViDoc",
+            antennaHeightMeters: instrument.antennaToGroundMeters,
+            in: documents
+        ) else {
+            ppkStatus = "記録を始められません"
+            return
+        }
+        ppkBase = base
+        ppkStatus = "記録中"
+        ppkShare = nil
+        rtkSession?.setPPKBase(base)
+    }
+
+    func lightFrontLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.lightFrontLaser()
+        #endif
+    }
+
+    func measureFrontLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.measureFrontLaser()
+        #endif
+    }
+
+    func lightLowerLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.lightLowerLaser()
+        #else
+        instrumentMessage = "受信機が無いので点灯できません。"
+        #endif
+    }
+
+    func measureLowerLaser() {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        rtkSession?.measureLowerLaser()
+        #else
+        instrumentMessage = "受信機が無いので測れません。"
+        #endif
+    }
+
+    private func annotate(_ condition: inout ObservationCondition, position: GeodeticPosition) {
+        #if !SURVEY_PLAYGROUND && canImport(CoreBluetooth) && canImport(Network)
+        condition.firmware = receiverFirmware ?? rtkSession?.firmwareVersion
+        #else
+        condition.firmware = receiverFirmware
+        #endif
+        condition.antennaMethod = instrument.antennaMethodLabel
+        if let height = position.ellipsoidalHeightMeters {
+            condition.groundHeightMeters = instrument.groundMarkMeters(ellipsoidal: height)
+        }
+        condition.hdop = position.hdop
+        condition.vdop = position.vdop
+        condition.tiltMedianDegrees = tiltDegrees
+        condition.tiltMeanDegrees = tiltMeanDegrees
+        condition.tiltMaxDegrees = tiltMaxDegrees
+        if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+           let record = IMUCalibrationStore.latest(hardwareID: DeviceIdentity.machine, bleName: "ViDoc", in: documents) {
+            condition.calibrationUsedAt = record.recordedAt
+        }
+    }
+
+    func recordKBMSample(ellipsoidal: Double) {
+        guard let h = instrument.kbmH else {
+            instrumentMessage = "成果の高さ H を入れてください。"
+            return
+        }
+        let sample = KBMCorrection.n(ellipsoidal: ellipsoidal, orthometric: h)
+        let now = Date()
+        if instrument.kbmFirstAt == nil {
+            instrument.kbmFirstN = sample
+            instrument.kbmFirstAt = now
+            instrumentMessage = "\(KBMCorrection.title) 1回目 N \(String(format: "%+.3f", sample)) m。"
+        } else if instrument.kbmFirstAt != now {
+            instrument.kbmSecondN = sample
+            instrument.kbmSecondAt = now
+            let ok = KBMCorrection.accepted(
+                first: instrument.kbmFirstN,
+                firstAt: instrument.kbmFirstAt,
+                second: instrument.kbmSecondN,
+                secondAt: instrument.kbmSecondAt
+            )
+            instrumentMessage = ok
+                ? "\(KBMCorrection.title) 2回の差は 2cm 以内。KBM は点検点にしません。"
+                : "\(KBMCorrection.title) 2回の差が 2cm を超えています。"
+        }
+    }
+
+    func projectSheetData() -> Data? {
+        guard let name = drawing.project?.name else { return nil }
+        return ProjectStore.sheetData(projectName: name, at: drawing.projectsRoot)
+    }
+
+    private static func sheetKind(fileName: String, data: Data) -> String {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        if ext == "pdf" || data.starts(with: Data("%PDF".utf8)) { return "pdf" }
+        if ext == "dxf" { return "dxf" }
+        if ext == "sfc" { return "sfc" }
+        if ["png", "jpg", "jpeg", "heic", "gif", "webp", "tif", "tiff"].contains(ext) { return "image" }
+        return "unknown"
     }
 
     func exportBasic(_ format: DeliveryFormat) {
@@ -2503,23 +3969,73 @@ final class FieldModel: ObservableObject {
         }
     }
 
+    private func noteCoordinate(_ text: String) {
+        exportMessage = text
+        bookNote = text
+        coordinateMessage = text
+    }
+
     func importBasic(data: Data, filename: String) {
-        guard let project = drawing.project else {
+        guard drawing.project != nil else {
             exportMessage = "先にプロジェクトを作ってください。"
+            bookNote = exportMessage
             return
         }
-        let entries = CoordinateExchange.parse(data: data, filename: filename, zone: drawing.zone)
-        guard !entries.isEmpty else {
-            exportMessage = "読める点がありません。"
+        let text = ControlPointCatalog.text(from: data)
+        if text.contains("latitude_deg") {
+            do {
+                let points = try ControlPointCatalog.loadCSV(text)
+                guard !points.isEmpty else {
+                    noteCoordinate("0行です。")
+                    return
+                }
+                if let zone = PlaneZoneCatalog.centroidZone(
+                    latitudes: points.map(\.latitudeDegrees),
+                    longitudes: points.map(\.longitudeDegrees)
+                ) {
+                    applyExplicitZone(zone)
+                }
+                adoptControlCatalog(points, data: data)
+            } catch let error as ControlPointError {
+                switch error {
+                case let .missingColumn(name):
+                    noteCoordinate("見出しが読めません。\(name) がありません。")
+                case .malformed:
+                    noteCoordinate("見出しが読めません。")
+                }
+            } catch {
+                noteCoordinate("ファイルを開けませんでした（OneDriveなどは一度ダウンロードしてください）: \(error.localizedDescription)")
+            }
             return
         }
-        do {
-            try ProjectStore.saveCoordinates(entries, projectName: project.name, at: drawing.projectsRoot)
-            basicRevision += 1
-            exportMessage = "\(entries.count)点を読みました。"
-        } catch {
-            exportMessage = "読み込めませんでした。"
+        guard let sample = CoordinateExchange.firstPlane(data: data, filename: filename) else {
+            if text.contains("A01,") || text.contains("緯度") || text.contains("北,") {
+                commitPlaneBook(data, filename: filename, zone: trustedZone ?? drawing.zone, adoptZone: false)
+            } else {
+                noteCoordinate("見出しが読めません。")
+            }
+            return
         }
+        if let trustedZone {
+            commitPlaneBook(data, filename: filename, zone: trustedZone, adoptZone: true)
+            return
+        }
+        let here = placementSample()
+        let decision = FieldPackPlacement.zoneForPlane(
+            northing: sample.northing,
+            easting: sample.easting,
+            latitude: here.latitude,
+            longitude: here.longitude,
+            trustedZone: trustedZone
+        )
+        guard let zone = decision.zone else {
+            pendingBook = (data, filename)
+            bookZoneChoices = decision.choices
+            bookNote = "系を選んでください。"
+            exportMessage = bookNote
+            return
+        }
+        commitPlaneBook(data, filename: filename, zone: zone, adoptZone: true)
     }
 
     func makeBasicBackup() {
@@ -2630,6 +4146,7 @@ final class FieldModel: ObservableObject {
     /// 画面へ出す位置は秒10回まで。方位のたびに全体を描き直すと、タップが届かなくなる。
     private func commit(_ reading: PositionReading) {
         self.reading = reading
+        if stakeoutCamera || cadStaking { followCad() }
         if let position = reading.position {
             let wasRecording = controlFix.canRecord
             let transition = StageLadder.step(held: stageTransition.stage, reported: position)

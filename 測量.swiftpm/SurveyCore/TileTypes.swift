@@ -125,6 +125,53 @@ public enum TileMath {
     }
 }
 
+/// 地理院タイルは z18 まで。アプリは z22 まで寄れるので、それ以上は最後のタイルを拡大する。
+public struct OverzoomedTile: Equatable, Sendable {
+    public var source: TileID
+    public var cropX: Int
+    public var cropY: Int
+    public var cropSize: Int
+
+    public var usesParent: Bool { cropSize < 256 }
+}
+
+public enum MapTileOverzoom {
+    public static let providerMaxZoom = 18
+    public static let appMaxZoom = 22
+    /// MapKit は画面の倍率分だけ、表示ズームより深いタイルを要求する。
+    public static let overlayMaximumZoom = 30
+    public static let tilePixels = 256
+
+    public static func resolve(z: Int, x: Int, y: Int, style: BaseMapStyle = .gsiStandard) -> OverzoomedTile {
+        let zoom = min(max(z, 0), overlayMaximumZoom)
+        let safeX = max(0, x)
+        let safeY = max(0, y)
+        if zoom <= providerMaxZoom {
+            return OverzoomedTile(
+                source: TileID(style: style, z: zoom, x: safeX, y: safeY),
+                cropX: 0,
+                cropY: 0,
+                cropSize: tilePixels
+            )
+        }
+        let delta = zoom - providerMaxZoom
+        let cell = 1 << delta
+        let parentX = safeX >> delta
+        let parentY = safeY >> delta
+        let subX = safeX & (cell - 1)
+        let subY = safeY & (cell - 1)
+        let size = max(1, tilePixels / cell)
+        let cropX = min(subX * tilePixels / cell, tilePixels - size)
+        let cropY = min(subY * tilePixels / cell, tilePixels - size)
+        return OverzoomedTile(
+            source: TileID(style: style, z: providerMaxZoom, x: parentX, y: parentY),
+            cropX: cropX,
+            cropY: cropY,
+            cropSize: size
+        )
+    }
+}
+
 public enum GSITileCatalog {
     public static let attribution = "地理院タイル"
     public static let sourceCredit = "出典：国土地理院"

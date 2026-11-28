@@ -140,6 +140,10 @@ final class DeliveryTests: XCTestCase {
 
         let csv = CoordinateDelivery.csv(filtered, zone: 9)
         XCTAssertTrue(csv.contains("点名,種類,出典,解"))
+        XCTAssertTrue(csv.contains("標高,高さ種別"))
+        XCTAssertTrue(csv.contains("未計算"))
+        XCTAssertTrue(csv.contains("楕円体高"))
+        XCTAssertTrue(sima.contains("標高,未計算"))
         XCTAssertTrue(csv.contains("T1,基準点,観測,FIX,2,"))
         XCTAssertTrue(csv.contains("PDOP"))
 

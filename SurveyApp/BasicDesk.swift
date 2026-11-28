@@ -7,6 +7,7 @@ private enum BasicPage: Hashable {
     case site
     case ledger
     case export
+    case setup
 }
 
 /// ベーシックの現場、データ管理、書き出し。測設は出すタブ。ほかの測量機能は出さない。
@@ -61,6 +62,16 @@ struct BasicDesk: View {
                         page: .ledger
                     )
                     menuTile(
+                        title: "器械設定",
+                        systemImage: "slider.horizontal.3",
+                        detail: "カメラ、アンテナ、高さ補正。",
+                        status: field.instrument.complianceEnabled ? "準拠モード" : "通常",
+                        badge: nil,
+                        emphasized: false,
+                        identifier: "open-setup",
+                        page: .setup
+                    )
+                    menuTile(
                         title: "データ書き出し",
                         systemImage: "square.and.arrow.up",
                         detail: "一覧、読み込み、控え。",
@@ -84,6 +95,7 @@ struct BasicDesk: View {
                 case .site: sitePage
                 case .ledger: ledgerPage
                 case .export: exportPage
+                case .setup: setupPage
                 }
             }
         }
@@ -200,6 +212,12 @@ struct BasicDesk: View {
         .accessibilityIdentifier(identifier)
     }
 
+    private var setupPage: some View {
+        subpage(title: "器械設定", identifier: "screen-setup") {
+            InstrumentSetupForm(field: field)
+        }
+    }
+
     private var sitePage: some View {
         subpage(title: "現場管理", identifier: "screen-site") {
             Text("現場管理")
@@ -291,6 +309,19 @@ struct BasicDesk: View {
             Text("座標簿")
                 .font(SurveyType(18, .heavy))
                 .accessibilityIdentifier("basic-book")
+            if let note = field.bookNote {
+                Text(note)
+                    .font(SurveyType(18, .heavy))
+                    .accessibilityIdentifier("book-count")
+            }
+            if !field.bookZoneChoices.isEmpty {
+                Text("系を選んでください。")
+                    .font(SurveyType(16, .semibold))
+                ForEach(field.bookZoneChoices, id: \.self) { zone in
+                    Button("\(zone)系") { field.acceptBookZone(zone) }
+                        .accessibilityIdentifier("book-zone-\(zone)")
+                }
+            }
             let points = field.basicPoints()
             if points.isEmpty {
                 Text("このプロジェクトの点はまだありません。")
@@ -301,6 +332,9 @@ struct BasicDesk: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(entry.name)  \(entry.kind ?? "")")
                         .font(SurveyType(16, .heavy))
+                    Text(String(format: "%.5f°N  %.5f°E", entry.latitudeDegrees, entry.longitudeDegrees))
+                        .font(SurveyType(15, .heavy))
+                        .accessibilityIdentifier("book-ll-\(entry.name)")
                     Text(line(entry))
                         .font(SurveyType(13, .semibold))
                         .foregroundStyle(SurveyColor.muted)
@@ -371,6 +405,13 @@ struct BasicDesk: View {
                     .lineLimit(3)
                     .accessibilityIdentifier("export-result")
             }
+            if !field.bookZoneChoices.isEmpty {
+                ForEach(field.bookZoneChoices, id: \.self) { zone in
+                    Button(PlaneZoneLabel.button(zone)) { field.acceptBookZone(zone) }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("book-zone-\(zone)")
+                }
+            }
             if let url = field.exportURL {
                 Text("保存先 \(url.lastPathComponent)")
                     .font(SurveyType(16, .heavy))
@@ -434,6 +475,8 @@ struct BasicDesk: View {
         .foregroundStyle(SurveyColor.text)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(SurveyColor.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {

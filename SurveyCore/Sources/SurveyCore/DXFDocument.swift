@@ -13,7 +13,7 @@ public struct DrawingColor: Sendable, Equatable, Codable {
 
     public static let white = DrawingColor(red: 1, green: 1, blue: 1)
 
-    /// ACI 1〜9 は AutoCAD の標準色。10 以降は表示用に色相を分ける。420 の真色が優先。
+    /// ACI 1〜9 は AutoCAD の標準色。250〜255 は灰色。7 と 255 は白で、明るい地では後から暗くする。
     public static func aci(_ index: Int) -> DrawingColor {
         switch abs(index) {
         case 1: return DrawingColor(red: 1, green: 0, blue: 0)
@@ -25,10 +25,32 @@ public struct DrawingColor: Sendable, Equatable, Codable {
         case 7: return white
         case 8: return DrawingColor(red: 0.5, green: 0.5, blue: 0.5)
         case 9: return DrawingColor(red: 0.75, green: 0.75, blue: 0.75)
+        case 250: return gray(51)
+        case 251: return gray(91)
+        case 252: return gray(132)
+        case 253: return gray(173)
+        case 254: return gray(214)
+        case 255: return white
         default:
             let hue = Double(abs(index) % 24) / 24
             return hsv(hue)
         }
+    }
+
+    /// 白や薄い色は、地理院の明るい地図の上では黒に近い色にする。
+    public func onLightMap() -> DrawingColor {
+        let y = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+        if y < 0.70 { return self }
+        if min(red, min(green, blue)) >= 0.80 {
+            return DrawingColor(red: 0.12, green: 0.12, blue: 0.12)
+        }
+        let scale = 0.28 / max(y, 0.01)
+        return DrawingColor(red: min(1, red * scale), green: min(1, green * scale), blue: min(1, blue * scale))
+    }
+
+    private static func gray(_ byte: Double) -> DrawingColor {
+        let channel = byte / 255
+        return DrawingColor(red: channel, green: channel, blue: channel)
     }
 
     public static func trueColor(_ value: Int) -> DrawingColor {
@@ -249,7 +271,36 @@ public struct DrawingDocument: Sendable, Equatable {
     public var unsupportedCounts: [String: Int]
     public var codePage: String
     public var unitWarning: String?
+    /// $INSUNITS。0 は無指定、4 はミリ、6 はメートル。
+    public var unitCode: Int
+    /// 部分図の一覧や、位置合わせが要るときの一文。
+    public var readNotice: String?
     public internal(set) var index: DrawingSpatialIndex
+
+    /// 読み込んだ図形の数。線は LINE、折線、円、弧、スプライン、楕円、ハッチの外形。
+    public var importCensus: String {
+        var lines = 0
+        var texts = 0
+        var points = 0
+        for entity in entities {
+            switch entity.primitive {
+            case .text: texts += 1
+            case .point: points += 1
+            default: lines += 1
+            }
+        }
+        return "線 \(Self.grouped(lines)) / 文字 \(Self.grouped(texts)) / 点 \(Self.grouped(points))"
+    }
+
+    private static func grouped(_ value: Int) -> String {
+        let digits = String(value)
+        var out = ""
+        for (offset, character) in digits.reversed().enumerated() {
+            if offset > 0, offset % 3 == 0 { out.append(",") }
+            out.append(character)
+        }
+        return String(out.reversed())
+    }
 
     public init(
         layers: [DrawingLayer],
@@ -258,7 +309,9 @@ public struct DrawingDocument: Sendable, Equatable {
         unsupportedCounts: [String: Int],
         codePage: String,
         unitWarning: String?,
-        index: DrawingSpatialIndex
+        index: DrawingSpatialIndex,
+        unitCode: Int = 0,
+        readNotice: String? = nil
     ) {
         self.layers = layers
         self.entities = entities
@@ -266,7 +319,20 @@ public struct DrawingDocument: Sendable, Equatable {
         self.unsupportedCounts = unsupportedCounts
         self.codePage = codePage
         self.unitWarning = unitWarning
+        self.unitCode = unitCode
+        self.readNotice = readNotice
         self.index = index
+    }
+
+    /// ファイルの 1 単位をメートルにする倍率。ミリは 0.001。数値そのものは変えない。
+    public var metersPerUnit: Double {
+        switch unitCode {
+        case 1: return 0.0254
+        case 2: return 0.3048
+        case 4: return 0.001
+        case 5: return 0.01
+        default: return 1
+        }
     }
 
     public var unsupportedSummary: String {
@@ -360,6 +426,11 @@ public struct DrawingSpatialIndex: Sendable, Equatable {
         let x1 = Int(floor(query.maxX / cell))
         let y0 = Int(floor(query.minY / cell))
         let y1 = Int(floor(query.maxY / cell))
+        let spanX = x1 >= x0 ? x1 - x0 + 1 : 0
+        let spanY = y1 >= y0 ? y1 - y0 + 1 : 0
+        if spanX > 64 || spanY > 64 {
+            return everyID()
+        }
         var seen = Set<Int>()
         var result: [Int] = []
         for ix in x0...x1 {
@@ -371,6 +442,20 @@ public struct DrawingSpatialIndex: Sendable, Equatable {
             }
         }
         for item in wide where item.bounds.intersects(query) && seen.insert(item.id).inserted {
+            result.append(item.id)
+        }
+        return result
+    }
+
+    private func everyID() -> [Int] {
+        var seen = Set<Int>()
+        var result: [Int] = []
+        for ids in buckets.values {
+            for id in ids where seen.insert(id).inserted {
+                result.append(id)
+            }
+        }
+        for item in wide where seen.insert(item.id).inserted {
             result.append(item.id)
         }
         return result
@@ -389,21 +474,44 @@ public enum DXFError: Error, Equatable, CustomStringConvertible {
     case binary
     case undecodable
     case notDXF
+    case truncated
 
     public var description: String {
         switch self {
         case .binary: return "バイナリ DXF は読めません。ASCII で書き出してください。"
         case .undecodable: return "文字コードを判定できませんでした。"
         case .notDXF: return "DXF の形になっていません。"
+        case .truncated: return "DXF が途中で切れています。"
         }
     }
 }
 
+public enum DrawingReadiness {
+    /// 落ちずに伝える文。問題がなければ nil。
+    public static func notice(_ document: DrawingDocument) -> String? {
+        if document.entities.isEmpty {
+            return "図形がありません。"
+        }
+        let bounds = document.bounds
+        if bounds.isEmpty {
+            return "座標が読めません。"
+        }
+        if bounds.minX == 0, bounds.minY == 0, bounds.maxX == 0, bounds.maxY == 0 {
+            return "座標がすべて原点です。位置を決められません。"
+        }
+        return nil
+    }
+}
+
 public enum DXFParser {
-    public static let supportedTypes: Set<String> = ["LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ARC", "TEXT", "MTEXT", "POINT", "INSERT"]
+    public static let supportedTypes: Set<String> = [
+        "LINE", "LWPOLYLINE", "POLYLINE", "CIRCLE", "ARC", "SPLINE", "ELLIPSE", "HATCH",
+        "TEXT", "MTEXT", "POINT", "INSERT"
+    ]
 
     public static func parse(_ data: Data) throws -> DrawingDocument {
         if data.starts(with: Data("AutoCAD Binary DXF".utf8)) { throw DXFError.binary }
+        if data.contains(0) { throw DXFError.truncated }
         let decoded = try decode(data)
         guard decoded.text.contains("SECTION") else { throw DXFError.notDXF }
         let pairs = pairLines(decoded.text)
@@ -418,6 +526,13 @@ public enum DXFParser {
             return (text, "UTF-8")
         }
         let codePage = scanCodePage(data)
+        let acad = scanGroupValue(data, name: "$ACADVER")
+        if SiteDXF.prefersUTF8(acadVersion: acad) || isShiftJIS(codePage) {
+            if let text = String(data: data, encoding: .utf8),
+               SiteDXF.prefersUTF8(acadVersion: acad) || text.contains("測設") || text.contains("IRB-") {
+                return (text, "UTF-8")
+            }
+        }
         if isShiftJIS(codePage) {
             guard let text = String(data: data, encoding: .shiftJIS) else { throw DXFError.undecodable }
             return (text, codePage ?? "Shift_JIS")
@@ -437,17 +552,23 @@ public enum DXFParser {
         return folded.contains("932") || folded.contains("SHIFT_JIS") || folded.contains("CP932")
     }
 
-    private static func scanCodePage(_ data: Data) -> String? {
-        guard let token = data.range(of: Data("$DWGCODEPAGE".utf8)) else { return nil }
+    private static func scanGroupValue(_ data: Data, name: String) -> String? {
+        guard let token = data.range(of: Data(name.utf8)) else { return nil }
         let tail = data[token.upperBound...].prefix(200)
         let text = String(tail.map { $0 < 128 ? Character(UnicodeScalar($0)) : "?" })
         let lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let marker = lines.firstIndex(of: "3"), lines.indices.contains(marker + 1) else { return nil }
-        return lines[marker + 1]
+        return lines.first { !$0.isEmpty && Int($0) == nil }
+    }
+
+    private static func scanCodePage(_ data: Data) -> String? {
+        scanGroupValue(data, name: "$DWGCODEPAGE")
     }
 
     private static func pairLines(_ text: String) -> [(Int, String)] {
-        let lines = text.components(separatedBy: .newlines)
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.components(separatedBy: "\n")
         var pairs: [(Int, String)] = []
         var index = 0
         while index + 1 < lines.count {
@@ -463,11 +584,12 @@ public enum DXFParser {
     private static func assemble(_ pairs: [(Int, String)], codePage: String) -> DrawingDocument {
         var section = ""
         var table = ""
-        var layers: [String: DrawingLayer] = ["0": DrawingLayer(name: "0", color: .white, isVisible: true)]
+        var layers: [String: DrawingLayer] = [:]
         var blocks: [String: BlockDefinition] = [:]
         var entities: [RawEntity] = []
         var unsupported: [String: Int] = [:]
         var unitWarning: String?
+        var unitCode = 0
         var index = 0
         while index < pairs.count {
             let (code, value) = pairs[index]
@@ -493,6 +615,7 @@ public enum DXFParser {
             }
             if code == 9, value == "$INSUNITS" {
                 if let units = int(pairs, after: index, code: 70) {
+                    unitCode = units
                     unitWarning = unitWarningText(units)
                 }
                 index += 1
@@ -501,8 +624,9 @@ public enum DXFParser {
             if section == "TABLES", table == "LAYER", code == 0, value == "LAYER" {
                 let record = takeRecord(pairs, from: index)
                 if let name = first(record.pairs, 2) {
-                    let aci = firstInt(record.pairs, 62) ?? 7
-                    layers[name] = DrawingLayer(name: name, color: DrawingColor.aci(aci), isVisible: aci >= 0 && (firstInt(record.pairs, 70) ?? 0) & 1 == 0)
+                    let aci = abs(firstInt(record.pairs, 62) ?? 7)
+                    let color = firstInt(record.pairs, 420).map(DrawingColor.trueColor) ?? DrawingColor.aci(aci == 0 ? 7 : aci)
+                    layers[name] = DrawingLayer(name: name, color: color, isVisible: true)
                 }
                 index = record.next
                 continue
@@ -529,7 +653,9 @@ public enum DXFParser {
                     continue
                 }
                 let record = takeRecord(pairs, from: index)
-                if let raw = rawEntity(type: value, pairs: record.pairs) {
+                if isPaperSpace(record.pairs) {
+                    unsupported["PAPER", default: 0] += 1
+                } else if let raw = rawEntity(type: value, pairs: record.pairs) {
                     entities.append(raw)
                 } else if value != "ENDSEC" {
                     unsupported[value, default: 0] += 1
@@ -538,6 +664,10 @@ public enum DXFParser {
                 continue
             }
             index += 1
+        }
+
+        if entities.isEmpty, let model = blocks.first(where: { $0.key.caseInsensitiveCompare("*Model_Space") == .orderedSame })?.value {
+            entities = model.entities
         }
 
         var expanded = expand(entities, blocks: blocks, layers: layers, unsupported: &unsupported)
@@ -558,7 +688,8 @@ public enum DXFParser {
             unsupportedCounts: unsupported,
             codePage: codePage,
             unitWarning: unitWarning,
-            index: DrawingSpatialIndex(entities: expanded)
+            index: DrawingSpatialIndex(entities: expanded),
+            unitCode: unitCode
         )
     }
 }
@@ -592,7 +723,7 @@ private func takeRecord(_ pairs: [(Int, String)], from start: Int) -> Taken {
 
 private func takeBlock(_ pairs: [(Int, String)], from start: Int) -> (name: String, definition: BlockDefinition, unsupported: [String: Int], next: Int) {
     let header = takeRecord(pairs, from: start)
-    let name = first(header.pairs, 2) ?? ""
+    let name = (first(header.pairs, 2) ?? "").trimmingCharacters(in: .whitespaces)
     var index = header.next
     var entities: [RawEntity] = []
     var unsupported: [String: Int] = [:]
@@ -611,7 +742,9 @@ private func takeBlock(_ pairs: [(Int, String)], from start: Int) -> (name: Stri
         }
         if code == 0 {
             let record = takeRecord(pairs, from: index)
-            if let raw = rawEntity(type: value, pairs: record.pairs) {
+            if isPaperSpace(record.pairs) {
+                unsupported["PAPER", default: 0] += 1
+            } else if let raw = rawEntity(type: value, pairs: record.pairs) {
                 entities.append(raw)
             } else if value != "ENDBLK" {
                 unsupported[value, default: 0] += 1
@@ -647,9 +780,57 @@ private func takePolyline(_ pairs: [(Int, String)], from start: Int) -> (entity:
         }
         break
     }
-    var body = header.pairs
-    body.append(contentsOf: vertices)
+    if isPaperSpace(header.pairs) {
+        return (nil, ["PAPER": 1], index)
+    }
+    var kept: [(point: PlanarPoint, bulge: Double, flag: Int)] = []
+    var pendingX: Double?
+    var pendingY: Double?
+    var bulge = 0.0
+    var flag = 0
+    func flushVertex() {
+        if let pendingX, let pendingY {
+            kept.append((PlanarPoint(x: pendingX, y: pendingY), bulge, flag))
+        }
+        pendingX = nil
+        pendingY = nil
+        bulge = 0
+        flag = 0
+    }
+    for pair in vertices {
+        if pair.0 == 10, let x = Double(pair.1) {
+            if pendingY != nil { flushVertex() }
+            pendingX = x
+        } else if pair.0 == 20, let y = Double(pair.1) {
+            pendingY = y
+        } else if pair.0 == 42, let value = Double(pair.1) {
+            bulge = value
+        } else if pair.0 == 70, let bits = Int(pair.1) {
+            flag = bits
+        }
+    }
+    flushVertex()
+    let fitted = kept.contains { $0.flag & 8 != 0 }
+    let chosen = fitted ? kept.filter { $0.flag & 8 != 0 } : kept.filter { $0.flag & 16 == 0 }
+    let used = chosen.isEmpty ? kept : chosen
+    var body = header.pairs.filter { $0.0 != 10 && $0.0 != 20 && $0.0 != 30 }
+    for vertex in used {
+        body.append((10, String(vertex.point.x)))
+        body.append((20, String(vertex.point.y)))
+        if abs(vertex.bulge) > 1e-12 { body.append((42, String(vertex.bulge))) }
+    }
     return (RawEntity(type: "POLYLINE", pairs: body), [:], index)
+}
+
+private func isPaperSpace(_ pairs: [(Int, String)]) -> Bool {
+    firstInt(pairs, 67) == 1
+}
+
+private func blockNamed(_ name: String, in blocks: [String: BlockDefinition]) -> BlockDefinition? {
+    if let exact = blocks[name] { return exact }
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    if let exact = blocks[trimmed] { return exact }
+    return blocks.first { $0.key.caseInsensitiveCompare(trimmed) == .orderedSame }?.value
 }
 
 private func rawEntity(type: String, pairs: [(Int, String)]) -> RawEntity? {
@@ -664,10 +845,15 @@ private func expand(
     unsupported: inout [String: Int]
 ) -> [DrawingEntity] {
     var output: [DrawingEntity] = []
-    func append(_ raw: RawEntity, transform: ((PlanarPoint) -> PlanarPoint)?, depth: Int, stack: Set<String>) {
+    func append(_ raw: RawEntity, transform: ((PlanarPoint) -> PlanarPoint)?, depth: Int, stack: Set<String>, byblock: DrawingColor?) {
         if raw.type == "INSERT" {
-            let name = first(raw.pairs, 2) ?? ""
-            guard depth < 8, !stack.contains(name), let block = blocks[name] else {
+            if isPaperSpace(raw.pairs) {
+                unsupported["PAPER", default: 0] += 1
+                return
+            }
+            let name = (first(raw.pairs, 2) ?? "").trimmingCharacters(in: .whitespaces)
+            if name.uppercased().hasPrefix("*PAPER_SPACE") { return }
+            guard depth < 8, !stack.contains(name), let block = blockNamed(name, in: blocks) else {
                 unsupported["INSERT(未定義)"] = (unsupported["INSERT(未定義)"] ?? 0) + 1
                 return
             }
@@ -688,23 +874,57 @@ private func expand(
             }
             var nextStack = stack
             nextStack.insert(name)
+            let insertLayerName = first(raw.pairs, 8) ?? "0"
+            let insertLayer = layers[insertLayerName] ?? DrawingLayer(name: insertLayerName, color: .white, isVisible: true)
+            let insertColor = resolveColor(raw.pairs, layer: insertLayer, byblock: byblock)
             for child in block.entities {
-                append(child, transform: local, depth: depth + 1, stack: nextStack)
+                var nested = child
+                if (first(nested.pairs, 8) ?? "0") == "0" {
+                    nested.pairs.removeAll { $0.0 == 8 }
+                    nested.pairs.insert((8, insertLayerName), at: 0)
+                }
+                append(nested, transform: local, depth: depth + 1, stack: nextStack, byblock: insertColor)
+            }
+            return
+        }
+        if isPaperSpace(raw.pairs) {
+            unsupported["PAPER", default: 0] += 1
+            return
+        }
+        if raw.type == "HATCH" {
+            let transformed = transform.map { mapRaw(raw, $0) } ?? raw
+            let outlines = hatchOutlines(transformed.pairs).filter { $0.count >= 2 }
+            if outlines.isEmpty {
+                unsupported["HATCH", default: 0] += 1
+            }
+            let layerName = first(transformed.pairs, 8) ?? "0"
+            let layer = layers[layerName] ?? DrawingLayer(name: layerName, color: .white, isVisible: true)
+            for outline in outlines {
+                output.append(entity(
+                    id: output.count,
+                    layer: layer.name,
+                    color: resolveColor(transformed.pairs, layer: layer, byblock: byblock),
+                    primitive: .polyline(vertices: outline, closed: false, display: outline),
+                    points: outline
+                ))
             }
             return
         }
         let transformed = transform.map { mapRaw(raw, $0) } ?? raw
-        if let entity = makeEntity(transformed, id: output.count, layers: layers) {
+        if let entity = makeEntity(transformed, id: output.count, layers: layers, byblock: byblock) {
             output.append(entity)
+        } else if raw.type != "INSERT" {
+            unsupported[raw.type, default: 0] += 1
         }
     }
     for entity in entities {
-        append(entity, transform: nil, depth: 0, stack: [])
+        append(entity, transform: nil, depth: 0, stack: [], byblock: nil)
     }
     return output
 }
 
 private func mapRaw(_ raw: RawEntity, _ transform: (PlanarPoint) -> PlanarPoint) -> RawEntity {
+    if raw.type == "ELLIPSE" { return mapEllipse(raw, transform) }
     var pairs = raw.pairs
     var index = 0
     var pendingX: Double?
@@ -743,6 +963,20 @@ private func mapRaw(_ raw: RawEntity, _ transform: (PlanarPoint) -> PlanarPoint)
     return RawEntity(type: raw.type, pairs: pairs)
 }
 
+private func mapEllipse(_ raw: RawEntity, _ transform: (PlanarPoint) -> PlanarPoint) -> RawEntity {
+    let center = point(raw.pairs, x: 10, y: 20) ?? PlanarPoint(x: 0, y: 0)
+    let major = point(raw.pairs, x: 11, y: 21) ?? PlanarPoint(x: 1, y: 0)
+    let movedCenter = transform(center)
+    let movedEnd = transform(PlanarPoint(x: center.x + major.x, y: center.y + major.y))
+    let vector = PlanarPoint(x: movedEnd.x - movedCenter.x, y: movedEnd.y - movedCenter.y)
+    var pairs = raw.pairs.filter { $0.0 != 10 && $0.0 != 20 && $0.0 != 11 && $0.0 != 21 }
+    pairs.append((10, String(movedCenter.x)))
+    pairs.append((20, String(movedCenter.y)))
+    pairs.append((11, String(vector.x)))
+    pairs.append((21, String(vector.y)))
+    return RawEntity(type: raw.type, pairs: pairs)
+}
+
 private func mappedAngle(
     _ degrees: Double,
     center: PlanarPoint,
@@ -758,10 +992,10 @@ private func mappedAngle(
     return GeoMath.degrees(fromRadians: GeoMath.arctangent(moved.y - movedCenter.y, moved.x - movedCenter.x))
 }
 
-private func makeEntity(_ raw: RawEntity, id: Int, layers: [String: DrawingLayer]) -> DrawingEntity? {
+private func makeEntity(_ raw: RawEntity, id: Int, layers: [String: DrawingLayer], byblock: DrawingColor?) -> DrawingEntity? {
     let layerName = first(raw.pairs, 8) ?? "0"
     let layer = layers[layerName] ?? DrawingLayer(name: layerName, color: .white, isVisible: true)
-    let color = resolveColor(raw.pairs, layer: layer)
+    let color = resolveColor(raw.pairs, layer: layer, byblock: byblock)
     switch raw.type {
     case "LINE":
         guard let start = point(raw.pairs, x: 10, y: 20), let end = point(raw.pairs, x: 11, y: 21) else { return nil }
@@ -808,9 +1042,136 @@ private func makeEntity(_ raw: RawEntity, id: Int, layers: [String: DrawingLayer
             primitive: .polyline(vertices: built.vertices, closed: built.closed, display: built.display),
             points: built.display
         )
+    case "SPLINE":
+        let fit = coordinatePairs(raw.pairs, x: 11, y: 21)
+        let controls = coordinatePairs(raw.pairs, x: 10, y: 20)
+        let vertices = fit.count >= 2 ? fit : controls
+        guard vertices.count >= 2 else { return nil }
+        return entity(
+            id: id,
+            layer: layer.name,
+            color: color,
+            primitive: .polyline(vertices: vertices, closed: false, display: vertices),
+            points: vertices
+        )
+    case "ELLIPSE":
+        guard let center = point(raw.pairs, x: 10, y: 20), let major = point(raw.pairs, x: 11, y: 21) else { return nil }
+        let ratio = firstDouble(raw.pairs, 40) ?? 1
+        let start = firstDouble(raw.pairs, 41) ?? 0
+        let end = firstDouble(raw.pairs, 42) ?? (2 * Double.pi)
+        let display = ellipsePoints(center: center, major: major, ratio: ratio, start: start, end: end)
+        guard display.count >= 2 else { return nil }
+        return entity(
+            id: id,
+            layer: layer.name,
+            color: color,
+            primitive: .polyline(vertices: display, closed: false, display: display),
+            points: display
+        )
     default:
         return nil
     }
+}
+
+private func coordinatePairs(_ pairs: [(Int, String)], x: Int, y: Int) -> [PlanarPoint] {
+    var points: [PlanarPoint] = []
+    var pending: Double?
+    for pair in pairs {
+        if pair.0 == x, let value = Double(pair.1) {
+            pending = value
+        } else if pair.0 == y, let north = Double(pair.1), let east = pending {
+            points.append(PlanarPoint(x: east, y: north))
+            pending = nil
+        }
+    }
+    return points
+}
+
+private func ellipsePoints(center: PlanarPoint, major: PlanarPoint, ratio: Double, start: Double, end: Double) -> [PlanarPoint] {
+    let minor = PlanarPoint(x: -major.y * ratio, y: major.x * ratio)
+    var sweep = end - start
+    if sweep < 1e-9 { sweep += 2 * Double.pi }
+    let steps = max(16, Int(ceil(abs(sweep) / (Double.pi / 12))))
+    return (0...steps).map { step in
+        let t = start + sweep * Double(step) / Double(steps)
+        return PlanarPoint(
+            x: center.x + major.x * GeoMath.cosine(t) + minor.x * GeoMath.sine(t),
+            y: center.y + major.y * GeoMath.cosine(t) + minor.y * GeoMath.sine(t)
+        )
+    }
+}
+
+private func hatchOutlines(_ pairs: [(Int, String)]) -> [[PlanarPoint]] {
+    guard let start = pairs.firstIndex(where: { $0.0 == 91 }) else { return [] }
+    let paths = Int(pairs[start].1) ?? 0
+    var index = start + 1
+    var outlines: [[PlanarPoint]] = []
+    for _ in 0..<paths {
+        while index < pairs.count, pairs[index].0 != 92 { index += 1 }
+        guard index < pairs.count, let flag = Int(pairs[index].1) else { break }
+        index += 1
+        if flag & 2 != 0 {
+            var closed = false
+            var count = 0
+            while index < pairs.count, pairs[index].0 != 10, pairs[index].0 != 93 {
+                if pairs[index].0 == 73 { closed = Int(pairs[index].1) == 1 }
+                index += 1
+            }
+            if index < pairs.count, pairs[index].0 == 93 {
+                count = Int(pairs[index].1) ?? 0
+                index += 1
+            }
+            var vertices: [PlanarPoint] = []
+            var pending: Double?
+            var got = 0
+            while index < pairs.count, got < max(count, 1) || (count == 0 && pairs[index].0 == 10) {
+                if pairs[index].0 == 10, let x = Double(pairs[index].1) {
+                    pending = x
+                } else if pairs[index].0 == 20, let y = Double(pairs[index].1), let x = pending {
+                    vertices.append(PlanarPoint(x: x, y: y))
+                    pending = nil
+                    got += 1
+                    if count > 0, got >= count { index += 1; break }
+                } else if pairs[index].0 == 92 || pairs[index].0 == 97 || pairs[index].0 == 75 {
+                    break
+                }
+                index += 1
+            }
+            if closed, let first = vertices.first, vertices.last?.distance(to: first) ?? 1 > 1e-9 {
+                vertices.append(first)
+            }
+            if vertices.count >= 2 { outlines.append(vertices) }
+        } else {
+            while index < pairs.count, pairs[index].0 != 93 { index += 1 }
+            let edges = index < pairs.count ? Int(pairs[index].1) ?? 0 : 0
+            if index < pairs.count { index += 1 }
+            var vertices: [PlanarPoint] = []
+            for _ in 0..<edges {
+                while index < pairs.count, pairs[index].0 != 72 { index += 1 }
+                guard index < pairs.count else { break }
+                let kind = Int(pairs[index].1) ?? 1
+                index += 1
+                if kind == 1 {
+                    let line = coordinatePairs(Array(pairs[index...].prefix(8)), x: 10, y: 20)
+                    let ends = coordinatePairs(Array(pairs[index...].prefix(8)), x: 11, y: 21)
+                    if let start = line.first { vertices.append(start) }
+                    if let end = ends.first { vertices.append(end) }
+                    while index < pairs.count, pairs[index].0 != 72, pairs[index].0 != 97, pairs[index].0 != 92 {
+                        index += 1
+                        if pairs[index - 1].0 == 21 { break }
+                    }
+                } else {
+                    while index < pairs.count, pairs[index].0 != 72, pairs[index].0 != 97, pairs[index].0 != 92 { index += 1 }
+                }
+            }
+            if vertices.count >= 2 { outlines.append(vertices) }
+        }
+        while index < pairs.count, pairs[index].0 != 92, pairs[index].0 != 75 {
+            index += 1
+        }
+        if index < pairs.count, pairs[index].0 == 75 { break }
+    }
+    return outlines
 }
 
 private func entity(id: Int, layer: String, color: DrawingColor, primitive: DrawingPrimitive, points: [PlanarPoint]) -> DrawingEntity {
@@ -860,11 +1221,12 @@ private func mtext(_ pairs: [(Int, String)]) -> String {
     return (prefix + body).replacingOccurrences(of: "\\P", with: "\n")
 }
 
-private func resolveColor(_ pairs: [(Int, String)], layer: DrawingLayer) -> DrawingColor {
-    if let trueColor = firstInt(pairs, 420) { return DrawingColor.trueColor(trueColor) }
-    let aci = firstInt(pairs, 62) ?? 256
-    if aci == 0 || aci == 256 { return layer.color }
-    return DrawingColor.aci(aci)
+private func resolveColor(_ pairs: [(Int, String)], layer: DrawingLayer, byblock: DrawingColor?) -> DrawingColor {
+    if let trueColor = firstInt(pairs, 420) { return DrawingColor.trueColor(trueColor).onLightMap() }
+    let aci = abs(firstInt(pairs, 62) ?? 256)
+    if aci == 0 { return (byblock ?? DrawingColor.aci(7)).onLightMap() }
+    if aci == 256 { return layer.color.onLightMap() }
+    return DrawingColor.aci(aci).onLightMap()
 }
 
 private func point(_ pairs: [(Int, String)], x: Int, y: Int) -> PlanarPoint? {
@@ -983,9 +1345,15 @@ public struct GeoCoord: Sendable, Equatable {
 
 public struct GeographicPath: Sendable, Equatable {
     public var coordinates: [GeoCoord]
+    public var red: Double
+    public var green: Double
+    public var blue: Double
 
-    public init(coordinates: [GeoCoord]) {
+    public init(coordinates: [GeoCoord], color: DrawingColor = DrawingColor(red: 0.12, green: 0.12, blue: 0.12)) {
         self.coordinates = coordinates
+        self.red = color.red
+        self.green = color.green
+        self.blue = color.blue
     }
 }
 
@@ -1046,7 +1414,9 @@ public struct UserOnDrawing: Sendable, Equatable {
 }
 
 public enum DrawingPlacement {
-    public static let vertexLimit = 12_000
+    /// 頂点を捨てて図形ごと消さない。長い折線だけ間引き、上限までは全部載せる。
+    public static let vertexLimit = 800_000
+    private static let pointsPerStroke = 48
 
     public static func overlay(
         document: DrawingDocument,
@@ -1060,11 +1430,20 @@ public enum DrawingPlacement {
         var capped = false
         let visible = Set(document.layers.filter(\.isVisible).map(\.name))
         for entity in document.entities where visible.contains(entity.layer) {
-            let stroke = entity.stroke
+            var stroke = entity.stroke
             guard stroke.count >= 2 else { continue }
-            if count + stroke.count > vertexLimit {
+            if stroke.count > pointsPerStroke {
+                stroke = sample(stroke, count: pointsPerStroke)
+                capped = true
+            }
+            let room = vertexLimit - count
+            if room < 2 {
                 capped = true
                 break
+            }
+            if stroke.count > room {
+                stroke = sample(stroke, count: room)
+                capped = true
             }
             var coordinates: [GeoCoord] = []
             for point in stroke {
@@ -1072,11 +1451,30 @@ public enum DrawingPlacement {
                 coordinates.append(geo)
             }
             if coordinates.count >= 2 {
-                paths.append(GeographicPath(coordinates: coordinates))
+                paths.append(GeographicPath(coordinates: coordinates, color: entity.color))
                 count += coordinates.count
             }
         }
         return OverlayBuild(paths: paths, capped: capped)
+    }
+
+    private static func sample(_ points: [PlanarPoint], count: Int) -> [PlanarPoint] {
+        guard count >= 2, let first = points.first, let last = points.last else { return points }
+        if points.count <= count { return points }
+        var kept: [PlanarPoint] = []
+        kept.reserveCapacity(count)
+        let steps = count - 1
+        for step in 0..<steps {
+            let index = Int((Double(step) * Double(points.count - 1) / Double(steps)).rounded())
+            let point = points[min(index, points.count - 1)]
+            if kept.last.map({ $0.distance(to: point) > 1e-9 }) ?? true {
+                kept.append(point)
+            }
+        }
+        if kept.last?.distance(to: last) ?? 1 > 1e-9 {
+            kept.append(last)
+        }
+        return kept.isEmpty ? [first, last] : kept
     }
 
     public static func geographic(

@@ -99,6 +99,30 @@ public enum PlaneZoneCatalog {
         named(name)?.zones ?? []
     }
 
+    /// 現在地に一番近い平面直角の系。奈良付近は 6。
+    public static func nearestZone(latitude: Double, longitude: Double) -> Int? {
+        zones(nearLatitude: latitude, longitude: longitude).first
+    }
+
+    /// 経緯度を持つ点の重心に一番近い系。電話の現在地は使わない。
+    public static func centroidZone(latitudes: [Double], longitudes: [Double]) -> Int? {
+        let count = min(latitudes.count, longitudes.count)
+        guard count > 0 else { return nil }
+        var latitude = 0.0
+        var longitude = 0.0
+        var used = 0
+        for index in 0..<count {
+            let lat = latitudes[index]
+            let lon = longitudes[index]
+            guard lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180 else { continue }
+            latitude += lat
+            longitude += lon
+            used += 1
+        }
+        guard used > 0 else { return nil }
+        return nearestZone(latitude: latitude / Double(used), longitude: longitude / Double(used))
+    }
+
     /// 現在地から、原点までの距離が近い系。県境では複数残す。
     public static func zones(nearLatitude latitude: Double, longitude: Double) -> [Int] {
         var ranked: [(zone: Int, distance: Double)] = []

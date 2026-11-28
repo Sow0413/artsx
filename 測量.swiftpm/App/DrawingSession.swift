@@ -41,6 +41,8 @@ final class DrawingSession: ObservableObject {
     @Published private(set) var mapPaths: [GeographicPath] = []
     @Published private(set) var mapRevision = 0
     @Published private(set) var overlayCapped = false
+    /// 地図の範囲照会。描画のたびに図面全体は走査しない。
+    private(set) var mapIndex = DrawingMapIndex.empty
     @Published var camera = DrawingCamera()
     @Published private(set) var backgroundVerdict: BackgroundVerdict?
     @Published private(set) var backgroundBusy = false
@@ -79,6 +81,12 @@ final class DrawingSession: ObservableObject {
     private var referenceStamp: (latitude: Double, longitude: Double)?
     private var loadGeneration = 0
     private var mapGeneration = 0
+    /// 点名合わせのあと、図面の XY を公共座標へ写す。無いあいだは現場座標を地図に載せない。
+    private var heldAlignment: Similarity2D?
+    /// 地図への重ねが更新されたとき。試験の画面合わせだけが使う。
+    var onMapPaths: (() -> Void)?
+    /// 読めなかったとき。渡す文は、利用者に出す一文。
+    var onImportFailed: ((String) -> Void)?
 
     init(projectsRoot: URL) {
         self.projectsRoot = projectsRoot
@@ -245,10 +253,10 @@ final class DrawingSession: ObservableObject {
                     codePage: parsed.codePage,
                     unsupported: parsed.unsupportedCounts
                 )
-                var note = ext == "sfc"
-                    ? "設計に \(stored) を置きました。公共座標として読みました。系を選ぶと地図に載ります。元の SFC は変えていません。"
-                    : "設計に \(stored) を置きました。元の DXF は変えていません。"
-                if let unit = parsed.unitWarning, ext != "sfc" { note += unit }
+                var note = "設計に \(stored) を置きました。"
+                if ext != "sfc" { note += "元の DXF は変えていません。" }
+                if let unit = parsed.unitWarning { note += unit }
+                if let notice = parsed.readNotice { note += notice }
                 if !parsed.unsupportedSummary.isEmpty { note += "読めない要素: \(parsed.unsupportedSummary)。" }
                 let draft = current
                 let base = note
@@ -274,6 +282,84 @@ final class DrawingSession: ObservableObject {
                 self.failImport(generation, "図面を読めませんでした。")
             }
         }
+    }
+
+    /// 試験で、解析済みの図面をその場で地図へ載せる。
+    func installParsed(
+        _ parsed: DrawingDocument,
+        data: Data,
+        fileName rawName: String,
+        zone nextZone: Int?,
+        axis nextAxis: DrawingAxis?
+    ) -> String {
+        guard var current = project else { return "先に現場を作ってください。" }
+        if let nextZone { zone = nextZone }
+        if let nextAxis { axis = nextAxis }
+        do {
+            let stored = try ProjectStore.importDXF(
+                data: data,
+                fileName: rawName,
+                into: &current,
+                at: projectsRoot,
+                codePage: parsed.codePage,
+                unsupported: parsed.unsupportedCounts
+            )
+            project = current
+            onProjectCommitted?()
+            reload()
+            if let nextZone { zone = nextZone }
+            if let nextAxis { axis = nextAxis }
+            adopt(parsed, fileName: stored)
+            let waiting = parsed.unitWarning?.contains("位置合わせが必要") == true && heldAlignment == nil && activeTransform == nil
+            var note = "設計に \(stored) を置きました。"
+            if let unit = parsed.unitWarning { note += unit }
+            if let notice = parsed.readNotice { note += notice }
+            if waiting {
+                mapIndex = .empty
+                mapPaths = []
+                overlayCapped = false
+                mapRevision += 1
+                note += "仮置き。"
+            } else {
+                mapIndex = DrawingMapIndex.build(
+                    document: parsed,
+                    zone: zone,
+                    axis: axis,
+                    transform: heldAlignment ?? activeTransform,
+                    composesAxis: activeComposesAxis && heldAlignment == nil
+                )
+                let fitted = mapIndex.fitted()
+                mapPaths = fitted.paths
+                overlayCapped = fitted.capped
+                mapRevision += 1
+                if fitted.capped { note += "見えている範囲だけ描きます。" }
+            }
+            message = note
+            return note
+        } catch {
+            let text = "図面を置けませんでした。"
+            message = text
+            return text
+        }
+    }
+
+    /// 合わせた図面を、選んだ系の経緯度で地図に載せる。
+    func placeAligned(_ document: DrawingDocument, transform: Similarity2D, zone number: Int) {
+        heldAlignment = transform
+        zone = number
+        axis = .cadEastNorth
+        mapGeneration += 1
+        mapIndex = DrawingMapIndex.build(
+            document: document,
+            zone: number,
+            axis: .cadEastNorth,
+            transform: transform,
+            composesAxis: false
+        )
+        let fitted = mapIndex.fitted()
+        mapPaths = fitted.paths
+        overlayCapped = fitted.capped
+        mapRevision += 1
     }
 
     func setPrefecture(_ raw: String?, latitude: Double?, longitude: Double?) {
@@ -1128,6 +1214,7 @@ final class DrawingSession: ObservableObject {
             guard generation == self.loadGeneration else { return }
             self.importProgress = nil
             self.message = text
+            self.onImportFailed?(text)
         }
     }
 
@@ -1174,6 +1261,7 @@ final class DrawingSession: ObservableObject {
         mapGeneration += 1
         let generation = mapGeneration
         guard let document else {
+            mapIndex = .empty
             mapPaths = []
             overlayCapped = false
             mapRevision += 1
@@ -1181,21 +1269,35 @@ final class DrawingSession: ObservableObject {
         }
         let zone = zone
         let axis = axis
-        let transform = activeTransform
-        let composes = activeComposesAxis
+        let transform = heldAlignment ?? activeTransform
+        let composes = heldAlignment == nil && activeComposesAxis
+        let provisional = document.unitWarning?.contains("位置合わせが必要") == true && transform == nil
+        if provisional {
+            DispatchQueue.main.async {
+                guard generation == self.mapGeneration else { return }
+                self.mapIndex = .empty
+                self.mapPaths = []
+                self.overlayCapped = false
+                self.mapRevision += 1
+            }
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async {
-            let built = DrawingPlacement.overlay(
+            let index = DrawingMapIndex.build(
                 document: document,
                 zone: zone,
                 axis: axis,
                 transform: transform,
                 composesAxis: composes
             )
+            let fitted = index.fitted()
             DispatchQueue.main.async {
                 guard generation == self.mapGeneration else { return }
-                self.mapPaths = built.paths
-                self.overlayCapped = built.capped
+                self.mapIndex = index
+                self.mapPaths = fitted.paths
+                self.overlayCapped = fitted.capped
                 self.mapRevision += 1
+                self.onMapPaths?()
             }
         }
     }

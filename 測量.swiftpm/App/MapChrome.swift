@@ -148,6 +148,7 @@ struct LocationPanel: View {
     var onRecord: (() -> Void)? = nil
     var onGCP: (() -> Void)? = nil
     var gcpEnabled = false
+    var rawStatus: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -161,10 +162,14 @@ struct LocationPanel: View {
                     .lineLimit(1)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
+                        .accessibilityIdentifier("height-ellipsoid")
+                    Text(CoordinateText.orthometricHeight(nil))
+                        .accessibilityIdentifier("height-orthometric")
                     Text(accuracyText(position))
                 }
                 .font(SurveyType(16, .bold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 if let statureNotice {
                     Button(action: { onStature?() }) {
                         Text(statureNotice)
@@ -193,6 +198,12 @@ struct LocationPanel: View {
                     Text(warning)
                         .font(SurveyType(15, .bold))
                         .foregroundStyle(SurveyColor.amber)
+                }
+                if let rawStatus {
+                    Text(rawStatus)
+                        .font(SurveyType(22, .heavy))
+                        .foregroundStyle(SurveyColor.amber)
+                        .accessibilityIdentifier("raw-status")
                 }
                 recordButtons
             } else {

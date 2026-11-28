@@ -25,7 +25,9 @@ let package = Package(
         ),
         .testTarget(
             name: "SurveyCoreTests",
-            dependencies: ["SurveyCore"]
+            dependencies: ["SurveyCore"],
+            exclude: ["drawings_test"],
+            resources: [.copy("docs")]
         )
     ]
 )

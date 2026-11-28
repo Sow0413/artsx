@@ -85,11 +85,11 @@ public enum DrawingLOD {
             let entity = document.entities[id]
             guard visible.contains(entity.layer) else { continue }
             if !overview, !entity.bounds.intersects(view) { continue }
-            if entity.bounds.width < pixel, entity.bounds.height < pixel, entity.stroke.count > 1 {
-                continue
-            }
             let limit = overview ? 4 : 48
-            let simplified = decimate(entity.stroke, step: pixel * 1.5, limit: limit)
+            var simplified = decimate(entity.stroke, step: pixel * 1.5, limit: limit)
+            if simplified.count < 2, entity.stroke.count >= 2 {
+                simplified = [entity.stroke[0], entity.stroke[entity.stroke.count - 1]]
+            }
             if simplified.count >= 2 {
                 strokes.append(DrawingBatchStroke(color: entity.color, points: simplified))
             }

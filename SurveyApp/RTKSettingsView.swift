@@ -33,6 +33,7 @@ struct RTKSettingsView: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.7)
                     labeled("ViDoc", session.vidocLine, id: "vidoc-status")
+                    labeled("ファームウェア", session.firmwareVersion ?? "未取得", id: "vidoc-firmware")
                     labeled("NTRIP", session.ntripLine, id: "ntrip-status")
                 }
 
