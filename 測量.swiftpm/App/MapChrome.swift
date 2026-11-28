@@ -162,10 +162,14 @@ struct LocationPanel: View {
                     .lineLimit(1)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(CoordinateText.ellipsoidalHeight(position.ellipsoidalHeightMeters))
+                        .accessibilityIdentifier("height-ellipsoid")
+                    Text(CoordinateText.orthometricHeight(nil))
+                        .accessibilityIdentifier("height-orthometric")
                     Text(accuracyText(position))
                 }
                 .font(SurveyType(16, .bold))
                 .lineLimit(1)
+                .minimumScaleFactor(0.6)
                 if let statureNotice {
                     Button(action: { onStature?() }) {
                         Text(statureNotice)

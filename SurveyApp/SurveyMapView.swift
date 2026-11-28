@@ -44,6 +44,7 @@ struct SurveyMapView: UIViewRepresentable {
             points: field.visibleControlPoints,
             selectedID: field.selectedControlPointID
         )
+        context.coordinator.syncObserved(on: map, observations: field.stagedPoints())
         context.coordinator.syncTiles(on: map, shown: field.showMapTiles)
         context.coordinator.attachedIndex = field.drawing.mapIndex
         context.coordinator.syncDrawing(
@@ -76,6 +77,7 @@ struct SurveyMapView: UIViewRepresentable {
         private var onVisible: (GeoBounds, Int) -> Void = { _, _ in }
         private var onSelectControlPoint: (String) -> Void = { _ in }
         private var controlAnnotations: [String: ControlPointAnnotation] = [:]
+        private var observedAnnotations: [String: ObservedPointAnnotation] = [:]
         private var selectedControlID: String?
         private var store: TileStore?
         private var tileOverlay: MKTileOverlay?
@@ -685,6 +687,18 @@ struct SurveyMapView: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let observed = annotation as? ObservedPointAnnotation {
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: "observed-point")
+                    ?? MKAnnotationView(annotation: observed, reuseIdentifier: "observed-point")
+                view.annotation = observed
+                view.image = Self.observedDot
+                view.centerOffset = CGPoint(x: 0, y: -8)
+                view.canShowCallout = false
+                view.isAccessibilityElement = true
+                view.accessibilityIdentifier = "observed-\(observed.name)"
+                view.accessibilityLabel = "観測点 \(observed.name)"
+                return view
+            }
             if let point = annotation as? ControlPointAnnotation {
                 let marker = mapView.dequeueReusableAnnotationView(withIdentifier: ControlMarkerView.reuseID) as? ControlMarkerView
                     ?? ControlMarkerView(annotation: point, reuseIdentifier: ControlMarkerView.reuseID)
@@ -875,7 +889,29 @@ struct SurveyMapView: UIViewRepresentable {
             )
             circle = overlay
             circleKey = key
-            map.addOverlay(overlay, level: .aboveLabels)
+            map.addOverlay(overlay, level: .aboveRoads)
+        }
+
+        func syncObserved(on map: MKMapView, observations: [FieldObservation]) {
+            let ids = Set(observations.map { $0.id.uuidString })
+            for (id, annotation) in observedAnnotations where !ids.contains(id) {
+                map.removeAnnotation(annotation)
+                observedAnnotations.removeValue(forKey: id)
+            }
+            for observation in observations {
+                let key = observation.id.uuidString
+                let coordinate = CLLocationCoordinate2D(
+                    latitude: observation.captured.latitudeDegrees,
+                    longitude: observation.captured.longitudeDegrees
+                )
+                if let existing = observedAnnotations[key] {
+                    existing.coordinate = coordinate
+                    continue
+                }
+                let mark = ObservedPointAnnotation(name: observation.name, coordinate: coordinate)
+                observedAnnotations[key] = mark
+                map.addAnnotation(mark)
+            }
         }
 
         func syncControls(on map: MKMapView, points: [ControlPoint], selectedID: String?) {
@@ -982,6 +1018,17 @@ struct SurveyMapView: UIViewRepresentable {
             }
         }()
 
+        private static let observedDot: UIImage = {
+            let size = CGSize(width: 22, height: 22)
+            let renderer = UIGraphicsImageRenderer(size: size)
+            return renderer.image { context in
+                UIColor.white.setFill()
+                context.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+                UIColor(red: 0.86, green: 0.12, blue: 0.12, alpha: 1).setFill()
+                context.cgContext.fillEllipse(in: CGRect(x: 3, y: 3, width: 16, height: 16))
+            }
+        }()
+
         private static let userDotImage: UIImage = {
             let size = CGSize(width: 28, height: 28)
             let renderer = UIGraphicsImageRenderer(size: size)
@@ -999,6 +1046,18 @@ final class CadCrosshairAnnotation: MKPointAnnotation {}
 
 final class CadArrowAnnotation: MKPointAnnotation {
     var bearingDegrees: CLLocationDirection = 0
+}
+
+final class ObservedPointAnnotation: NSObject, MKAnnotation {
+    let name: String
+    @objc dynamic var coordinate: CLLocationCoordinate2D
+    var title: String? { name }
+    var subtitle: String? { "観測点" }
+
+    init(name: String, coordinate: CLLocationCoordinate2D) {
+        self.name = name
+        self.coordinate = coordinate
+    }
 }
 
 final class ControlPointAnnotation: NSObject, MKAnnotation {

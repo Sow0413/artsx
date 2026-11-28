@@ -231,6 +231,8 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
     public var latitudeDegrees: Double
     public var longitudeDegrees: Double
     public var ellipsoidalHeightMeters: Double?
+    /// 標高。ジオイドが無い記録は nil のまま。楕円体高とは混ぜない。
+    public var orthometricHeightMeters: Double?
     public var horizontalAccuracyMeters: Double
     public var verticalAccuracyMeters: Double?
     public var satelliteCount: Int?
@@ -254,6 +256,7 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         latitudeDegrees: Double,
         longitudeDegrees: Double,
         ellipsoidalHeightMeters: Double?,
+        orthometricHeightMeters: Double? = nil,
         horizontalAccuracyMeters: Double,
         verticalAccuracyMeters: Double?,
         satelliteCount: Int?,
@@ -274,6 +277,7 @@ public struct CoordinateBookEntry: Codable, Equatable, Sendable, Identifiable {
         self.latitudeDegrees = latitudeDegrees
         self.longitudeDegrees = longitudeDegrees
         self.ellipsoidalHeightMeters = ellipsoidalHeightMeters
+        self.orthometricHeightMeters = orthometricHeightMeters
         self.horizontalAccuracyMeters = horizontalAccuracyMeters
         self.verticalAccuracyMeters = verticalAccuracyMeters
         self.satelliteCount = satelliteCount

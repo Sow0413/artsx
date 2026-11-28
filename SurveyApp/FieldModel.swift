@@ -2825,7 +2825,10 @@ final class FieldModel: ObservableObject {
               let guide = BasicStakeout.guide(from: position, to: target, zone: drawing.zone) else {
             return StakeoutLines(zone: zone, name: target.name, distance: "位置を待っています", north: "", east: "", height: "高さは未確認")
         }
-        let height = guide.heightMeters.map { String(format: "高さ %+.2f m", $0) } ?? "高さは未確認"
+        let height = CoordinateText.cutFill(
+            current: position.ellipsoidalHeightMeters,
+            design: target.ellipsoidalHeightMeters
+        ) ?? "高さは未確認"
         return StakeoutLines(
             zone: zone,
             name: target.name,
@@ -2834,6 +2837,12 @@ final class FieldModel: ObservableObject {
             east: Self.offsetText(guide.eastMeters, positive: "東", negative: "西"),
             height: height
         )
+    }
+
+    /// 設計の楕円体高があるときだけ。ジオイドは作らない。
+    var stakeoutCutFill: String? {
+        guard let target = basicTarget, let position = navigationReading.position else { return nil }
+        return CoordinateText.cutFill(current: position.ellipsoidalHeightMeters, design: target.ellipsoidalHeightMeters)
     }
 
     private static func horizontalText(_ meters: Double) -> String {
@@ -3646,7 +3655,7 @@ final class FieldModel: ObservableObject {
             position: IPhonePosition.make(
                 latitudeDegrees: latitude,
                 longitudeDegrees: longitude,
-                ellipsoidalHeightMeters: nil,
+                ellipsoidalHeightMeters: 45.2,
                 horizontalAccuracyMeters: 1,
                 verticalAccuracyMeters: nil,
                 timestamp: Date()

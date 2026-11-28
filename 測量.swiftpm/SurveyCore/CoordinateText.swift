@@ -18,6 +18,23 @@ public enum CoordinateText {
         return "楕円体高 \(FixedNumber.string(meters, fractionDigits: 1))m"
     }
 
+    /// ジオイド格子が無いときは標高を未計算のままにする。数値は作らない。
+    public static func orthometricHeight(_ meters: Double?) -> String {
+        guard let meters, meters.isFinite else { return "標高 未計算" }
+        return "標高 \(FixedNumber.string(meters, fractionDigits: 3)) m"
+    }
+
+    /// 設計高より高ければ切り、低ければ盛り。同じ高さの種類どうしだけ。
+    public static func cutFill(current: Double?, design: Double?) -> String? {
+        guard let current, let design, current.isFinite, design.isFinite else { return nil }
+        let difference = current - design
+        if abs(difference) < 0.005 { return "高さ 0.00 m" }
+        if difference > 0 {
+            return String(format: "切り %.2f m", locale: Locale(identifier: "en_US_POSIX"), difference)
+        }
+        return String(format: "盛り %.2f m", locale: Locale(identifier: "en_US_POSIX"), -difference)
+    }
+
     public static func currentLocationLine(_ position: GeodeticPosition) -> String {
         "\(latitude(position.latitudeDegrees)), \(longitude(position.longitudeDegrees))　\(ellipsoidalHeight(position.ellipsoidalHeightMeters))"
     }

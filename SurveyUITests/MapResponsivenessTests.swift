@@ -158,6 +158,57 @@ final class MapResponsivenessTests: XCTestCase {
         assertLoadMenuStays()
     }
 
+    func testHeightRecordAndStakeoutDifference() {
+        app.terminate()
+        app.launchArguments = ["-surveyUITest", "-uitestLatitude", "34.6", "-uitestLongitude", "135.8"]
+        app.launch()
+        allowSystemPrompts()
+        dismissStaturePrompt()
+        let map = app.buttons["tab-map"]
+        XCTAssertTrue(map.waitForExistence(timeout: 8))
+        map.tap()
+        let ellipsoid = app.staticTexts["height-ellipsoid"]
+        let orthometric = app.staticTexts["height-orthometric"]
+        XCTAssertTrue(ellipsoid.waitForExistence(timeout: 8), "楕円体高が無い")
+        XCTAssertTrue(ellipsoid.label.contains("楕円体高"))
+        XCTAssertTrue(orthometric.waitForExistence(timeout: 5), "標高が無い")
+        XCTAssertTrue(orthometric.label.contains("未計算"))
+        shot("60-height-card")
+        let measure = app.buttons["tab-measure"]
+        measure.tap()
+        let site = app.buttons["open-site"]
+        XCTAssertTrue(site.waitForExistence(timeout: 8))
+        site.tap()
+        let project = app.textFields["basic-project-name"]
+        XCTAssertTrue(project.waitForExistence(timeout: 5))
+        project.tap()
+        project.typeText("高さ")
+        app.buttons["basic-create"].tap()
+        map.tap()
+        let record = app.buttons["map-record"]
+        XCTAssertTrue(record.waitForExistence(timeout: 8), "記録が無い")
+        record.tap()
+        let dot = app.descendants(matching: .any)["observed-T1"]
+        XCTAssertTrue(dot.waitForExistence(timeout: 8), "観測点が出ない")
+        XCTAssertTrue(dot.label.contains("観測点"))
+        shot("61-recorded-point")
+        let export = app.buttons["tab-export"]
+        export.tap()
+        let coordinate = app.buttons["open-coordinate"]
+        XCTAssertTrue(coordinate.waitForExistence(timeout: 8))
+        coordinate.tap()
+        let height = app.textFields["stakeout-height"]
+        XCTAssertTrue(height.waitForExistence(timeout: 8))
+        height.tap()
+        height.typeText("50")
+        app.buttons["basic-stakeout"].tap()
+        map.tap()
+        let cut = app.staticTexts["stakeout-cutfill"]
+        XCTAssertTrue(cut.waitForExistence(timeout: 8), "盛り切りが無い")
+        XCTAssertTrue(cut.label.contains("盛り") || cut.label.contains("切り"))
+        shot("62-stake-height")
+    }
+
     func testVIDrawingAndSurveyPoints() {
         app.terminate()
         app.launchArguments = ["-surveyUITest", "-uitestField", "vi", "-uitestLatitude", "34.60045", "-uitestLongitude", "135.8"]

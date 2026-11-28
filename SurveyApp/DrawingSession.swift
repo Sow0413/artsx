@@ -332,7 +332,7 @@ final class DrawingSession: ObservableObject {
                 mapPaths = fitted.paths
                 overlayCapped = fitted.capped
                 mapRevision += 1
-                if fitted.capped { note += "途中まで" }
+                if fitted.capped { note += "見えている範囲だけ描きます。" }
             }
             message = note
             return note

@@ -170,15 +170,15 @@ public enum CoordinateDelivery {
         var lines = ["G00,02,"]
         for (index, entry) in entries.enumerated() {
             let plane = projected(entry, zone: zone)
-            let height = entry.ellipsoidalHeightMeters.map { String(format: "%.3f", $0) } ?? ""
-            lines.append("A01,\(index + 1),\(entry.name),\(number(plane?.northing)),\(number(plane?.easting)),\(height),")
+            let labelled = Self.heightFields(entry)
+            lines.append("A01,\(index + 1),\(entry.name),\(number(plane?.northing)),\(number(plane?.easting)),\(labelled.orthometric),楕円体高,\(labelled.ellipsoidal),標高,\(labelled.orthometricLabel),")
         }
         lines.append("A99,")
         return lines.joined(separator: "\n") + "\n"
     }
 
     public static func csv(_ entries: [CoordinateBookEntry], zone: Int) -> String {
-        var lines = ["点名,種類,出典,解,段階,北,東,緯度,経度,楕円体高,水平精度m,高さ精度m,PDOP,衛星,補正遅れ秒,補正元,観測時刻,秒数,エポック,機器"]
+        var lines = ["点名,種類,出典,解,段階,北,東,緯度,経度,楕円体高,水平精度m,高さ精度m,PDOP,衛星,補正遅れ秒,補正元,観測時刻,秒数,エポック,機器,標高,高さ種別"]
         for entry in entries {
             lines.append(csvRow(entry, zone: zone))
         }
@@ -361,9 +361,22 @@ public enum CoordinateDelivery {
             ObservationCondition.stamp.string(from: entry.recordedAt),
             String(format: "%.0f", entry.fixDurationSeconds),
             epochs,
-            entry.receiverLabel ?? ""
+            entry.receiverLabel ?? "",
+            Self.heightFields(entry).orthometricLabel,
+            Self.heightFields(entry).kind
         ]
         return columns.joined(separator: ",")
+    }
+
+    /// 楕円体高と標高を、種類の名前つきで並べる。無い標高は未計算。
+    static func heightFields(_ entry: CoordinateBookEntry) -> (ellipsoidal: String, orthometric: String, orthometricLabel: String, kind: String) {
+        let ellipsoidal = entry.ellipsoidalHeightMeters.map { String(format: "%.3f", $0) } ?? ""
+        if let orthometric = entry.orthometricHeightMeters, orthometric.isFinite {
+            let text = String(format: "%.3f", orthometric)
+            let kind = ellipsoidal.isEmpty ? "標高" : "楕円体高・標高"
+            return (ellipsoidal, text, text, kind)
+        }
+        return (ellipsoidal, "", "未計算", ellipsoidal.isEmpty ? "未計算" : "楕円体高")
     }
 
     private static func projected(_ entry: CoordinateBookEntry, zone: Int) -> (northing: Double, easting: Double)? {

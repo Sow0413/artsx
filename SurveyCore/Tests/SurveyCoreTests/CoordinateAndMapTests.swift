@@ -8,6 +8,10 @@ final class CoordinateAndMapTests: XCTestCase {
         XCTAssertEqual(CoordinateText.longitude(139.76712), "139.76712")
         XCTAssertEqual(CoordinateText.ellipsoidalHeight(12.4), "楕円体高 12.4m")
         XCTAssertEqual(CoordinateText.ellipsoidalHeight(nil), "楕円体高 —")
+        XCTAssertEqual(CoordinateText.orthometricHeight(nil), "標高 未計算")
+        XCTAssertEqual(CoordinateText.cutFill(current: 45.2, design: 50), "盛り 4.80 m")
+        XCTAssertEqual(CoordinateText.cutFill(current: 50.5, design: 50), "切り 0.50 m")
+        XCTAssertNil(CoordinateText.cutFill(current: 45.2, design: nil))
         XCTAssertEqual(
             CoordinateText.currentLocationLine(position),
             "35.68123, 139.76712　楕円体高 12.4m"

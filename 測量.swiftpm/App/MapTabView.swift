@@ -21,11 +21,23 @@ struct MapTabView: View {
                     Text(status)
                         .font(SurveyType(14, .heavy))
                         .foregroundStyle(SurveyColor.amber)
-                        .lineLimit(8)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
                         .background(SurveyColor.card)
                         .accessibilityIdentifier("draw-overlay-status")
+                }
+                if SurveyBuild.basicMode, field.drawing.overlayCapped, let note = field.drawing.message {
+                    Text(note)
+                        .font(SurveyType(14, .heavy))
+                        .foregroundStyle(SurveyColor.text)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(SurveyColor.card)
+                        .accessibilityIdentifier("draw-capped-note")
                 }
                 if !SurveyBuild.basicMode {
                     WorkBar(field: field)
@@ -321,6 +333,14 @@ struct MapTabView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("stakeout-stop")
+            }
+            if let cutFill = field.stakeoutCutFill {
+                Text(cutFill)
+                    .font(.system(size: 40, weight: .bold, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.4)
+                    .foregroundStyle(SurveyColor.amber)
+                    .accessibilityIdentifier("stakeout-cutfill")
             }
             if let headline = bigDistance {
                 Text(headline)
